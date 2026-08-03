@@ -68,14 +68,46 @@ def _migrate_view(request):
             return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
 
         elif action == 'init':
-            """一键初始化: 迁移 + 创建管理员"""
+            """一键初始化: 重建迁移 + 迁移 + 创建管理员"""
             from django.core.management import call_command
             from django.contrib.auth import get_user_model
             import io
+            import os
+            import glob
 
             results = []
 
-            # Step 1: 迁移
+            # Step 1: 删除所有迁移文件并重新生成 (解决依赖不一致问题)
+            try:
+                apps_dir = os.path.join(settings.BASE_DIR, '..', 'apps')
+                migration_dirs = glob.glob(os.path.join(apps_dir, '*/migrations'))
+                deleted = 0
+                for mig_dir in migration_dirs:
+                    for f in os.listdir(mig_dir):
+                        if f.startswith('0') and f.endswith('.py'):
+                            os.remove(os.path.join(mig_dir, f))
+                            deleted += 1
+                        elif f.endswith('.pyc'):
+                            try:
+                                os.remove(os.path.join(mig_dir, f))
+                            except OSError:
+                                pass
+
+                # 删除 __pycache__ 目录
+                for mig_dir in migration_dirs:
+                    pycache = os.path.join(mig_dir, '__pycache__')
+                    if os.path.exists(pycache):
+                        import shutil
+                        shutil.rmtree(pycache, ignore_errors=True)
+
+                if deleted > 0:
+                    out = io.StringIO()
+                    call_command('makemigrations', verbosity=1, stdout=out)
+                    results.append(f'删除 {deleted} 个旧迁移并重新生成')
+            except Exception as e:
+                return JsonResponse({'status': 'error', 'message': f'重建迁移失败: {str(e)}'}, status=500)
+
+            # Step 2: 执行迁移
             try:
                 out = io.StringIO()
                 call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=1, stdout=out)
@@ -83,7 +115,7 @@ def _migrate_view(request):
             except Exception as e:
                 return JsonResponse({'status': 'error', 'message': f'迁移失败: {str(e)}'}, status=500)
 
-            # Step 2: 创建管理员
+            # Step 3: 创建管理员
             try:
                 User = get_user_model()
                 if not User.objects.filter(username='admin').exists():
