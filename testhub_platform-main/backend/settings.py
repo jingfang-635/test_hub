@@ -139,6 +139,13 @@ USE_TZ = True
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static_files')
 
+# 前端构建产物目录 (Vue frontend/dist)
+FRONTEND_DIST = os.path.join(BASE_DIR, 'frontend_dist')
+
+STATICFILES_DIRS = [
+    FRONTEND_DIST,  # 前端静态文件 (index.html, assets/, wasm 等)
+]
+
 # 数据工厂的静态文件目录
 STATIC_FILES_URL = '/static_files/'
 STATIC_FILES_ROOT = os.path.join(BASE_DIR, 'static_files')

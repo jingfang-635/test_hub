@@ -1,0 +1,9 @@
+{
+  "buildCommand": "cd testhub_platform-main/frontend && npm run build && cp -r dist ../frontend_dist",
+  "framework": null,
+  "functions": {
+    "testhub_platform-main/backend/asgi.py": {
+      "includeFiles": "testhub_platform-main/**"
+    }
+  }
+}
