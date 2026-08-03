@@ -83,85 +83,107 @@ def _migrate_view(request):
             return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
 
         elif action == 'init':
-            """一键初始化: 批量 SQL 建表 + 创建管理员 (极致优化 Vercel 超时)"""
+            """分批建表: 每次 batch 只创建少量表, 确保不超时"""
             from django.apps import apps
             from django.db import connection
             from django.contrib.auth import get_user_model
             import logging
 
             logger = logging.getLogger(__name__)
-            results = []
+            batch = request.GET.get('batch', None)
 
-            # Step 1: 用 collect_sql 收集所有 CREATE TABLE 语句, 一次性批量执行
-            # 优势: 将 N 次数据库往返压缩为 1 次, 速度提升 10-50 倍
-            try:
-                all_models = list(apps.get_models())
+            # 收集所有建表 SQL (collect_sql 不访问数据库, 纯内存操作)
+            all_models = list(apps.get_models())
+            with connection.schema_editor(collect_sql=True) as se:
+                for model in all_models:
+                    se.create_model(model)
+            all_sql = se.collected_sql
 
-                # 收集所有建表 SQL
-                with connection.schema_editor(collect_sql=True) as se:
-                    for model in all_models:
-                        se.create_model(model)
-                all_sql = se.collected_sql
+            batch_size = 5
+            total_batches = (len(all_sql) + batch_size - 1) // batch_size
 
-                # 批量执行: 关闭 FK 检查后一次性执行所有 DDL
-                executed = 0
-                skipped = 0
-                errors = 0
+            # 无 batch 参数: 返回分批信息
+            if batch is None:
+                return JsonResponse({
+                    'status': 'ok',
+                    'message': f'共 {len(all_sql)} 条建表 SQL, 分 {total_batches} 批执行',
+                    'total_sql': len(all_sql),
+                    'total_batches': total_batches,
+                    'next': f'/api/migrate?action=init&batch=1'
+                })
 
-                with connection.cursor() as cursor:
-                    cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-                    for sql in all_sql:
-                        try:
-                            cursor.execute(sql)
-                            executed += 1
-                        except Exception as e:
-                            err_msg = str(e).lower()
-                            if 'already exists' in err_msg or '1050' in err_msg:
-                                skipped += 1
-                            else:
-                                errors += 1
-                                logger.warning(f'SQL 执行失败: {str(e)[:200]}')
-                    cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-                results.append(f'建表完成: 执行 {executed}, 已存在 {skipped}, 失败 {errors}')
-                logger.info(f'Step1 done: executed={executed}, skipped={skipped}, errors={errors}')
-            except Exception as e:
-                import traceback
+            batch_idx = int(batch) - 1
+            if batch_idx < 0 or batch_idx >= total_batches:
                 return JsonResponse({
                     'status': 'error',
-                    'message': f'建表失败: {str(e)}',
-                    'traceback': traceback.format_exc()
-                }, status=500)
+                    'message': f'batch 范围: 1..{total_batches}'
+                }, status=400)
 
-            # Step 2: 创建 django_migrations 表 (确保后续 migrate 命令可用)
-            try:
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS django_migrations (
-                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
-                            app VARCHAR(255) NOT NULL,
-                            name VARCHAR(255) NOT NULL,
-                            applied DATETIME NOT NULL
-                        )
-                    """)
-                results.append('迁移记录表已就绪')
-            except Exception as e:
-                logger.warning(f'django_migrations 表创建警告: {e}')
+            start = batch_idx * batch_size
+            end = start + batch_size
+            batch_sql = all_sql[start:end]
 
-            # Step 3: 创建管理员
-            try:
-                User = get_user_model()
-                if not User.objects.filter(username='admin').exists():
-                    User.objects.create_superuser(username='admin', password='admin123', email='admin@test.com')
-                    results.append('管理员 admin 创建成功')
-                else:
-                    results.append('管理员 admin 已存在')
-            except Exception as e:
-                results.append(f'创建管理员失败: {str(e)}')
-                logger.error(f'创建管理员失败: {e}')
+            # 执行当前批次的 SQL
+            executed = 0
+            skipped = 0
+            errors = 0
 
-            logger.info(f'Init completed: {"; ".join(results)}')
-            return JsonResponse({'status': 'ok', 'message': '; '.join(results)})
+            with connection.cursor() as cursor:
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+                for sql in batch_sql:
+                    try:
+                        cursor.execute(sql)
+                        executed += 1
+                    except Exception as e:
+                        err_msg = str(e).lower()
+                        if 'already exists' in err_msg or '1050' in err_msg:
+                            skipped += 1
+                        else:
+                            errors += 1
+                            logger.warning(f'SQL 执行失败: {str(e)[:200]}')
+                cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+            is_last = (batch_idx + 1 >= total_batches)
+
+            # 最后一批: 创建 django_migrations 表 + 管理员
+            extra_results = []
+            if is_last:
+                try:
+                    with connection.cursor() as cursor:
+                        cursor.execute("""
+                            CREATE TABLE IF NOT EXISTS django_migrations (
+                                id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                                app VARCHAR(255) NOT NULL,
+                                name VARCHAR(255) NOT NULL,
+                                applied DATETIME NOT NULL
+                            )
+                        """)
+                    extra_results.append('迁移记录表已就绪')
+                except Exception as e:
+                    logger.warning(f'django_migrations 表创建警告: {e}')
+
+                try:
+                    User = get_user_model()
+                    if not User.objects.filter(username='admin').exists():
+                        User.objects.create_superuser(username='admin', password='admin123', email='admin@test.com')
+                        extra_results.append('管理员 admin 创建成功')
+                    else:
+                        extra_results.append('管理员 admin 已存在')
+                except Exception as e:
+                    extra_results.append(f'创建管理员失败: {str(e)}')
+                    logger.error(f'创建管理员失败: {e}')
+
+            next_batch = batch_idx + 2 if not is_last else None
+            result_msg = f'批次 {batch}/{total_batches}: 执行 {executed}, 跳过 {skipped}, 失败 {errors}'
+            if extra_results:
+                result_msg += '; ' + '; '.join(extra_results)
+
+            return JsonResponse({
+                'status': 'ok',
+                'message': result_msg,
+                'next': f'/api/migrate?action=init&batch={next_batch}' if next_batch else None,
+                'is_complete': is_last
+            })
 
         else:
             return JsonResponse({'status': 'error', 'message': f'未知操作: {action}'}, status=400)
