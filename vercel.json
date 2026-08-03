@@ -2,8 +2,13 @@
   "buildCommand": "cd testhub_platform-main/frontend && npm run build && cp -r dist ../frontend_dist",
   "framework": null,
   "functions": {
-    "testhub_platform-main/backend/asgi.py": {
-      "includeFiles": "testhub_platform-main/**"
+    "api/index.py": {
+      "includeFiles": "testhub_platform-main/**",
+      "memory": 1024,
+      "maxDuration": 30
     }
-  }
+  },
+  "rewrites": [
+    { "source": "/(.*)", "destination": "/api/index" }
+  ]
 }

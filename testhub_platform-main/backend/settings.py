@@ -335,6 +335,46 @@ EMAIL_TIMEOUT = 30
 # Vercel 部署会自动设置 VERCEL=1 环境变量
 IS_VERCEL = os.environ.get('VERCEL', '') == '1'
 
+# Vercel 环境下数据库配置：
+# - 如果配置了外部 MySQL 环境变量 (DB_HOST/DB_USER/DB_PASSWORD)，使用 MySQL
+# - 否则降级为 SQLite (存于 /tmp 临时目录，每次冷启动数据会重置)
+if IS_VERCEL:
+    _db_host = config('DB_HOST', default='127.0.0.1')
+    _db_user = config('DB_USER', default='')
+    _db_password = config('DB_PASSWORD', default='')
+    _has_external_db = _db_host not in ('127.0.0.1', 'localhost', '') and bool(_db_user)
+
+    if _has_external_db:
+        # 外部 MySQL 可用
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.mysql',
+                'NAME': config('DB_NAME', default='testhub'),
+                'USER': _db_user,
+                'PASSWORD': _db_password,
+                'HOST': _db_host,
+                'PORT': config('DB_PORT', default='3306'),
+                'OPTIONS': {
+                    'charset': 'utf8mb4',
+                    'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+                    'connect_timeout': 3,
+                    'read_timeout': 5,
+                    'write_timeout': 5,
+                },
+            }
+        }
+    else:
+        # 无外部 DB → 降级为 SQLite (Vercel /tmp 目录可写)
+        import tempfile
+        _sqlite_path = os.path.join(tempfile.gettempdir(), 'testhub_vercel.db')
+        print(f'[settings] Vercel 环境无外部 MySQL, 降级为 SQLite: {_sqlite_path}')
+        DATABASES = {
+            'default': {
+                'ENGINE': 'django.db.backends.sqlite3',
+                'NAME': _sqlite_path,
+            }
+        }
+
 # 本地环境确保日志目录存在；Vercel 只读文件系统跳过
 if not IS_VERCEL:
     log_dir = os.path.join(BASE_DIR, 'logs')
