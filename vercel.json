@@ -4,7 +4,7 @@
     "api/index.py": {
       "includeFiles": "testhub_platform-main/**",
       "memory": 1024,
-      "maxDuration": 30
+      "maxDuration": 60
     }
   },
   "rewrites": [
