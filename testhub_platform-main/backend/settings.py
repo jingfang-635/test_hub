@@ -318,11 +318,29 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
 # For 163 email with SSL, you might need this setting
 EMAIL_TIMEOUT = 30
 
-# 确保日志目录存在
-log_dir = os.path.join(BASE_DIR, 'logs')
-os.makedirs(log_dir, exist_ok=True)
+# 检测是否运行在 Vercel 等 Serverless 只读文件系统环境
+# Vercel 部署会自动设置 VERCEL=1 环境变量
+IS_VERCEL = os.environ.get('VERCEL', '') == '1'
+
+# 本地环境确保日志目录存在；Vercel 只读文件系统跳过
+if not IS_VERCEL:
+    log_dir = os.path.join(BASE_DIR, 'logs')
+    os.makedirs(log_dir, exist_ok=True)
 
 # Logging
+# Vercel 等只读环境下用 StreamHandler (输出到 stdout) 替代 FileHandler，
+# 避免 OSError: [Errno 30] Read-only file system
+if IS_VERCEL:
+    _file_handler_class = 'logging.StreamHandler'
+    _error_handler_class = 'logging.StreamHandler'
+    _file_handler_filename = None  # StreamHandler 不需要 filename
+    _error_handler_filename = None
+else:
+    _file_handler_class = 'logging.FileHandler'
+    _error_handler_class = 'logging.FileHandler'
+    _file_handler_filename = os.path.join(BASE_DIR, 'logs', 'app.log')
+    _error_handler_filename = os.path.join(BASE_DIR, 'logs', 'error.log')
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -339,15 +357,15 @@ LOGGING = {
     'handlers': {
         'file': {
             'level': 'INFO',
-            'class': 'logging.FileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'app.log'),
+            'class': _file_handler_class,
             'formatter': 'verbose',
+            **({'filename': _file_handler_filename} if _file_handler_filename else {}),
         },
         'error_file': {
             'level': 'ERROR',
-            'class': 'logging.FileHandler',
-            'filename': os.path.join(BASE_DIR, 'logs', 'error.log'),
+            'class': _error_handler_class,
             'formatter': 'verbose',
+            **({'filename': _error_handler_filename} if _error_handler_filename else {}),
         },
         'console': {
             'level': 'DEBUG',
