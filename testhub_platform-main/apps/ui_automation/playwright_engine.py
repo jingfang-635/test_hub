@@ -12,7 +12,15 @@ from typing import Dict, List, Optional, Tuple
 # 设置 Playwright 浏览器安装路径（自定义路径）
 os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'ms-playwright'))
 
-from playwright.async_api import async_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
+# playwright 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
+try:
+    from playwright.async_api import async_playwright, Page, Browser, BrowserContext, TimeoutError as PlaywrightTimeout
+except ImportError:
+    async_playwright = None
+    Page = None
+    Browser = None
+    BrowserContext = None
+    PlaywrightTimeout = None
 import logging
 from .variable_resolver import resolve_variables
 

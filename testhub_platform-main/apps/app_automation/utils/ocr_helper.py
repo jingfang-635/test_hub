@@ -10,9 +10,16 @@ import re
 from typing import Any, Dict, Optional, Tuple
 from functools import lru_cache
 
-import cv2
-import numpy as np
-from PIL import Image, ImageEnhance
+# cv2, numpy, PIL, airtest 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
+try:
+    import cv2
+    import numpy as np
+    from PIL import Image, ImageEnhance
+except ImportError:
+    cv2 = None
+    np = None
+    Image = None
+    ImageEnhance = None
 
 try:
     import easyocr
@@ -20,7 +27,11 @@ try:
 except ImportError:
     EASYOCR_AVAILABLE = False
 
-from airtest.core.api import G, sleep as airtest_sleep
+try:
+    from airtest.core.api import G, sleep as airtest_sleep
+except ImportError:
+    G = None
+    airtest_sleep = None
 
 logger = logging.getLogger(__name__)
 

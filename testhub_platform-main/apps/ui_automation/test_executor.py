@@ -13,7 +13,11 @@ from django.db import connection
 # 避免使用默认的 C:\Users\...\AppData\Local\ms-playwright（可能有沙箱限制）
 os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'ms-playwright'))
 
-from playwright.sync_api import sync_playwright
+# playwright 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
+try:
+    from playwright.sync_api import sync_playwright
+except ImportError:
+    sync_playwright = None
 
 # Selenium 为可选依赖：仅在用户选择 selenium 引擎时才会用到。
 # 这里用 try/except 包裹，避免未安装 selenium 时模块加载失败影响 playwright 引擎。

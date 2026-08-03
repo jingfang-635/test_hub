@@ -12,7 +12,11 @@ import logging
 import random
 import string
 
-from fakerx import FakerX
+try:
+    from fakerx import FakerX
+except ImportError:
+    # fakerx 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
+    FakerX = None
 from typing import Dict, Any, List
 
 from .china_bank_card import bank_card
