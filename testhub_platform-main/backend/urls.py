@@ -68,44 +68,38 @@ def _migrate_view(request):
             return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
 
         elif action == 'init':
-            """一键初始化: 重建迁移 + 迁移 + 创建管理员"""
+            """一键初始化: 清空数据库 + 迁移 + 创建管理员"""
             from django.core.management import call_command
             from django.contrib.auth import get_user_model
+            from django.db import connection
             import io
-            import os
-            import glob
 
             results = []
 
-            # Step 1: 删除所有迁移文件并重新生成 (解决依赖不一致问题)
+            # Step 1: 清空数据库所有表 (解决表已存在冲突)
             try:
-                apps_dir = os.path.join(settings.BASE_DIR, '..', 'apps')
-                migration_dirs = glob.glob(os.path.join(apps_dir, '*/migrations'))
-                deleted = 0
-                for mig_dir in migration_dirs:
-                    for f in os.listdir(mig_dir):
-                        if f.startswith('0') and f.endswith('.py'):
-                            os.remove(os.path.join(mig_dir, f))
-                            deleted += 1
-                        elif f.endswith('.pyc'):
-                            try:
-                                os.remove(os.path.join(mig_dir, f))
-                            except OSError:
-                                pass
+                with connection.cursor() as cursor:
+                    # TiDB/MySQL: 获取所有表并 DROP
+                    cursor.execute(
+                        "SELECT table_name FROM information_schema.tables "
+                        "WHERE table_schema = DATABASE()"
+                    )
+                    tables = [row[0] for row in cursor.fetchall()]
 
-                # 删除 __pycache__ 目录
-                for mig_dir in migration_dirs:
-                    pycache = os.path.join(mig_dir, '__pycache__')
-                    if os.path.exists(pycache):
-                        import shutil
-                        shutil.rmtree(pycache, ignore_errors=True)
+                    # 关闭外键检查
+                    cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+                    for table in tables:
+                        try:
+                            cursor.execute(f"DROP TABLE IF EXISTS `{table}`")
+                        except Exception:
+                            pass
+                    cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
 
-                if deleted > 0:
-                    out = io.StringIO()
-                    call_command('makemigrations', verbosity=1, stdout=out)
-                    results.append(f'删除 {deleted} 个旧迁移并重新生成')
+                    # 清除 django_migrations 记录
+                    cursor.execute("DELETE FROM django_migrations")
+                results.append(f'清空 {len(tables)} 张表')
             except Exception as e:
-                return JsonResponse({'status': 'error', 'message': f'重建迁移失败: {str(e)}'}, status=500)
+                return JsonResponse({'status': 'error', 'message': f'清空数据库失败: {str(e)}'}, status=500)
 
             # Step 2: 执行迁移
             try:
