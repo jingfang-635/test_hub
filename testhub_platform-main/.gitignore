@@ -70,7 +70,7 @@ frontend/node_modules/
 frontend/.DS_Store
 frontend/*.log
 frontend/dist/
-frontend_dist/
+# frontend_dist/  # 不再忽略，需要提交到仓库供 Vercel 使用
 
 # Docker
 Dockerfile*

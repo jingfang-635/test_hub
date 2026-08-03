@@ -1,5 +1,4 @@
 {
-  "buildCommand": "cd testhub_platform-main/frontend && npm run build && cp -r dist ../frontend_dist",
   "framework": null,
   "functions": {
     "api/index.py": {
