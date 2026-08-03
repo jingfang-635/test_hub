@@ -5,15 +5,9 @@
       "includeFiles": "testhub_platform-main/**",
       "memory": 1024,
       "maxDuration": 30
-    },
-    "api/migrate.py": {
-      "includeFiles": "testhub_platform-main/**",
-      "memory": 1024,
-      "maxDuration": 30
     }
   },
   "rewrites": [
-    { "source": "/api/migrate(.*)", "destination": "/api/migrate" },
     { "source": "/(.*)", "destination": "/api/index" }
   ]
 }

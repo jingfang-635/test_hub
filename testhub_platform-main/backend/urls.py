@@ -4,13 +4,15 @@ from django.conf import settings
 from django.conf.urls.static import static
 from django.views.decorators.csrf import csrf_exempt
 from django.views.static import serve
-from django.http import FileResponse, HttpResponseNotFound
+from django.http import FileResponse, HttpResponseNotFound, JsonResponse
+from django.views import View
 from drf_spectacular.views import (
     SpectacularAPIView,
     SpectacularRedocView,
     SpectacularSwaggerView,
 )
 import os
+import json
 
 # 前端 index.html 路径
 _FRONTEND_INDEX = os.path.join(getattr(settings, 'FRONTEND_DIST', ''), 'index.html')
@@ -21,6 +23,48 @@ def _serve_frontend_index(request):
     if os.path.exists(_FRONTEND_INDEX):
         return FileResponse(open(_FRONTEND_INDEX, 'rb'), content_type='text/html')
     return HttpResponseNotFound('<h1>Frontend not built</h1>')
+
+
+@csrf_exempt
+def _migrate_view(request):
+    """数据库迁移管理视图 (仅用于 Vercel 部署后初始化)。"""
+    action = request.GET.get('action', 'check')
+
+    try:
+        if action == 'check':
+            from django.db import connection
+            with connection.cursor() as cursor:
+                cursor.execute('SELECT 1')
+            return JsonResponse({'status': 'ok', 'message': '数据库连接正常'})
+
+        elif action == 'migrate':
+            from django.core.management import call_command
+            call_command('migrate', '--run-syncdb', verbosity=1)
+            return JsonResponse({'status': 'ok', 'message': '数据库迁移成功'})
+
+        elif action == 'createsuperuser':
+            from django.contrib.auth import get_user_model
+            User = get_user_model()
+            username = request.GET.get('username', 'admin')
+            password = request.GET.get('password', 'admin123')
+            email = request.GET.get('email', 'admin@test.com')
+
+            if User.objects.filter(username=username).exists():
+                return JsonResponse({'status': 'warn', 'message': f'用户 {username} 已存在'})
+
+            User.objects.create_superuser(username=username, password=password, email=email)
+            return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
+
+        else:
+            return JsonResponse({'status': 'error', 'message': f'未知操作: {action}'}, status=400)
+
+    except Exception as e:
+        import traceback
+        return JsonResponse({
+            'status': 'error',
+            'message': str(e),
+            'traceback': traceback.format_exc()
+        }, status=500)
 
 
 urlpatterns = [
@@ -45,6 +89,7 @@ urlpatterns = [
     path('api/', include('apps.api_testing.urls')),
     path('api/core/', include('apps.core.urls')),
     path('api/data-factory/', include('apps.data_factory.urls')),
+    path('api/migrate', _migrate_view, name='migrate'),
 ]
 
 if settings.DEBUG:
