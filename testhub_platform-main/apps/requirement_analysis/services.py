@@ -10,8 +10,13 @@ from datetime import datetime
 try:
     from PyPDF2 import PdfReader
 except ImportError:
-    from PyPDF2 import PdfFileReader as PdfReader
-    
+    try:
+        from PyPDF2 import PdfFileReader as PdfReader
+    except ImportError:
+        # PyPDF2 未安装时降级为 None，避免模块导入失败影响 URL 路由解析
+        # （Vercel 等 Serverless 环境只安装核心依赖）
+        PdfReader = None
+
 try:
     import docx
 except ImportError:
@@ -24,12 +29,19 @@ from .models import RequirementDocument, RequirementAnalysis, BusinessRequiremen
 logger = logging.getLogger(__name__)
 
 
+def _check_pdf_available():
+    """检查 PyPDF2 是否可用，不可用时抛出友好错误"""
+    if PdfReader is None:
+        raise RuntimeError('PyPDF2 未安装，PDF 文档解析功能不可用。请安装 requirements_optional.txt')
+
+
 class DocumentProcessor:
     """文档处理服务"""
     
     @staticmethod
     def extract_text_from_pdf(file_path: str) -> str:
         """从PDF文件提取文本"""
+        _check_pdf_available()
         try:
             text = ""
             with open(file_path, 'rb') as file:
