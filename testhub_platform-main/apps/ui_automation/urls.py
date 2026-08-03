@@ -24,6 +24,7 @@ from .views import (
     UiDashboardViewSet
 )
 from .views_config import EnvironmentConfigViewSet, AIIntelligentModeConfigViewSet
+from .views_exploration import AIExplorationTaskViewSet, AIExplorationStepViewSet
 
 router = DefaultRouter()
 router.register(r'dashboard', UiDashboardViewSet, basename='dashboard')
@@ -46,6 +47,8 @@ router.register(r'ai-cases', AICaseViewSet, basename='ai-cases')
 router.register(r'ai-case-generation', AICaseViewSet, basename='ai-case-generation')
 router.register(r'notification-logs', UiNotificationLogViewSet)
 router.register(r'operation-records', OperationRecordViewSet)
+router.register(r'ai-exploration-tasks', AIExplorationTaskViewSet, basename='ai-exploration-tasks')
+router.register(r'ai-exploration-steps', AIExplorationStepViewSet, basename='ai-exploration-steps')
 
 
 # Configuration Center APIs

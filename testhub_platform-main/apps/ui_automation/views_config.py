@@ -11,6 +11,21 @@ import logging
 
 logger = logging.getLogger(__name__)
 
+
+def _friendly_ai_error(status_code, response_text, model_name=''):
+    """生成友好的 AI 连接错误提示，识别模型名大小写等常见问题"""
+    text = response_text or ''
+    if status_code == 400:
+        lower = text.lower()
+        # DeepSeek 等 API 的模型名大小写不匹配错误：响应中会同时出现 supported/passed/model
+        if 'supported' in lower and 'model' in lower and 'passed' in lower:
+            hint = '模型名只接受小写，请检查模型名称大小写'
+            if model_name:
+                hint += f'（当前: {model_name}）'
+            return f'连接失败: {hint}'
+    return f'连接失败: {status_code} - {text}'
+
+
 class EnvironmentConfigViewSet(viewsets.ViewSet):
     """
     UI自动化环境配置视图集
@@ -431,7 +446,7 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
             else:
                 logger.error(f"AI智能模式 - API调用返回错误: Status={response.status_code}, Body={response.text}")
                 return Response(
-                    {'error': f'连接失败: {response.status_code} - {response.text}'},
+                    {'error': _friendly_ai_error(response.status_code, response.text, model_name)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         except requests.exceptions.Timeout as e:
@@ -512,7 +527,7 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
             else:
                 logger.error(f"AI智能模式 - API调用返回错误: Status={response.status_code}, Body={response.text}")
                 return Response(
-                    {'error': f'连接失败: {response.status_code} - {response.text}'},
+                    {'error': _friendly_ai_error(response.status_code, response.text, config.model_name)},
                     status=status.HTTP_400_BAD_REQUEST
                 )
         except requests.exceptions.Timeout as e:

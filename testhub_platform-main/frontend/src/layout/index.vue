@@ -208,6 +208,10 @@
               <el-icon><Timer /></el-icon>
               <span>{{ $t('menu.aiExecutionRecords') }}</span>
             </el-menu-item>
+            <el-menu-item index="/ai-intelligent-mode/exploration">
+              <el-icon><Compass /></el-icon>
+              <span>AI探索测试</span>
+            </el-menu-item>
 
           </template>
 
@@ -324,7 +328,7 @@ import { useI18n } from 'vue-i18n'
 import {
   Monitor, Folder, Document, Flag, Check, Collection, VideoPlay,
   DataAnalysis, ChatDotRound, DocumentCopy, Link, MagicStick,
-  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, ArrowDown, Cellphone, Connection, FolderOpened
+  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, ArrowDown, Cellphone, Connection, FolderOpened, Compass
 } from '@element-plus/icons-vue'
 import logoSvg from '@/assets/images/logo.svg'
 import logoHomePng from '@/assets/images/logo_home.png'
@@ -429,6 +433,7 @@ const breadcrumbTitle = computed(() => {
     '/ai-intelligent-mode/testing': t('menu.aiIntelligentTesting'),
     '/ai-intelligent-mode/cases': t('menu.aiCaseManagement'),
     '/ai-intelligent-mode/execution-records': t('menu.aiExecutionRecords'),
+    '/ai-intelligent-mode/exploration': 'AI探索测试',
 
 
     // 配置中心

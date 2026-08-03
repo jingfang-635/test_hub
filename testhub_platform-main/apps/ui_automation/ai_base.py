@@ -461,6 +461,12 @@ try:
             if output_format:
                 kwargs['response_format'] = {"type": "json_object"}
 
+            # 过滤 browser-use 传给 ChatBrowserUse 云 API 的专用参数
+            # langchain ChatOpenAI 不支持这些参数，透传给 OpenAI SDK 会报
+            # "AsyncCompletions.create() got an unexpected keyword argument 'session_id'"
+            for _bad_key in ('session_id', 'request_type'):
+                kwargs.pop(_bad_key, None)
+
             # Add retry logic for LLM invocation
             max_retries = 2  # 重试次数为2次
             last_exception = None
@@ -1472,7 +1478,7 @@ class BaseBrowserAgent:
             ])
 
         return BrowserProfile(
-            headless=(system == 'Linux'),  # Linux 使用无头模式，其他系统使用显示模式
+            headless=True,  # 全部使用无头模式，通过截图投屏查看画面，避免弹出浏览器窗口
             disable_security=True,
             executable_path=chrome_path,
             args=extra_args,
@@ -1712,6 +1718,8 @@ class BaseBrowserAgent:
         agent._pending_status_task_description = None
         agent._auth_failure_task_id = None
         agent._auth_failure_count = 0
+        # 保存 browser-use Agent 引用，供探索投屏 _push_screenshot 获取 browser_session
+        self._browser_use_agent = agent
 
         # Callback helper - 添加任务标记跟踪
         last_processed_step = 0
@@ -1832,6 +1840,13 @@ class BaseBrowserAgent:
 
                         action_str = " | ".join([self._format_action(a) for a in actions])
                         log_content = f"\n[Step {i + 1}]\n执行: {action_str}\n"
+
+                        # 探索模式扩展点：记录步骤元素坐标和截图
+                        if getattr(self, 'step_recorder', None):
+                            try:
+                                await self.step_recorder(agent_instance, i + 1, actions, action_str)
+                            except Exception as _rec_err:
+                                logger.warning(f"⚠️ step_recorder failed at step {i + 1}: {_rec_err}")
 
                         if callback:
                             if asyncio.iscoroutinefunction(callback):

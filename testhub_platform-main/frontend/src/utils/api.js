@@ -123,7 +123,20 @@ api.interceptors.response.use(
       }
 
       // 如果有refresh token，尝试刷新
-      if (userStore.refreshToken && !isRefreshing) {
+      if (userStore.refreshToken) {
+        // 如果正在刷新，将请求加入队列等待，避免并发刷新导致旧 refresh token 被拉黑
+        if (isRefreshing) {
+          console.log('Token正在刷新，401请求加入队列等待...')
+          return new Promise((resolve, reject) => {
+            failedQueue.push({ resolve, reject })
+          }).then(token => {
+            originalRequest.headers.Authorization = `Bearer ${token}`
+            return api(originalRequest)
+          }).catch(err => {
+            return Promise.reject(err)
+          })
+        }
+
         originalRequest._retry = true
         isRefreshing = true
 

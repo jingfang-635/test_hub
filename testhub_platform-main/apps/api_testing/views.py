@@ -2440,9 +2440,15 @@ class AIServiceConfigViewSet(viewsets.ModelViewSet):
             if response.status_code == 200:
                 return Response({'message': '连接测试成功', 'status': 'success'})
             else:
+                err_text = response.text or ''
+                lower = err_text.lower()
+                if response.status_code == 400 and 'supported' in lower and 'model' in lower and 'passed' in lower:
+                    friendly = f'模型名只接受小写，请检查模型名称大小写（当前: {config.model_name}）'
+                else:
+                    friendly = f'连接测试失败: {response.status_code}'
                 return Response({
-                    'error': f'连接测试失败: {response.status_code}',
-                    'details': response.text
+                    'error': friendly,
+                    'details': err_text
                 }, status=status.HTTP_400_BAD_REQUEST)
 
         except requests.exceptions.Timeout:

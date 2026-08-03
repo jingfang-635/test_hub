@@ -32,6 +32,7 @@ import UiNotificationLogs from '@/views/ui-automation/notification/NotificationL
 import UiAITesting from '@/views/ui-automation/ai/AITesting.vue'
 import UiAICaseList from '@/views/ui-automation/ai/AICaseList.vue'
 import UiAIExecutionRecords from '@/views/ui-automation/ai/AIExecutionRecords.vue'
+import UiAIExploration from '@/views/ui-automation/ai/AIExploration.vue'
 
 /** @type {import('vue-router').RouteRecordRaw[]} */
 const routes = [
@@ -329,6 +330,11 @@ const routes = [
         path: 'execution-records',
         name: 'AIExecutionRecords',
         component: UiAIExecutionRecords
+      },
+      {
+        path: 'exploration',
+        name: 'AIExploration',
+        component: UiAIExploration
       }
     ]
   },

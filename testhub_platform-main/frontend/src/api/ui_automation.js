@@ -1058,3 +1058,72 @@ export function exportAIExecutionReportPDF(id, params = {}) {
     responseType: 'blob'
   })
 }
+
+// ============ AI探索测试 API ============
+
+// 获取探索任务列表
+export function getAIExplorationTasks() {
+  return request({
+    url: '/ui-automation/ai-exploration-tasks/',
+    method: 'get'
+  })
+}
+
+// 获取探索任务详情
+export function getAIExplorationTaskDetail(id) {
+  return request({
+    url: `/ui-automation/ai-exploration-tasks/${id}/`,
+    method: 'get'
+  })
+}
+
+// 创建探索任务
+export function createAIExplorationTask(data) {
+  return request({
+    url: '/ui-automation/ai-exploration-tasks/',
+    method: 'post',
+    data
+  })
+}
+
+// 启动探索任务
+export function startAIExplorationTask(id) {
+  return request({
+    url: `/ui-automation/ai-exploration-tasks/${id}/start/`,
+    method: 'post'
+  })
+}
+
+// 停止探索任务
+export function stopAIExplorationTask(id) {
+  return request({
+    url: `/ui-automation/ai-exploration-tasks/${id}/stop/`,
+    method: 'post'
+  })
+}
+
+// 轮询探索进度（任务状态 + 用例步骤动态加载）
+export function getAIExplorationProgress(id) {
+  return request({
+    url: `/ui-automation/ai-exploration-tasks/${id}/progress/`,
+    method: 'get'
+  })
+}
+
+// 更新探索步骤坐标（可视化编排）
+export function updateAIExplorationStepCoords(stepId, data) {
+  return request({
+    url: `/ui-automation/ai-exploration-steps/${stepId}/update_coords/`,
+    method: 'patch',
+    data
+  })
+}
+
+// 更新探索步骤（通用 PATCH）
+export function updateAIExplorationStep(stepId, data) {
+  return request({
+    url: `/ui-automation/ai-exploration-steps/${stepId}/`,
+    method: 'patch',
+    data
+  })
+}

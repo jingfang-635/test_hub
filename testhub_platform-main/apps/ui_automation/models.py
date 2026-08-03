@@ -1056,3 +1056,105 @@ class AIExecutionRecord(models.Model):
 
     def __str__(self):
         return f"{self.case_name} - {self.get_status_display()}"
+
+
+class AIExplorationTask(models.Model):
+    """AI探索测试任务"""
+    DATA_SOURCE_CHOICES = [
+        ('autonomous', '自主探索（AI从页面规划）'),
+        ('case_driven', '功能用例驱动'),
+    ]
+    STATUS_CHOICES = [
+        ('pending', '等待中'),
+        ('running', '执行中'),
+        ('passed', '成功'),
+        ('failed', '失败'),
+        ('stopped', '已停止'),
+    ]
+
+    project = models.ForeignKey(UiProject, on_delete=models.CASCADE, null=True, blank=True, verbose_name='所属项目')
+    name = models.CharField(max_length=200, verbose_name='任务名称')
+    start_url = models.URLField(max_length=1000, verbose_name='起始URL')
+    environment = models.CharField(max_length=200, blank=True, default='', verbose_name='环境')
+    data_source = models.CharField(max_length=20, choices=DATA_SOURCE_CHOICES, default='autonomous', verbose_name='数据来源')
+    data_content = models.TextField(blank=True, default='', verbose_name='功能用例描述', help_text='功能用例驱动模式下填写')
+    intent_content = models.TextField(blank=True, default='', verbose_name='自然语言意图', help_text='独立填写，作为探索的意图补充')
+    repo_content = models.TextField(blank=True, default='', verbose_name='代码仓库信息', help_text='独立填写，作为探索的参考补充')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
+    logs = models.TextField(blank=True, default='', verbose_name='执行日志')
+    start_time = models.DateTimeField(auto_now_add=True, verbose_name='开始时间')
+    end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
+    duration = models.FloatField(null=True, blank=True, verbose_name='执行时长(秒)')
+    created_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='创建者')
+
+    class Meta:
+        db_table = 'ui_ai_exploration_tasks'
+        verbose_name = 'AI探索测试任务'
+        verbose_name_plural = 'AI探索测试任务'
+        ordering = ['-start_time']
+
+    def __str__(self):
+        return self.name
+
+
+class AIExplorationCase(models.Model):
+    """AI探索用例（一次探索产生的多条用例）"""
+    STATUS_CHOICES = [
+        ('pending', '等待中'),
+        ('running', '执行中'),
+        ('passed', '成功'),
+        ('failed', '失败'),
+        ('skipped', '已跳过'),
+    ]
+
+    task = models.ForeignKey(AIExplorationTask, on_delete=models.CASCADE, related_name='cases', verbose_name='所属探索任务')
+    name = models.CharField(max_length=200, verbose_name='用例名称')
+    description = models.TextField(blank=True, default='', verbose_name='用例描述')
+    order = models.IntegerField(default=0, verbose_name='顺序')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'ui_ai_exploration_cases'
+        verbose_name = 'AI探索用例'
+        verbose_name_plural = 'AI探索用例'
+        ordering = ['order', 'id']
+
+    def __str__(self):
+        return f"{self.task.name} - {self.name}"
+
+
+class AIExplorationStep(models.Model):
+    """AI探索步骤（含元素坐标和截图）"""
+    ACTION_CHOICES = [
+        ('click', '点击'),
+        ('input', '输入'),
+        ('select', '选择'),
+        ('navigate', '导航'),
+        ('scroll', '滚动'),
+        ('other', '其他'),
+    ]
+
+    case = models.ForeignKey(AIExplorationCase, on_delete=models.CASCADE, related_name='steps', verbose_name='所属用例')
+    order = models.IntegerField(default=0, verbose_name='步骤顺序')
+    action_type = models.CharField(max_length=50, default='other', verbose_name='动作类型')
+    action_description = models.TextField(blank=True, default='', verbose_name='动作描述')
+    element_index = models.IntegerField(null=True, blank=True, verbose_name='元素索引')
+    element_text = models.CharField(max_length=500, blank=True, default='', verbose_name='元素文本')
+    # 元素边界框 bounding rect: {x, y, width, height}
+    rect = models.JSONField(default=dict, blank=True, verbose_name='元素边界框')
+    # 点击点坐标: {x, y}
+    click_point = models.JSONField(default=dict, blank=True, verbose_name='点击点坐标')
+    screenshot = models.CharField(max_length=500, blank=True, default='', verbose_name='截图路径')
+    page_url = models.CharField(max_length=1000, blank=True, default='', verbose_name='页面URL')
+    status = models.CharField(max_length=20, default='pending', verbose_name='步骤状态')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+
+    class Meta:
+        db_table = 'ui_ai_exploration_steps'
+        verbose_name = 'AI探索步骤'
+        verbose_name_plural = 'AI探索步骤'
+        ordering = ['order', 'id']
+
+    def __str__(self):
+        return f"{self.case.name} - 步骤{self.order}"
