@@ -39,8 +39,20 @@ def _migrate_view(request):
 
         elif action == 'migrate':
             from django.core.management import call_command
-            call_command('migrate', '--run-syncdb', verbosity=1)
-            return JsonResponse({'status': 'ok', 'message': '数据库迁移成功'})
+            import io
+
+            # 先尝试创建迁移
+            out = io.StringIO()
+            try:
+                call_command('makemigrations', '--check', '--dry-run', verbosity=0, stdout=out)
+            except Exception:
+                pass  # 没有新迁移可创建
+
+            # 执行迁移
+            out = io.StringIO()
+            call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=2, stdout=out)
+            output = out.getvalue()
+            return JsonResponse({'status': 'ok', 'message': '数据库迁移成功', 'output': output[:2000]})
 
         elif action == 'createsuperuser':
             from django.contrib.auth import get_user_model
@@ -54,6 +66,35 @@ def _migrate_view(request):
 
             User.objects.create_superuser(username=username, password=password, email=email)
             return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
+
+        elif action == 'init':
+            """一键初始化: 迁移 + 创建管理员"""
+            from django.core.management import call_command
+            from django.contrib.auth import get_user_model
+            import io
+
+            results = []
+
+            # Step 1: 迁移
+            try:
+                out = io.StringIO()
+                call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=1, stdout=out)
+                results.append('迁移成功')
+            except Exception as e:
+                return JsonResponse({'status': 'error', 'message': f'迁移失败: {str(e)}'}, status=500)
+
+            # Step 2: 创建管理员
+            try:
+                User = get_user_model()
+                if not User.objects.filter(username='admin').exists():
+                    User.objects.create_superuser(username='admin', password='admin123', email='admin@test.com')
+                    results.append('管理员 admin 创建成功')
+                else:
+                    results.append('管理员 admin 已存在')
+            except Exception as e:
+                results.append(f'创建管理员失败: {str(e)}')
+
+            return JsonResponse({'status': 'ok', 'message': '; '.join(results)})
 
         else:
             return JsonResponse({'status': 'error', 'message': f'未知操作: {action}'}, status=400)
