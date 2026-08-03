@@ -102,6 +102,12 @@ DATABASES = {
         'OPTIONS': {
             'charset': 'utf8mb4',
             'init_command': "SET sql_mode='STRICT_TRANS_TABLES'",
+            # 连接超时设置，避免 Vercel 等 Serverless 环境下 DB 不可达时卡死
+            # connect_timeout: TCP 连接超时（秒）
+            # read_timeout/write_timeout: 读写超时（秒）
+            'connect_timeout': 3,
+            'read_timeout': 5,
+            'write_timeout': 5,
         },
     }
 }
