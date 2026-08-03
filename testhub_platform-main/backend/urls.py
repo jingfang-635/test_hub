@@ -39,20 +39,35 @@ def _migrate_view(request):
 
         elif action == 'migrate':
             from django.core.management import call_command
+            from django.db import connection
             import io
 
-            # 先尝试创建迁移
+            # 检查 django_migrations 是否有记录
+            has_migration_records = False
+            try:
+                with connection.cursor() as cursor:
+                    cursor.execute("SELECT COUNT(*) FROM django_migrations")
+                    count = cursor.fetchone()[0]
+                    has_migration_records = count > 0
+            except Exception:
+                pass  # 表不存在, 视为无记录
+
             out = io.StringIO()
             try:
-                call_command('makemigrations', '--check', '--dry-run', verbosity=0, stdout=out)
-            except Exception:
-                pass  # 没有新迁移可创建
+                if not has_migration_records:
+                    # 表已通过 schema_editor 创建, 迁移历史为空
+                    # 用 --fake 标记所有迁移为已应用 + --run-syncdb 补齐缺表
+                    call_command('migrate', '--fake', '--run-syncdb', '--skip-checks', '--noinput', verbosity=0, stdout=out)
+                    out.write('\n[已同步所有迁移记录]\n')
+                else:
+                    # 执行迁移 (处理新增的迁移文件)
+                    call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=2, stdout=out)
 
-            # 执行迁移
-            out = io.StringIO()
-            call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=2, stdout=out)
-            output = out.getvalue()
-            return JsonResponse({'status': 'ok', 'message': '数据库迁移成功', 'output': output[:2000]})
+                output = out.getvalue()
+                return JsonResponse({'status': 'ok', 'message': '数据库迁移成功', 'output': output[:2000]})
+            except Exception as e:
+                output = out.getvalue()
+                return JsonResponse({'status': 'error', 'message': f'迁移失败: {str(e)}', 'output': output[:1000]}, status=500)
 
         elif action == 'createsuperuser':
             from django.contrib.auth import get_user_model
@@ -68,49 +83,80 @@ def _migrate_view(request):
             return JsonResponse({'status': 'ok', 'message': f'超级用户 {username} 创建成功'})
 
         elif action == 'init':
-            """一键初始化: 清空数据库 + 迁移 + 创建管理员"""
-            from django.core.management import call_command
-            from django.contrib.auth import get_user_model
+            """一键初始化: 高效建表 + 创建管理员 (针对 Vercel 超时优化)"""
+            from django.apps import apps
             from django.db import connection
-            import io
+            from django.contrib.auth import get_user_model
+            import logging
 
+            logger = logging.getLogger(__name__)
             results = []
 
-            # Step 1: 清空数据库所有表 (解决表已存在冲突)
+            # Step 1: 使用 schema_editor 直接创建所有模型表
+            # 优势: 跳过 Django 迁移历史检查, 直接执行 CREATE TABLE, 速度快数倍
+            # 使用重试机制解决外键依赖顺序问题
+            try:
+                all_models = list(apps.get_models())
+                created = 0
+                skipped = 0
+                errors = 0
+                max_retries = 10
+                failed = []
+
+                with connection.schema_editor() as schema_editor:
+                    remaining = all_models
+                    for attempt in range(max_retries):
+                        if not remaining:
+                            break
+                        failed = []
+                        for model in remaining:
+                            try:
+                                schema_editor.create_model(model)
+                                created += 1
+                            except Exception as e:
+                                err_msg = str(e).lower()
+                                if 'already exists' in err_msg or '1050' in err_msg:
+                                    skipped += 1
+                                else:
+                                    failed.append((model, e))
+                        if not failed:
+                            break
+                        remaining = [m for m, _ in failed]
+                        logger.warning(f'Attempt {attempt+1}: {len(failed)} models remaining due to FK dependencies')
+
+                    # 最终仍失败的, 统计错误
+                    for model, e in failed:
+                        err_msg = str(e).lower()
+                        if 'already exists' in err_msg or '1050' in err_msg:
+                            skipped += 1
+                        else:
+                            errors += 1
+                            logger.error(f'建表最终失败 {model.__name__}: {e}')
+
+                results.append(f'建表完成: 新建 {created}, 已存在 {skipped}, 失败 {errors}')
+                logger.info(f'Step1 done: created={created}, skipped={skipped}, errors={errors}')
+            except Exception as e:
+                import traceback
+                return JsonResponse({
+                    'status': 'error',
+                    'message': f'建表失败: {str(e)}',
+                    'traceback': traceback.format_exc()
+                }, status=500)
+
+            # Step 2: 创建 django_migrations 表 (确保后续 migrate 命令可用)
             try:
                 with connection.cursor() as cursor:
-                    # TiDB/MySQL: 获取所有表并 DROP
-                    cursor.execute(
-                        "SELECT table_name FROM information_schema.tables "
-                        "WHERE table_schema = DATABASE()"
-                    )
-                    tables = [row[0] for row in cursor.fetchall()]
-
-                    # 关闭外键检查
-                    cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
-                    for table in tables:
-                        try:
-                            cursor.execute(f"DROP TABLE IF EXISTS `{table}`")
-                        except Exception:
-                            pass
-                    cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-                    # 清除 django_migrations 记录
-                    try:
-                        cursor.execute("DELETE FROM django_migrations")
-                    except Exception:
-                        pass  # 表不存在时忽略
-                results.append(f'清空 {len(tables)} 张表')
+                    cursor.execute("""
+                        CREATE TABLE IF NOT EXISTS django_migrations (
+                            id BIGINT AUTO_INCREMENT PRIMARY KEY,
+                            app VARCHAR(255) NOT NULL,
+                            name VARCHAR(255) NOT NULL,
+                            applied DATETIME NOT NULL
+                        )
+                    """)
+                results.append('迁移记录表已就绪')
             except Exception as e:
-                return JsonResponse({'status': 'error', 'message': f'清空数据库失败: {str(e)}'}, status=500)
-
-            # Step 2: 执行迁移
-            try:
-                out = io.StringIO()
-                call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=1, stdout=out)
-                results.append('迁移成功')
-            except Exception as e:
-                return JsonResponse({'status': 'error', 'message': f'迁移失败: {str(e)}'}, status=500)
+                logger.warning(f'django_migrations 表创建警告: {e}')
 
             # Step 3: 创建管理员
             try:
@@ -122,7 +168,9 @@ def _migrate_view(request):
                     results.append('管理员 admin 已存在')
             except Exception as e:
                 results.append(f'创建管理员失败: {str(e)}')
+                logger.error(f'创建管理员失败: {e}')
 
+            logger.info(f'Init completed: {"; ".join(results)}')
             return JsonResponse({'status': 'ok', 'message': '; '.join(results)})
 
         else:
