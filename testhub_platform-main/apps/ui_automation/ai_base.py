@@ -12,7 +12,15 @@ import functools
 import json
 import re
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
+
+# Optional dependencies (langchain_openai, browser_use) may be missing in
+# Serverless environments (e.g. Vercel) that only install core requirements.
+# Gracefully degrade to None so module import succeeds; actual usage raises
+# a friendly error via _check_ai_dependencies().
+try:
+    from langchain_openai import ChatOpenAI
+except ImportError:
+    ChatOpenAI = None
 
 # 加载环境变量
 load_dotenv()
@@ -202,19 +210,21 @@ def _contains_auth_failure_signal(text):
 # ============================================================================
 
 # Patch ChatOpenAI to allow setting attributes (required for browser-use token counting)
-try:
-    from pydantic import ConfigDict
+# Skip patching if ChatOpenAI is unavailable (optional dependency not installed)
+if ChatOpenAI is not None:
+    try:
+        from pydantic import ConfigDict
 
-    if hasattr(ChatOpenAI, 'model_config'):
-        if isinstance(ChatOpenAI.model_config, dict):
-            ChatOpenAI.model_config['extra'] = 'allow'
+        if hasattr(ChatOpenAI, 'model_config'):
+            if isinstance(ChatOpenAI.model_config, dict):
+                ChatOpenAI.model_config['extra'] = 'allow'
+            else:
+                ChatOpenAI.model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
         else:
             ChatOpenAI.model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
-    else:
-        ChatOpenAI.model_config = ConfigDict(extra='allow', arbitrary_types_allowed=True)
-except ImportError:
-    if hasattr(ChatOpenAI, 'model_config'):
-        ChatOpenAI.model_config['extra'] = 'allow'
+    except ImportError:
+        if hasattr(ChatOpenAI, 'model_config'):
+            ChatOpenAI.model_config['extra'] = 'allow'
 
 # 修改 ActionModel 配置以允许额外字段
 try:
@@ -915,7 +925,12 @@ except Exception as e:
 # PART 2: Helper Classes
 # ============================================================================
 
-from langchain_core.callbacks import BaseCallbackHandler
+try:
+    from langchain_core.callbacks import BaseCallbackHandler
+except ImportError:
+    # langchain_core 未安装时降级为 object，保证模块导入成功
+    BaseCallbackHandler = object
+
 from typing import Any
 
 
@@ -935,13 +950,38 @@ class RawResponseLogger(BaseCallbackHandler):
 # PART 3: Base Browser Agent
 # ============================================================================
 
-from browser_use import Agent, Controller
-from browser_use.browser.events import CloseTabEvent, SwitchTabEvent
-from browser_use.browser.profile import BrowserProfile
+# browser_use 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
+try:
+    from browser_use import Agent, Controller
+    from browser_use.browser.events import CloseTabEvent, SwitchTabEvent
+    from browser_use.browser.profile import BrowserProfile
+except ImportError:
+    Agent = None
+    Controller = None
+    CloseTabEvent = None
+    SwitchTabEvent = None
+    BrowserProfile = None
+
+
+def _check_ai_dependencies():
+    """检查 AI 浏览器自动化所需的可选依赖是否可用，不可用时抛出友好错误"""
+    missing = []
+    if ChatOpenAI is None:
+        missing.append('langchain_openai')
+    if Agent is None:
+        missing.append('browser_use')
+    if missing:
+        raise RuntimeError(
+            f'AI 浏览器自动化功能所需的依赖未安装: {", ".join(missing)}。'
+            f'请安装 requirements_optional.txt'
+        )
 
 
 class BaseBrowserAgent:
     def __init__(self, execution_mode='text', enable_gif=True, case_name=None):
+        # 检查可选依赖是否可用（Vercel 等环境可能未安装 langchain_openai / browser_use）
+        _check_ai_dependencies()
+
         self.execution_mode = 'text'
         self.enable_gif = enable_gif  # GIF录制开关
         self.case_name = case_name or "Adhoc Task"  # 用例名称
