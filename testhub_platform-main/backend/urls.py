@@ -67,9 +67,16 @@ urlpatterns += [
 
 # 前端静态资源路由 (Vite 构建产物: /assets/*, *.wasm)
 if getattr(settings, 'FRONTEND_DIST', ''):
+    def _serve_frontend_file(request, file_path):
+        """服务前端静态文件 (wasm 等)。"""
+        full_path = os.path.join(settings.FRONTEND_DIST, file_path)
+        if os.path.exists(full_path) and os.path.isfile(full_path):
+            return FileResponse(open(full_path, 'rb'))
+        return HttpResponseNotFound(f'File not found: {file_path}')
+
     urlpatterns += [
         path('assets/<path:path>', serve, {'document_root': os.path.join(settings.FRONTEND_DIST, 'assets')}),
-        re_path(r'^.*\.wasm$', serve, {'document_root': settings.FRONTEND_DIST}),
+        re_path(r'^(?P<file_path>.*\.wasm)$', _serve_frontend_file),
     ]
 
 # SPA 回退：所有非 API/admin/static/media 路由返回前端 index.html
