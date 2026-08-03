@@ -96,7 +96,10 @@ def _migrate_view(request):
                     cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
 
                     # 清除 django_migrations 记录
-                    cursor.execute("DELETE FROM django_migrations")
+                    try:
+                        cursor.execute("DELETE FROM django_migrations")
+                    except Exception:
+                        pass  # 表不存在时忽略
                 results.append(f'清空 {len(tables)} 张表')
             except Exception as e:
                 return JsonResponse({'status': 'error', 'message': f'清空数据库失败: {str(e)}'}, status=500)
