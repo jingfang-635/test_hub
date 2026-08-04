@@ -445,7 +445,7 @@ class AIModelService:
         actual_max_tokens = max_tokens if max_tokens is not None else config.max_tokens
 
         data = {
-            'model': config.model_name,
+            'model': config.model_name.lower(),  # DeepSeek 等API要求模型名小写
             'messages': messages,
             'max_tokens': actual_max_tokens,
             'temperature': config.temperature,
@@ -569,7 +569,7 @@ class AIModelService:
 
         while continuation_count <= MAX_CONTINUATIONS:
             data = {
-                'model': config.model_name,
+                'model': config.model_name.lower(),  # DeepSeek 等API要求模型名小写
                 'messages': current_messages,
                 'max_tokens': actual_max_tokens,
                 'temperature': config.temperature,
