@@ -892,11 +892,11 @@ export default {
 
         // readyState=2表示连接已关闭，readyState=0表示连接中断
         // EventSource会自动重连（readyState=0），除非是致命错误（readyState=2）
+        // 注意：Vercel/Serverless 环境通常不支持 SSE 长连接，降级到轮询是预期行为，不要弹错吓用户
         if (this.eventSource.readyState === 2) {
-          console.error('❌ SSE连接永久关闭，降级到轮询模式')
+          console.info('ℹ️ SSE连接已关闭，切换到轮询模式（此为正常降级，Serverless环境下常见）')
           this.eventSource.close()
           this.eventSource = null
-          ElMessage.warning(this.$t('requirementAnalysis.streamConnectionInterrupted'))
           this.startPolling()
         } else if (this.eventSource.readyState === 0) {
           // EventSource正在重连，等待一段时间后检查
@@ -904,10 +904,9 @@ export default {
           setTimeout(() => {
             // 如果5秒后还是断开状态，降级到轮询
             if (this.eventSource && this.eventSource.readyState === 0) {
-              console.error('❌ SSE重连失败，降级到轮询模式')
+              console.info('ℹ️ SSE重连未恢复，切换到轮询模式（此为正常降级，Serverless环境下常见）')
               this.eventSource.close()
               this.eventSource = null
-              ElMessage.warning(this.$t('requirementAnalysis.streamConnectionInterrupted'))
               this.startPolling()
             }
           }, 5000)
