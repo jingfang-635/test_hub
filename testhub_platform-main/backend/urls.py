@@ -56,9 +56,15 @@ def _migrate_view(request):
             try:
                 if not has_migration_records:
                     # 表已通过 schema_editor 创建, 迁移历史为空
-                    # 用 --fake 标记所有迁移为已应用 + --run-syncdb 补齐缺表
-                    call_command('migrate', '--fake', '--run-syncdb', '--skip-checks', '--noinput', verbosity=0, stdout=out)
-                    out.write('\n[已同步所有迁移记录]\n')
+                    # Step 1: --fake 标记所有迁移为已应用（不执行SQL，只记录到django_migrations）
+                    call_command('migrate', '--fake', '--skip-checks', '--noinput', verbosity=0, stdout=out)
+                    out.write('\n[已标记所有迁移为已应用]\n')
+                    # Step 2: --run-syncdb 补齐无迁移文件的app表（已存在的自动跳过）
+                    try:
+                        call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=0, stdout=out)
+                        out.write('\n[已同步无迁移app的表]\n')
+                    except Exception as syncdb_err:
+                        out.write(f'\n[run-syncdb警告(可忽略): {str(syncdb_err)}]\n')
                 else:
                     # 执行迁移 (处理新增的迁移文件)
                     call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=2, stdout=out)
