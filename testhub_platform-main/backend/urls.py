@@ -40,7 +40,10 @@ def _migrate_view(request):
         elif action == 'migrate':
             from django.core.management import call_command
             from django.db import connection
+            from django.db.migrations.loader import MigrationLoader
             import io
+
+            out = io.StringIO()
 
             # 检查 django_migrations 是否有记录
             has_migration_records = False
@@ -52,22 +55,48 @@ def _migrate_view(request):
             except Exception:
                 pass  # 表不存在, 视为无记录
 
-            out = io.StringIO()
             try:
                 if not has_migration_records:
-                    # 表已通过 schema_editor 创建, 迁移历史为空
-                    # Step 1: --fake 标记所有迁移为已应用（不执行SQL，只记录到django_migrations）
-                    call_command('migrate', '--fake', '--skip-checks', '--noinput', verbosity=0, stdout=out)
-                    out.write('\n[已标记所有迁移为已应用]\n')
-                    # Step 2: --run-syncdb 补齐无迁移文件的app表（已存在的自动跳过）
-                    try:
-                        call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=0, stdout=out)
-                        out.write('\n[已同步无迁移app的表]\n')
-                    except Exception as syncdb_err:
-                        out.write(f'\n[run-syncdb警告(可忽略): {str(syncdb_err)}]\n')
+                    # 表已通过 schema_editor 创建, 但 django_migrations 为空
+                    # 直接手动插入迁移记录, 绕过 migrate 命令（migrate --fake 仍会同步无迁移app导致表已存在冲突）
+                    loader = MigrationLoader(connection, ignore_no_migrations=True)
+                    graph = loader.graph
+
+                    inserted = 0
+                    with connection.cursor() as cursor:
+                        # 先创建 django_migrations 表（如果不存在）
+                        try:
+                            cursor.execute("""
+                                CREATE TABLE IF NOT EXISTS django_migrations (
+                                    id bigint AUTO_INCREMENT PRIMARY KEY,
+                                    app varchar(255) NOT NULL,
+                                    name varchar(255) NOT NULL,
+                                    applied datetime(6) NOT NULL,
+                                    UNIQUE(app, name)
+                                )
+                            """)
+                        except Exception:
+                            pass  # 可能已存在或MySQL语法不同
+
+                        for node in graph.leaf_nodes():
+                            # 遍历所有迁移节点, 插入记录
+                            for migration in loader.disk_migrations.values():
+                                try:
+                                    from django.utils import timezone
+                                    cursor.execute(
+                                        "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                                        [migration.app_label, migration.name, timezone.now()]
+                                    )
+                                    inserted += cursor.rowcount
+                                except Exception:
+                                    pass
+
+                    out.write(f'\n[手动插入 {inserted} 条迁移记录到 django_migrations]\n')
+                    out.write('[表已通过 init 创建, 跳过 migrate 命令]\n')
                 else:
-                    # 执行迁移 (处理新增的迁移文件)
-                    call_command('migrate', '--run-syncdb', '--skip-checks', '--noinput', verbosity=2, stdout=out)
+                    # 有迁移记录, 执行正常增量迁移
+                    out.write('[执行增量迁移]\n')
+                    call_command('migrate', '--skip-checks', '--noinput', verbosity=1, stdout=out)
 
                 output = out.getvalue()
                 return JsonResponse({'status': 'ok', 'message': '数据库迁移成功', 'output': output[:2000]})
