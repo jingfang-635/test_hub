@@ -147,7 +147,7 @@ class AIModelService:
         }
         
         data = {
-            'model': config.model_name,
+            'model': config.model_name.lower(),  # DeepSeek 等API要求模型名小写
             'messages': messages,
             'max_tokens': config.max_tokens,
             'temperature': config.temperature,
@@ -169,6 +169,7 @@ class AIModelService:
             url = base_url
             
         try:
+            logger.info(f"调用AI API: model={data['model']}, url={url}, messages_count={len(messages)}")
             # Increase timeout to 120s for long generation tasks
             async with httpx.AsyncClient(timeout=120.0) as client:
                 response = await client.post(
@@ -179,7 +180,7 @@ class AIModelService:
                 
                 if response.status_code != 200:
                     error_detail = response.text
-                    logger.error(f"API调用返回错误: Status={response.status_code}, Body={error_detail}")
+                    logger.error(f"API调用返回错误: Status={response.status_code}, Body={error_detail}, model={data['model']}, url={url}")
                     
                 response.raise_for_status()
                 return response.json()
