@@ -1,6 +1,7 @@
 """
 ASGI config for backend project.
-支持 Daphne (WebSocket) 和 runserver (仅 HTTP) 两种模式
+推荐使用 Uvicorn / Daphne 启动，以同时支持 HTTP、SSE 与 WebSocket。
+开发可用: python start_backend.py
 """
 
 import os
@@ -91,7 +92,7 @@ try:
         ),
     })
     logger.info('=' * 60)
-    logger.info('ASGI 已启用 WebSocket 支持 (需通过 Daphne 启动)')
+    logger.info('ASGI 已启用 WebSocket 支持 (推荐 Uvicorn/Daphne 启动)')
     logger.info('  - HTTP 路由: django_asgi_app')
     logger.info('  - WebSocket 路由总数: %d', app_ws_count + ui_ws_count)
     logger.info('=' * 60)

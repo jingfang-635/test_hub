@@ -93,8 +93,18 @@
         </template>
       </el-table-column>
 
-      <el-table-column label="操作" width="250" fixed="right">
+      <el-table-column label="操作" min-width="320" fixed="right">
         <template #default="{ row }">
+          <el-button
+            v-if="canRemoteConnect(row)"
+            link
+            size="small"
+            type="warning"
+            :icon="Monitor"
+            @click="openRemoteControl(row)"
+          >
+            远程连接
+          </el-button>
           <el-button
             v-if="row.status === 'available' || row.status === 'online'"
             link
@@ -271,8 +281,9 @@
 
 <script setup>
 import { ref, onMounted, onBeforeUnmount } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Plus } from '@element-plus/icons-vue'
+import { Refresh, Plus, Monitor } from '@element-plus/icons-vue'
 import {
   getDeviceList,
   discoverDevices,
@@ -283,6 +294,8 @@ import {
   deleteDevice
 } from '@/api/app-automation'
 import { getDeviceStatusType, getDeviceStatusText, formatDateTime } from '@/utils/app-automation-helpers'
+
+const router = useRouter()
 
 // Refs
 const remoteDeviceFormRef = ref(null)
@@ -316,6 +329,18 @@ const remoteDeviceRules = {
   port: [
     { required: true, message: '请输入端口号', trigger: 'blur' }
   ]
+}
+
+const canRemoteConnect = (row) => {
+  return row && row.status && row.status !== 'offline'
+}
+
+const openRemoteControl = (row) => {
+  if (!canRemoteConnect(row)) {
+    ElMessage.warning('设备离线，无法远程连接')
+    return
+  }
+  router.push(`/app-automation/devices/${row.id}/remote`)
 }
 
 // 方法

@@ -496,6 +496,12 @@ const routes = [
         component: () => import('@/views/app-automation/devices/DeviceList.vue')
       },
       {
+        path: 'devices/:id/remote',
+        name: 'AppDeviceRemote',
+        component: () => import('@/views/app-automation/devices/RemoteControl.vue'),
+        meta: { title: '远程投屏' }
+      },
+      {
         path: 'packages',
         name: 'AppPackageList',
         component: () => import('@/views/app-automation/packages/PackageList.vue')

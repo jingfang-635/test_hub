@@ -15,7 +15,8 @@ echo "============================================"
 echo "  TestHub 一键启动"
 echo "  前端端口: ${FRONTEND_PORT}"
 echo "  后端端口: ${BACKEND_PORT}"
-echo "  Django Server + Django-Q2 + Scheduler"
+echo "  Uvicorn ASGI + Django-Q2 + Scheduler"
+echo "  (HTTP + SSE + WebSocket 同端口)"
 echo "============================================"
 
 # 1. 启动前端（后台）
@@ -34,6 +35,6 @@ echo "Django-Q2 Cluster started (PID: ${QCLUSTER_PID})"
 SCHEDULER_PID=$!
 echo "Scheduler started (PID: ${SCHEDULER_PID})"
 
-#    c) Django 开发服务器（前台）
+#    c) Uvicorn ASGI（前台）— HTTP/SSE/WebSocket
 trap "kill ${FRONTEND_PID} ${QCLUSTER_PID} ${SCHEDULER_PID} 2>/dev/null" EXIT
-(cd backend && "$PYTHON" manage.py runserver 0.0.0.0:${BACKEND_PORT})
+"$PYTHON" start_backend.py --port "${BACKEND_PORT}"

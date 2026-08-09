@@ -8,7 +8,7 @@
           <span class="logo-text">testhub</span>
         </div>
         <el-menu
-          :default-active="$route.path"
+          :default-active="activeMenu"
           router
           class="side-menu"
         >
@@ -395,6 +395,14 @@ const handleLanguageChange = (lang) => {
   appStore.setLanguage(lang)
   ElMessage.success(lang === 'zh-cn' ? '语言已切换为中文' : 'Language switched to English')
 }
+
+const activeMenu = computed(() => {
+  // 远程投屏归属设备管理菜单高亮
+  if (/^\/app-automation\/devices\/\d+\/remote/.test(route.path)) {
+    return '/app-automation/devices'
+  }
+  return route.path
+})
 
 const currentModule = computed(() => {
   if (route.path.startsWith('/ai-generation')) return 'ai-generation'

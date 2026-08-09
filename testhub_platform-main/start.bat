@@ -18,7 +18,8 @@ echo ============================================
 echo   TestHub One-Click Start
 echo   Frontend Port: %FRONTEND_PORT%
 echo   Backend Port: %BACKEND_PORT%
-echo   Django Server + Django-Q2 + Scheduler
+echo   Uvicorn ASGI + Django-Q2 + Scheduler
+echo   (HTTP + SSE + WebSocket on one port)
 echo ============================================
 
 REM 1. Start frontend (separate window)
@@ -31,7 +32,7 @@ start "TestHub-QCluster" cmd /k "cd /d %~dp0backend && %PYTHON% manage.py qclust
 REM    b) Scheduler (separate window)
 start "TestHub-Scheduler" cmd /k "cd /d %~dp0backend && %PYTHON% manage.py run_all_scheduled_tasks"
 
-REM    c) Django dev server (current window)
-cd /d %~dp0backend
-%PYTHON% manage.py runserver 0.0.0.0:%BACKEND_PORT%
+REM    c) Uvicorn ASGI server (current window) — HTTP/SSE/WebSocket
+cd /d %~dp0
+%PYTHON% start_backend.py --port %BACKEND_PORT%
 pause

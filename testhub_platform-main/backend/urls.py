@@ -31,88 +31,241 @@ def _migrate_view(request):
     action = request.GET.get('action', 'check')
 
     try:
+        from django.db import connection
+        from django.db.migrations.loader import MigrationLoader
+        from django.utils import timezone
+        from django.apps import apps
+
+        def _is_initial(migration):
+            return getattr(migration, 'initial', False) or 'initial' in migration.name
+
         if action == 'check':
-            from django.db import connection
             with connection.cursor() as cursor:
                 cursor.execute('SELECT 1')
             return JsonResponse({'status': 'ok', 'message': '数据库连接正常'})
 
-        elif action in ('migrate', 'repair'):
-            from django.core.management import call_command
-            from django.db import connection
-            from django.db.migrations.loader import MigrationLoader
-            from django.utils import timezone
-            import io
+        # ================== diagnose：对比模型与真实数据库，列出缺失列/未应用迁移 ==================
+        elif action == 'diagnose':
+            # 1. 现有表与列
+            real_tables = {}
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW TABLES")
+                table_names = [row[0] for row in cursor.fetchall()]
+                for t in table_names:
+                    try:
+                        cursor.execute(f"SHOW COLUMNS FROM `{t}`")
+                        real_tables[t] = [row[0] for row in cursor.fetchall()]
+                    except Exception:
+                        real_tables[t] = []
 
-            out = io.StringIO()
+            # 2. Django 模型期望的表与列
+            expected = {}
+            for model in apps.get_models():
+                db_table = model._meta.db_table
+                expected[db_table] = sorted([f.column for f in model._meta.concrete_fields])
 
+            # 3. 缺失列
+            missing_cols = {}
+            for db_table, cols in expected.items():
+                real_cols = set(real_tables.get(db_table, []))
+                missing = [c for c in cols if c not in real_cols]
+                if missing:
+                    missing_cols[db_table] = missing
+
+            # 4. 迁移记录 vs 磁盘
+            loader = MigrationLoader(connection, ignore_no_migrations=True)
+            applied = set()
             try:
-                # 1. 确保 django_migrations 表存在
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        CREATE TABLE IF NOT EXISTS django_migrations (
-                            id bigint AUTO_INCREMENT PRIMARY KEY,
-                            app varchar(255) NOT NULL,
-                            name varchar(255) NOT NULL,
-                            applied datetime(6) NOT NULL,
-                            UNIQUE(app, name)
-                        )
-                    """)
-
-                # 2. 获取已记录的迁移
-                applied = set()
                 with connection.cursor() as cursor:
                     cursor.execute("SELECT app, name FROM django_migrations")
                     applied = {(row[0], row[1]) for row in cursor.fetchall()}
+            except Exception:
+                pass
 
-                # 3. 预插入 initial 迁移记录（建表类迁移，表已通过 init 创建）
-                #    非 initial 迁移（字段变更等）不预插入，让步骤4的 migrate 真正执行
-                loader = MigrationLoader(connection, ignore_no_migrations=True)
-                inserted = 0
+            unapplied_non_initial = []
+            for key, migration in loader.disk_migrations.items():
+                if not _is_initial(migration) and (migration.app_label, migration.name) not in applied:
+                    unapplied_non_initial.append(f"{migration.app_label}.{migration.name}")
+
+            return JsonResponse({
+                'status': 'ok',
+                'missing_columns_count': sum(len(v) for v in missing_cols.values()),
+                'missing_columns': missing_cols,
+                'unapplied_non_initial_migrations_count': len(unapplied_non_initial),
+                'unapplied_non_initial_migrations': sorted(unapplied_non_initial),
+            })
+
+        # ================== migrate / repair：细粒度逐条执行，支持 batch ==================
+        elif action in ('migrate', 'repair'):
+            results = []
+
+            # 1. 确保 django_migrations 表存在
+            with connection.cursor() as cursor:
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS django_migrations (
+                        id bigint AUTO_INCREMENT PRIMARY KEY,
+                        app varchar(255) NOT NULL,
+                        name varchar(255) NOT NULL,
+                        applied datetime(6) NOT NULL,
+                        UNIQUE(app, name)
+                    )
+                """)
+
+            # 2. 已记录的迁移
+            applied = set()
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT app, name FROM django_migrations")
+                applied = {(row[0], row[1]) for row in cursor.fetchall()}
+
+            loader = MigrationLoader(connection, ignore_no_migrations=True)
+
+            # 3. 预插入 initial 迁移（建表类）
+            inserted_initial = 0
+            with connection.cursor() as cursor:
+                for migration in loader.disk_migrations.values():
+                    key = (migration.app_label, migration.name)
+                    if _is_initial(migration) and key not in applied:
+                        try:
+                            cursor.execute(
+                                "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                                [migration.app_label, migration.name, timezone.now()]
+                            )
+                            inserted_initial += cursor.rowcount
+                        except Exception:
+                            pass
+            if inserted_initial:
+                results.append(f"预插入 {inserted_initial} 条 initial 迁移")
+
+            # 4. repair：清理非 initial 错误记录
+            cleaned = 0
+            if action == 'repair':
                 with connection.cursor() as cursor:
                     for migration in loader.disk_migrations.values():
-                        key = (migration.app_label, migration.name)
-                        is_initial = getattr(migration, 'initial', False) or 'initial' in migration.name
-                        if is_initial and key not in applied:
-                            try:
+                        if not _is_initial(migration):
+                            key = (migration.app_label, migration.name)
+                            if key in applied:
                                 cursor.execute(
-                                    "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
-                                    [migration.app_label, migration.name, timezone.now()]
+                                    "DELETE FROM django_migrations WHERE app=%s AND name=%s",
+                                    [migration.app_label, migration.name]
                                 )
-                                inserted += cursor.rowcount
-                            except Exception:
-                                pass
+                                cleaned += cursor.rowcount
+                                applied.discard(key)
+                if cleaned:
+                    results.append(f"repair: 清理 {cleaned} 条错误标记的非 initial 迁移")
 
-                if inserted > 0:
-                    out.write(f'[补充插入 {inserted} 条 initial 迁移记录]\n')
+            # 5. 收集待执行的非 initial 迁移（按 loader 依赖顺序）
+            pending = []  # [(migration, key)]
+            seen_keys = set()
+            # loader.graph.root_nodes + 依赖拓扑排序可通过 MigrationExecutor 获得
+            from django.db.migrations.executor import MigrationExecutor
+            executor = MigrationExecutor(connection)
+            # 未应用的迁移（initial 已补齐，但 non-initial 是真未执行）
+            plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
+            for migration in plan:
+                if not _is_initial(migration):
+                    key = (migration.app_label, migration.name)
+                    if key not in applied and key not in seen_keys:
+                        seen_keys.add(key)
+                        pending.append(migration)
 
-                # repair 模式: 清理之前可能错误预插入的非 initial 迁移记录
-                # 这些记录将步骤4的 migrate 误认为已应用，导致字段变更未执行
-                cleaned = 0
-                if action == 'repair':
+            # 6. 批处理执行 pending
+            try:
+                batch_param = request.GET.get('batch', None)
+                page_size = int(request.GET.get('size', '30'))
+            except (ValueError, TypeError):
+                batch_param = None
+                page_size = 30
+
+            total_pending = len(pending)
+            total_batches = max(1, (total_pending + page_size - 1) // page_size)
+
+            # 无 batch 且总量超过一页：返回分批信息，由用户决定是否批量执行
+            if batch_param is None and total_pending > page_size:
+                # 先尝试快速执行一小批前 10 个（多为 AddField，很快），再返回进度
+                batch_idx = 0
+            elif batch_param is None:
+                batch_idx = 0
+            else:
+                try:
+                    batch_idx = max(0, int(batch_param) - 1)
+                except (ValueError, TypeError):
+                    batch_idx = 0
+
+            start = batch_idx * page_size
+            end = min(start + page_size, total_pending)
+            batch_items = pending[start:end]
+
+            executed_ok = 0
+            executed_fail = 0
+            executed_skip = 0
+            fail_details = []
+
+            for migration in batch_items:
+                key = (migration.app_label, migration.name)
+                try:
+                    with connection.schema_editor(atomic=True) as schema_editor:
+                        migration.apply(
+                            app_label=migration.app_label,
+                            schema_editor=schema_editor,
+                            from_state=executor.loader.project_state(
+                                (migration.app_label,),
+                                at_most=migration.name,
+                            ),
+                        )
+                    # 标记 applied
                     with connection.cursor() as cursor:
-                        for migration in loader.disk_migrations.values():
-                            is_initial = getattr(migration, 'initial', False) or 'initial' in migration.name
-                            if not is_initial:
-                                key = (migration.app_label, migration.name)
-                                if key in applied:
-                                    cursor.execute(
-                                        "DELETE FROM django_migrations WHERE app=%s AND name=%s",
-                                        [migration.app_label, migration.name]
-                                    )
-                                    cleaned += cursor.rowcount
-                    if cleaned > 0:
-                        out.write(f'[repair: 清理 {cleaned} 条可能错误的非 initial 迁移记录]\n')
+                        cursor.execute(
+                            "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                            [migration.app_label, migration.name, timezone.now()]
+                        )
+                    executed_ok += 1
+                except Exception as e:
+                    msg = str(e).lower()
+                    if ('duplicate' in msg and 'column' in msg) or \
+                       ('already exists' in msg and ('column' in msg or 'key' in msg or 'table' in msg)) or \
+                       '1060' in msg or '1061' in msg or '1050' in msg:
+                        # 字段/索引/表已存在，跳过并标记为 applied
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                                [migration.app_label, migration.name, timezone.now()]
+                            )
+                        executed_skip += 1
+                    else:
+                        executed_fail += 1
+                        if len(fail_details) < 10:
+                            fail_details.append({
+                                'migration': f"{migration.app_label}.{migration.name}",
+                                'error': str(e)[:200]
+                            })
 
-                # 4. 执行增量迁移（非 initial 迁移会被真正执行）
-                out.write('[执行增量迁移检查]\n')
-                call_command('migrate', '--skip-checks', '--noinput', verbosity=1, stdout=out)
+            is_last = (batch_idx + 1 >= total_batches)
+            next_batch = (batch_idx + 2) if not is_last else None
 
-                output = out.getvalue()
-                return JsonResponse({'status': 'ok', 'message': '数据库迁移成功', 'output': output[:2000]})
-            except Exception as e:
-                output = out.getvalue()
-                return JsonResponse({'status': 'error', 'message': f'迁移失败: {str(e)}', 'output': output[:1000]}, status=500)
+            message = (
+                f"本批次: 成功 {executed_ok}, 跳过 {executed_skip}, 失败 {executed_fail}; "
+                f"待执行总数 {total_pending}, 进度 {min(end, total_pending)}/{total_pending}"
+            )
+            if results:
+                message = '; '.join(results) + '; ' + message
+
+            return JsonResponse({
+                'status': 'ok' if executed_fail == 0 else 'warn',
+                'message': message,
+                'inserted_initial': inserted_initial,
+                'cleaned': cleaned if action == 'repair' else None,
+                'total_pending': total_pending,
+                'total_batches': total_batches,
+                'current_batch': (batch_idx + 1),
+                'page_size': page_size,
+                'progress': f"{min(end, total_pending)}/{total_pending}",
+                'executed_ok': executed_ok,
+                'executed_skip': executed_skip,
+                'executed_fail': executed_fail,
+                'fail_details': fail_details,
+                'next': (f'/api/migrate?action={action}&batch={next_batch}&size={page_size}') if next_batch else None,
+                'is_complete': is_last,
+            })
 
         elif action == 'createsuperuser':
             from django.contrib.auth import get_user_model
