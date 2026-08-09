@@ -203,14 +203,22 @@ def handler(event, context):
 
             for migration in batch_items:
                 try:
-                    # 用 executor.migrate 执行单个 migration
-                    # executor 内部会正确计算 from_state 和 to_state，并记录到 django_migrations
-                    key = (migration.app_label, migration.name)
-                    node = executor.loader.graph.node_map[key]
-                    single_plan = [(migration, False)]  # False = forwards
-                    # 重建 executor 以基于最新 applied 状态计算 start_state
+                    # 重建 executor 获取最新 applied 状态
                     executor = MigrationExecutor(connection)
-                    executor.migrate([node], plan=single_plan)
+                    # from_state = 当前所有已应用迁移的状态（不含本 migration）
+                    from_state = executor.loader.project_state()
+                    # 直接调用 migration.apply，Django 内部处理 schema 变更
+                    with connection.schema_editor(atomic=True) as schema_editor:
+                        migration.apply(
+                            app_label=migration.app_label,
+                            schema_editor=schema_editor,
+                            from_state=from_state,
+                        )
+                    with connection.cursor() as cursor:
+                        cursor.execute(
+                            "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                            [migration.app_label, migration.name, timezone.now()]
+                        )
                     executed_ok += 1
                 except Exception as e:
                     msg = str(e).lower()
