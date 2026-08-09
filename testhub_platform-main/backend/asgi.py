@@ -24,15 +24,20 @@ logger.info('Python 版本: %s', sys.version)
 logger.info('当前工作目录 (CWD): %s', os.getcwd())
 logger.info('__file__: %s', __file__)
 
-# 将项目根目录（backend/ 的父目录）加入 sys.path，
-# 确保 Vercel 等部署环境（CWD != 项目根目录）下 'backend' 包可被正确导入
-_PROJECT_ROOT = str(Path(__file__).resolve().parent.parent)
+# 将项目根目录（backend/ 的父目录）与 backend/ 目录加入 sys.path：
+# - 项目根：确保可导入 backend 包
+# - backend/：确保可导入 config_loader、apps（与 manage.py 行为一致）
+_BACKEND_DIR = Path(__file__).resolve().parent
+_PROJECT_ROOT = str(_BACKEND_DIR.parent)
+_BACKEND_DIR = str(_BACKEND_DIR)
 logger.info('计算得到的项目根目录: %s', _PROJECT_ROOT)
-if _PROJECT_ROOT in sys.path:
-    logger.info('项目根目录已在 sys.path 中 (位置: %d)', sys.path.index(_PROJECT_ROOT))
-else:
-    sys.path.insert(0, _PROJECT_ROOT)
-    logger.info('已将项目根目录插入 sys.path[0]')
+logger.info('计算得到的 backend 目录: %s', _BACKEND_DIR)
+for _path in (_PROJECT_ROOT, _BACKEND_DIR):
+    if _path in sys.path:
+        logger.info('路径已在 sys.path 中 (位置: %d): %s', sys.path.index(_path), _path)
+    else:
+        sys.path.insert(0, _path)
+        logger.info('已将路径插入 sys.path[0]: %s', _path)
 
 logger.info('当前 sys.path:')
 for idx, path in enumerate(sys.path):

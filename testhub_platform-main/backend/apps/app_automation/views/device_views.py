@@ -331,3 +331,102 @@ class AppDeviceViewSet(viewsets.ModelViewSet):
                 )
             except Exception:
                 pass
+
+    @action(detail=True, methods=['get'], url_path='performance')
+    def performance(self, request, pk=None):
+        """采集设备实时性能指标（CPU/内存/网络/电池/存储等）"""
+        device = self.get_object()
+        if device.status == 'offline':
+            return Response({
+                'code': 400,
+                'msg': '设备离线，无法采集性能数据',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from ..utils.device_performance import collect_device_performance
+            adb_path = get_adb_path()
+            data = collect_device_performance(adb_path, device.device_id)
+            data['device_id'] = device.device_id
+            data['name'] = device.name or device.device_id
+            data['timestamp'] = int(timezone.now().timestamp() * 1000)
+            return Response({
+                'code': 0,
+                'msg': 'ok',
+                'success': True,
+                'data': data
+            })
+        except Exception as e:
+            logger.error(f'采集设备性能失败 device={device.device_id}: {e}')
+            return Response({
+                'code': 500,
+                'msg': f'采集失败: {e}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'], url_path='app-packages')
+    def app_packages(self, request, pk=None):
+        """列出设备上可选应用包名（运行中 + 第三方安装 + 前台）"""
+        device = self.get_object()
+        if device.status == 'offline':
+            return Response({
+                'code': 400,
+                'msg': '设备离线，无法获取包列表',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from ..utils.app_performance import list_running_packages
+            from ..utils.remote_control import get_foreground_package
+            adb_path = get_adb_path()
+            packages = list_running_packages(adb_path, device.device_id)
+            foreground = get_foreground_package(adb_path, device.device_id) or ''
+            return Response({
+                'code': 0,
+                'msg': 'ok',
+                'success': True,
+                'data': {
+                    'packages': packages,
+                    'foreground': foreground,
+                }
+            })
+        except Exception as e:
+            logger.error(f'获取包列表失败 device={device.device_id}: {e}')
+            return Response({
+                'code': 500,
+                'msg': f'获取失败: {e}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'], url_path='app-performance')
+    def app_performance(self, request, pk=None):
+        """采集指定应用实时性能指标（CPU/PSS/线程/FPS/卡顿等）"""
+        device = self.get_object()
+        if device.status == 'offline':
+            return Response({
+                'code': 400,
+                'msg': '设备离线，无法采集应用性能',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        package = (request.query_params.get('package') or '').strip()
+        try:
+            from ..utils.app_performance import collect_app_performance
+            adb_path = get_adb_path()
+            data = collect_app_performance(adb_path, device.device_id, package)
+            data['device_id'] = device.device_id
+            data['name'] = device.name or device.device_id
+            data['timestamp'] = int(timezone.now().timestamp() * 1000)
+            return Response({
+                'code': 0,
+                'msg': 'ok',
+                'success': True,
+                'data': data
+            })
+        except Exception as e:
+            logger.error(f'采集应用性能失败 device={device.device_id}: {e}')
+            return Response({
+                'code': 500,
+                'msg': f'采集失败: {e}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

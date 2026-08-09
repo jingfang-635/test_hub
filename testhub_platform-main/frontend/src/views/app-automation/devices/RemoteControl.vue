@@ -1,89 +1,89 @@
 <template>
   <div class="remote-page" :class="{ 'is-fullscreen': isFullscreen }">
-    <div class="remote-workspace">
-      <!-- 左侧：实时投屏 -->
-      <section ref="mirrorPanelRef" class="mirror-panel">
-        <div class="mirror-toolbar">
-          <div class="toolbar-left">
-            <el-button size="small" :icon="ArrowLeft" @click="goBack">返回</el-button>
-            <div class="device-line">
-              <span class="device-name">{{ deviceName || deviceSerial || '远程设备' }}</span>
-              <span class="app-pkg">当前应用: {{ foregroundApp || '-' }}</span>
-            </div>
+    <div class="remote-card">
+      <!-- 顶栏：设备信息 + 结束会话 -->
+      <header class="session-header">
+        <div class="session-left">
+          <el-button text :icon="ArrowLeft" class="back-btn" @click="goBack">返回</el-button>
+          <div class="session-meta">
+            <span class="device-id">{{ deviceName || deviceSerial || '远程设备' }}</span>
+            <span class="pkg-text">当前应用：{{ foregroundApp || '-' }}</span>
+          </div>
+        </div>
+        <el-button type="danger" size="small" class="end-btn" @click="endSession">结束会话</el-button>
+      </header>
+
+      <div class="session-body">
+        <!-- 左侧投屏 -->
+        <section ref="mirrorPanelRef" class="mirror-panel">
+          <div class="mirror-toolbar">
             <span class="status-pill" :class="statusClass">
-              <i class="dot" />
-              {{ statusText }}
+              <i class="dot" />{{ statusText }}
             </span>
             <span class="session-timer">{{ sessionTimerText }}</span>
-          </div>
-          <div class="toolbar-right">
-            <el-select v-model="quality" size="small" style="width: 130px" @change="onQualityChange">
+            <el-select v-model="quality" size="small" class="quality-select" @change="onQualityChange">
               <el-option label="流畅" value="low" />
               <el-option label="均衡 (推荐)" value="balanced" />
               <el-option label="高清" value="high" />
             </el-select>
-            <el-select v-model="zoom" size="small" style="width: 90px">
-              <el-option label="75%" :value="75" />
-              <el-option label="100%" :value="100" />
-              <el-option label="125%" :value="125" />
-              <el-option label="150%" :value="150" />
-            </el-select>
-            <el-button size="small" :icon="Refresh" :loading="connecting" @click="reconnect" />
-            <el-button size="small" @click="toggleFullscreen">全屏</el-button>
-            <el-button size="small" type="danger" @click="endSession">结束会话</el-button>
-          </div>
-        </div>
-
-        <div class="mirror-body">
-          <div class="phone-frame" :style="{ transform: `scale(${zoom / 100})` }">
-            <div
-              ref="screenRef"
-              class="phone-screen"
-              @pointerdown="onPointerDown"
-              @pointermove="onPointerMove"
-              @pointerup="onPointerUp"
-              @pointercancel="onPointerUp"
-              @pointerleave="onPointerUp"
-            >
-              <img v-if="liveImage" :src="liveImage" class="screen-img" draggable="false" alt="live" />
-              <div v-else class="screen-placeholder">
-                <el-icon class="is-loading" v-if="connecting || status === 'connected'"><Loading /></el-icon>
-                <span>{{ placeholderText }}</span>
-              </div>
-              <div v-if="touchHint.visible" class="touch-hint" :style="touchHintStyle" />
+            <div class="zoom-group">
+              <button type="button" class="zoom-btn" @click="zoomOut">−</button>
+              <span class="zoom-text">{{ zoom }}%</span>
+              <button type="button" class="zoom-btn" @click="zoomIn">+</button>
             </div>
-            <div class="soft-keys">
-              <button type="button" title="返回" @click="sendKey('BACK')">
-                <el-icon><Back /></el-icon>
-              </button>
-              <button type="button" title="主页" @click="sendKey('HOME')">
-                <el-icon><HomeFilled /></el-icon>
-              </button>
-              <button type="button" title="多任务" @click="sendKey('APP_SWITCH')">
-                <el-icon><Menu /></el-icon>
-              </button>
+            <el-button size="small" :icon="FullScreen" circle title="全屏" @click="toggleFullscreen" />
+          </div>
+
+          <div class="mirror-body">
+            <div class="phone-stage" :style="{ '--zoom': zoom / 100 }">
+              <div
+                ref="screenRef"
+                class="phone-screen"
+                @pointerdown="onPointerDown"
+                @pointermove="onPointerMove"
+                @pointerup="onPointerUp"
+                @pointercancel="onPointerUp"
+                @pointerleave="onPointerUp"
+              >
+                <img v-if="liveImage" :src="liveImage" class="screen-img" draggable="false" alt="live" />
+                <div v-else class="screen-placeholder">
+                  <el-icon class="is-loading" v-if="connecting || status === 'connected'"><Loading /></el-icon>
+                  <span>{{ placeholderText }}</span>
+                </div>
+                <div v-if="touchHint.visible" class="touch-hint" :style="touchHintStyle" />
+              </div>
+              <div class="soft-keys">
+                <button type="button" title="返回" @click="sendKey('BACK')">
+                  <span class="nav-icon nav-back" />
+                </button>
+                <button type="button" title="主页" @click="sendKey('HOME')">
+                  <span class="nav-icon nav-home" />
+                </button>
+                <button type="button" title="多任务" @click="sendKey('APP_SWITCH')">
+                  <span class="nav-icon nav-recent" />
+                </button>
+              </div>
             </div>
           </div>
-        </div>
-      </section>
+        </section>
 
-      <!-- 右侧：功能面板 -->
-      <section class="side-panel">
-        <el-tabs v-model="activeTab" class="side-tabs">
-          <el-tab-pane label="元素创建" name="element">
-            <div class="element-create">
-              <div class="element-toolbar">
-                <el-button size="small" @click="clearFrozenFrame">取消当前画面</el-button>
-                <el-button size="small" type="primary" :loading="capturing" @click="captureFromLive">设备截图</el-button>
-                <el-button size="small" @click="resetElementForm">重置</el-button>
-              </div>
+        <!-- 右侧面板 -->
+        <section class="side-panel">
+          <el-tabs v-model="activeTab" stretch class="side-tabs">
+            <el-tab-pane label="元素创建" name="element">
+              <div class="element-create">
+                <!-- Tab 栏与画面之间的操作按钮 -->
+                <div class="element-action-bar">
+                  <el-button size="small" type="primary" :loading="capturing" @click="captureFromLive">取当前画面</el-button>
+                  <el-button size="small" :loading="capturing" @click="captureFromLive">设备截图</el-button>
+                  <el-button size="small" @click="handleResetAll">重置</el-button>
+                </div>
 
-              <div class="element-body">
-                <!-- 预览裁剪区 -->
-                <div class="preview-col">
-                  <div class="preview-tip">拖拽框选目标图片区域，保存时只截取选中部分</div>
-                  <div v-if="frozenImage" class="preview-scroll">
+                <div class="element-body">
+                  <!-- 左侧：截图预览 -->
+                  <div class="preview-col">
                     <div
+                      v-if="frozenImage"
                       ref="imageWrapper"
                       class="image-wrapper"
                       @mousedown="handleMouseDown"
@@ -115,127 +115,133 @@
                         />
                       </div>
                     </div>
+                    <div v-else class="preview-empty">
+                      <div class="preview-empty-phone">
+                        <span>点击「取当前画面」</span>
+                        <span class="sub">冻结画面后在此框选元素</span>
+                      </div>
+                    </div>
                   </div>
-                  <div v-else class="preview-empty">
-                    <el-empty description="点击「设备截图」冻结当前远控画面后框选" :image-size="80" />
-                  </div>
-                </div>
 
-                <!-- 配置表单 -->
-                <div class="form-col">
-                  <div class="source-tag">来源: 远控当前画面</div>
-                  <el-form :model="formData" label-position="top" size="small" class="element-form">
-                    <el-form-item label="设备">
-                      <el-input :model-value="deviceSerial || '-'" disabled />
-                    </el-form-item>
-                    <el-form-item label="元素名称" required>
-                      <el-input v-model="formData.name" placeholder="例如：登录按钮" />
-                    </el-form-item>
-                    <el-form-item label="所属项目">
-                      <el-select v-model="formData.project" placeholder="请选择项目" clearable filterable style="width: 100%">
-                        <el-option v-for="p in projectList" :key="p.id" :label="p.name" :value="p.id" />
-                      </el-select>
-                    </el-form-item>
-                    <el-form-item label="元素类型" required>
-                      <el-radio-group v-model="formData.element_type">
-                        <el-radio value="image">图片元素</el-radio>
-                        <el-radio value="pos">坐标元素</el-radio>
-                        <el-radio value="region">区域元素</el-radio>
-                      </el-radio-group>
-                    </el-form-item>
-                    <el-form-item label="标签">
-                      <el-select
-                        v-model="formData.tags"
-                        multiple
-                        filterable
-                        allow-create
-                        default-first-option
-                        placeholder="输入标签后回车"
-                        style="width: 100%"
-                      />
-                    </el-form-item>
-
-                    <template v-if="formData.element_type === 'image'">
-                      <div class="section-title">图片配置</div>
-                      <el-form-item label="图片分类" required>
-                        <div class="category-row">
-                          <el-select v-model="formData.image_category" filterable style="flex: 1">
-                            <el-option v-for="cat in imageCategories" :key="cat" :label="cat" :value="cat" />
-                          </el-select>
-                          <el-button type="primary" @click="showCreateCategoryDialog">新建分类</el-button>
-                        </div>
+                  <div class="form-col">
+                    <div class="element-tip">拖拽框选目标图片区域，保存时只截取选中部分</div>
+                    <div class="source-tag">来源：远控当前画面</div>
+                    <el-form :model="formData" label-position="top" size="default" class="element-form">
+                      <el-form-item label="设备">
+                        <el-input :model-value="deviceSerial || '-'" disabled />
                       </el-form-item>
-                      <el-form-item label="模板文件名" required>
-                        <el-input v-model="templateFileName" placeholder="例如：login_btn.png" />
+                      <el-form-item label="元素名称" required>
+                        <el-input v-model="formData.name" placeholder="例如：登录按钮" />
                       </el-form-item>
-                      <el-form-item label="截取区域">
-                        <div class="hint-text">{{ selectionHint }}</div>
+                      <el-form-item label="所属项目">
+                        <el-select v-model="formData.project" placeholder="请选择项目" clearable filterable style="width: 100%">
+                          <el-option v-for="p in projectList" :key="p.id" :label="p.name" :value="p.id" />
+                        </el-select>
                       </el-form-item>
-                      <el-form-item label="保存路径">
-                        <el-input :model-value="imageSavePath" readonly />
+                      <el-form-item label="元素类型" required>
+                        <el-radio-group v-model="formData.element_type">
+                          <el-radio value="image">图片元素</el-radio>
+                          <el-radio value="pos">坐标元素</el-radio>
+                          <el-radio value="region">区域元素</el-radio>
+                        </el-radio-group>
                       </el-form-item>
-                      <el-form-item label="匹配阈值">
-                        <el-slider
-                          v-model="formData.config.image_threshold"
-                          :min="0.5"
-                          :max="1"
-                          :step="0.05"
-                          show-input
-                          :show-input-controls="true"
+                      <el-form-item label="标签">
+                        <el-select
+                          v-model="formData.tags"
+                          multiple
+                          filterable
+                          allow-create
+                          default-first-option
+                          placeholder="输入标签后回车"
+                          style="width: 100%"
                         />
                       </el-form-item>
-                      <el-form-item label="颜色模式">
-                        <el-switch
-                          v-model="formData.config.rgb"
-                          active-text="RGB 彩色"
-                          inactive-text="灰度"
-                        />
-                      </el-form-item>
-                    </template>
 
-                    <template v-else-if="formData.element_type === 'pos'">
-                      <el-form-item label="坐标 Pos">
-                        <el-input :model-value="posValue" readonly placeholder="在左侧画面单击选择坐标" />
-                      </el-form-item>
-                    </template>
+                      <template v-if="formData.element_type === 'image'">
+                        <div class="section-title">图片配置</div>
+                        <el-form-item label="图片分类" required>
+                          <div class="category-row">
+                            <el-select v-model="formData.image_category" filterable style="flex: 1">
+                              <el-option v-for="cat in imageCategories" :key="cat" :label="cat" :value="cat" />
+                            </el-select>
+                            <el-button type="primary" plain @click="showCreateCategoryDialog">新建分类</el-button>
+                          </div>
+                        </el-form-item>
+                        <el-form-item label="模板文件名" required>
+                          <el-input v-model="templateFileName" placeholder="例如：login_btn.png" />
+                        </el-form-item>
+                        <el-form-item label="截取区域">
+                          <div class="hint-text">{{ selectionHint }}</div>
+                        </el-form-item>
+                        <el-form-item label="保存路径">
+                          <el-input :model-value="imageSavePath" readonly />
+                        </el-form-item>
+                        <el-form-item label="匹配阈值">
+                          <el-slider
+                            v-model="formData.config.image_threshold"
+                            :min="0.5"
+                            :max="1"
+                            :step="0.05"
+                            show-input
+                            :show-input-controls="true"
+                          />
+                        </el-form-item>
+                        <el-form-item label="颜色模式">
+                          <el-radio-group v-model="colorMode">
+                            <el-radio value="gray">灰度</el-radio>
+                            <el-radio value="rgb">RGB 彩色</el-radio>
+                          </el-radio-group>
+                        </el-form-item>
+                      </template>
 
-                    <template v-else>
-                      <el-form-item label="区域 Region">
-                        <el-input :model-value="regionValue" readonly placeholder="在左侧画面拖拽框选区域" />
-                      </el-form-item>
-                    </template>
-                  </el-form>
+                      <template v-else-if="formData.element_type === 'pos'">
+                        <el-form-item label="坐标 Pos">
+                          <el-input :model-value="posValue" readonly placeholder="在左侧画面单击选择坐标" />
+                        </el-form-item>
+                      </template>
 
-                  <div class="form-actions">
-                    <el-button type="primary" :loading="submitting" :disabled="!canSave" @click="saveElement(false)">
-                      保存元素
-                    </el-button>
-                    <el-button type="primary" plain :loading="submitting" :disabled="!canSave" @click="saveElement(true)">
-                      保存后继续
-                    </el-button>
+                      <template v-else>
+                        <el-form-item label="区域 Region">
+                          <el-input :model-value="regionValue" readonly placeholder="在左侧画面拖拽框选区域" />
+                        </el-form-item>
+                      </template>
+                    </el-form>
+
+                    <div class="form-actions">
+                      <el-button type="primary" :loading="submitting" :disabled="!canSave" @click="saveElement(false)">
+                        保存元素
+                      </el-button>
+                      <el-button :loading="submitting" :disabled="!canSave" @click="saveElement(true)">
+                        保存后继续
+                      </el-button>
+                    </div>
                   </div>
                 </div>
               </div>
-            </div>
-          </el-tab-pane>
+            </el-tab-pane>
 
-          <el-tab-pane label="APP管理" name="app">
-            <div class="placeholder-pane">APP 管理功能将在后续版本提供</div>
-          </el-tab-pane>
-          <el-tab-pane label="设备性能" name="device-perf">
-            <div class="placeholder-pane">设备性能监控将在后续版本提供</div>
-          </el-tab-pane>
-          <el-tab-pane label="APP性能" name="app-perf">
-            <div class="placeholder-pane">APP 性能监控将在后续版本提供</div>
-          </el-tab-pane>
-          <el-tab-pane label="调试日志" name="logs">
-            <div class="debug-logs">
-              <div v-for="(line, idx) in debugLogs" :key="idx" class="log-line">{{ line }}</div>
-              <div v-if="!debugLogs.length" class="placeholder-pane">暂无日志</div>
-            </div>
-          </el-tab-pane>
-        </el-tabs>
-      </section>
+            <el-tab-pane label="应用管理" name="app">
+              <div class="placeholder-pane">应用管理功能将在后续版本提供</div>
+            </el-tab-pane>
+            <el-tab-pane label="设备性能" name="device-perf">
+              <DevicePerformancePanel :device-id="devicePk" :active="activeTab === 'device-perf'" />
+            </el-tab-pane>
+            <el-tab-pane label="应用性能" name="app-perf">
+              <AppPerformancePanel
+                :device-id="devicePk"
+                :active="activeTab === 'app-perf'"
+                :foreground-package="foregroundApp"
+              />
+            </el-tab-pane>
+            <el-tab-pane label="调试日志" name="logs">
+              <div class="debug-logs">
+                <div v-for="(line, idx) in debugLogs" :key="idx" class="log-line">{{ line }}</div>
+                <div v-if="!debugLogs.length" class="placeholder-pane">暂无日志</div>
+              </div>
+            </el-tab-pane>
+          </el-tabs>
+        </section>
+      </div>
     </div>
 
     <el-dialog v-model="createCategoryVisible" title="创建图片分类" width="400px">
@@ -254,11 +260,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   ArrowLeft,
-  Back,
-  HomeFilled,
-  Loading,
-  Menu,
-  Refresh
+  FullScreen,
+  Loading
 } from '@element-plus/icons-vue'
 import {
   getAppProjects,
@@ -269,6 +272,8 @@ import {
   captureDeviceScreenshot,
   getDeviceList
 } from '@/api/app-automation'
+import DevicePerformancePanel from './components/DevicePerformancePanel.vue'
+import AppPerformancePanel from './components/AppPerformancePanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -444,6 +449,19 @@ const canSave = computed(() => {
   return false
 })
 
+const colorMode = computed({
+  get: () => (formData.config.rgb ? 'rgb' : 'gray'),
+  set: (val) => { formData.config.rgb = val === 'rgb' }
+})
+
+function zoomIn() {
+  zoom.value = Math.min(150, zoom.value + 25)
+}
+
+function zoomOut() {
+  zoom.value = Math.max(75, zoom.value - 25)
+}
+
 function pushLog(msg) {
   const ts = new Date().toLocaleTimeString()
   debugLogs.value.unshift(`[${ts}] ${msg}`)
@@ -534,16 +552,22 @@ function connectWs() {
 
   socket.onerror = () => {
     connecting.value = false
-    status.value = 'error'
-    pushLog('WebSocket 连接失败，请确认后端已通过 Uvicorn 启动')
-    ElMessage.error('WebSocket 连接失败，请确认后端已通过 Uvicorn 启动')
+    // 具体原因以 onclose / status 消息为准，避免误导
+    pushLog('WebSocket 发生错误')
   }
 
-  socket.onclose = () => {
+  socket.onclose = (event) => {
     connecting.value = false
-    if (status.value !== 'error') status.value = 'closed'
     ws.value = null
-    pushLog('远程连接已关闭')
+    pushLog(`远程连接已关闭 (code=${event.code})`)
+    if (status.value === 'connecting') {
+      status.value = 'error'
+      const tip = 'WebSocket 连接失败。请用 start_backend.py / Uvicorn 启动后端（不要用 runserver）'
+      ElMessage.error(tip)
+      pushLog(tip)
+    } else if (status.value !== 'error' && status.value !== 'closed') {
+      status.value = 'closed'
+    }
   }
 }
 
@@ -721,6 +745,11 @@ function resetElementForm() {
   })
   templateFileName.value = ''
   clearSelection()
+}
+
+function handleResetAll() {
+  resetElementForm()
+  clearFrozenFrame()
 }
 
 function handleImageLoad() {
@@ -1040,77 +1069,105 @@ onBeforeUnmount(() => {
 
 <style scoped>
 .remote-page {
-  height: calc(100vh - 100px);
-  min-height: 640px;
-  padding: 12px 14px 16px;
+  height: calc(100vh - 96px);
+  min-height: 680px;
+  padding: 12px 16px 16px;
   box-sizing: border-box;
-  background: #f5f7fb;
+  background: #f0f2f5;
 }
 
-.remote-workspace {
-  display: flex;
-  gap: 12px;
+.remote-card {
   height: 100%;
+  background: #fff;
+  border: 1px solid #e8eaef;
+  border-radius: 12px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+
+.session-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 12px 16px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.session-left {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.back-btn {
+  color: #4b5563;
+  padding: 4px 8px;
+}
+
+.session-meta {
+  display: flex;
+  align-items: baseline;
+  gap: 12px;
+  min-width: 0;
+}
+
+.device-id {
+  font-size: 16px;
+  font-weight: 700;
+  color: #111827;
+}
+
+.pkg-text {
+  font-size: 13px;
+  color: #6b7280;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.end-btn {
+  flex-shrink: 0;
+}
+
+.session-body {
+  flex: 1;
   min-height: 0;
+  display: flex;
+  gap: 0;
 }
 
 .mirror-panel {
-  width: 360px;
-  flex-shrink: 0;
+  width: 38%;
+  min-width: 340px;
+  max-width: 460px;
   display: flex;
   flex-direction: column;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  overflow: hidden;
+  border-right: 1px solid #eef0f4;
+  background: #fafbfc;
 }
 
 .mirror-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #eef0f4;
-  background: #fafbfc;
-}
-
-.toolbar-left,
-.toolbar-right {
-  display: flex;
   align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-}
-
-.device-line {
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-  line-height: 1.3;
-}
-
-.device-name {
-  font-weight: 600;
-  color: #1f2937;
-  font-size: 14px;
-}
-
-.app-pkg {
-  font-size: 12px;
-  color: #6b7280;
-  max-width: 180px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  padding: 10px 12px;
+  border-bottom: 1px solid #eef0f4;
+  background: #fff;
 }
 
 .status-pill {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  padding: 2px 8px;
+  padding: 3px 10px;
   border-radius: 999px;
   font-size: 12px;
+  font-weight: 500;
   background: #eef2ff;
   color: #4338ca;
 }
@@ -1139,8 +1196,47 @@ onBeforeUnmount(() => {
 
 .session-timer {
   font-variant-numeric: tabular-nums;
+  font-size: 13px;
+  color: #4b5563;
+  min-width: 64px;
+}
+
+.quality-select {
+  width: 120px;
+}
+
+.zoom-group {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid #e5e7eb;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.zoom-btn {
+  width: 28px;
+  height: 28px;
+  border: none;
+  background: #fff;
+  color: #374151;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.zoom-btn:hover {
+  background: #f3f4f6;
+}
+
+.zoom-text {
+  min-width: 48px;
+  text-align: center;
   font-size: 12px;
-  color: #6b7280;
+  color: #374151;
+  border-left: 1px solid #e5e7eb;
+  border-right: 1px solid #e5e7eb;
+  padding: 0 4px;
 }
 
 .mirror-body {
@@ -1150,35 +1246,50 @@ onBeforeUnmount(() => {
   align-items: center;
   justify-content: center;
   padding: 12px;
-  background: #111827;
-  overflow: auto;
+  overflow: hidden; /* 去掉滚动条，画面完整落在可视区内 */
+  container-type: size;
+  background: linear-gradient(180deg, #f7f8fa 0%, #eef1f6 100%);
 }
 
-.phone-frame {
-  width: 260px;
+.phone-stage {
+  /* 按容器宽高自适应：完整等比例塞进左侧投屏区（含底部导航键），不出现滚动条 */
+  --keys: 52px;
+  --ar: 0.4615; /* 9 / 19.5 */
+  --zoom: 1;
+  --fit-w: min(100cqw, calc((100cqh - var(--keys)) * var(--ar)));
+  --fit-h: calc(var(--fit-w) / var(--ar) + var(--keys));
+  width: var(--fit-w);
+  height: var(--fit-h);
+  display: flex;
+  flex-direction: column;
+  transform: scale(var(--zoom));
   transform-origin: center center;
   transition: transform 0.15s ease;
 }
 
 .phone-screen {
   position: relative;
+  flex: 1 1 auto;
+  min-height: 0;
   width: 100%;
-  aspect-ratio: 9 / 19.5;
-  background: #000;
-  border-radius: 12px;
+  background: #0b1220;
+  border-radius: 16px;
   overflow: hidden;
   touch-action: none;
   user-select: none;
   cursor: crosshair;
-  border: 1px solid #374151;
+  box-shadow: 0 12px 28px rgba(15, 23, 42, 0.18);
+  border: 1px solid #d1d5db;
 }
 
 .screen-img {
   width: 100%;
   height: 100%;
-  object-fit: contain;
+  object-fit: contain; /* 等比例完整展示，不裁切 */
+  object-position: center;
   display: block;
   pointer-events: none;
+  background: #000;
 }
 
 .screen-placeholder {
@@ -1205,37 +1316,65 @@ onBeforeUnmount(() => {
 }
 
 .soft-keys {
+  flex-shrink: 0;
+  margin-top: 8px;
+  height: 44px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #e5e7eb;
   display: flex;
+  align-items: center;
   justify-content: space-around;
-  margin-top: 10px;
 }
 
 .soft-keys button {
-  width: 42px;
-  height: 42px;
-  border-radius: 50%;
-  border: 1px solid #4b5563;
-  background: #1f2937;
-  color: #e5e7eb;
+  width: 48px;
+  height: 32px;
+  border: none;
+  background: transparent;
   cursor: pointer;
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  border-radius: 6px;
 }
 
 .soft-keys button:hover {
-  background: #374151;
+  background: #f3f4f6;
+}
+
+.nav-icon {
+  display: block;
+  border: 2px solid #6b7280;
+}
+
+.nav-back {
+  width: 10px;
+  height: 10px;
+  border-right: none;
+  border-top: none;
+  transform: rotate(45deg);
+  margin-left: 4px;
+}
+
+.nav-home {
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+}
+
+.nav-recent {
+  width: 12px;
+  height: 12px;
+  border-radius: 2px;
 }
 
 .side-panel {
   flex: 1;
   min-width: 0;
-  background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: #fff;
 }
 
 .side-tabs {
@@ -1246,14 +1385,43 @@ onBeforeUnmount(() => {
 
 .side-tabs :deep(.el-tabs__header) {
   margin: 0;
-  padding: 0 12px;
-  background: #fafbfc;
+  padding: 0;
+  background: #fff;
+}
+
+.side-tabs :deep(.el-tabs__nav-wrap) {
+  width: 100%;
+}
+
+.side-tabs :deep(.el-tabs__nav-scroll) {
+  width: 100%;
+}
+
+.side-tabs :deep(.el-tabs__nav) {
+  width: 100%;
+  display: flex;
+  float: none;
+}
+
+.side-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background: #eef0f4;
+}
+
+.side-tabs :deep(.el-tabs__item) {
+  flex: 1;
+  height: 46px;
+  font-size: 14px;
+  justify-content: center;
+  padding: 0 8px;
+  text-align: center;
 }
 
 .side-tabs :deep(.el-tabs__content) {
   flex: 1;
   min-height: 0;
   overflow: hidden;
+  padding: 0;
 }
 
 .side-tabs :deep(.el-tab-pane) {
@@ -1267,70 +1435,97 @@ onBeforeUnmount(() => {
   min-height: 0;
 }
 
-.element-toolbar {
+.element-action-bar {
   display: flex;
-  gap: 8px;
-  padding: 10px 12px;
+  align-items: center;
+  gap: 10px;
+  padding: 10px 16px;
   border-bottom: 1px solid #eef0f4;
+  background: #fafbfc;
 }
 
 .element-body {
   flex: 1;
   min-height: 0;
   display: flex;
-  gap: 12px;
-  padding: 12px;
+  gap: 16px;
+  padding: 12px 16px 12px;
   overflow: hidden;
 }
 
+/* 左侧预览窗：灰底圆角边框，无滚动条，画面等比例完整展示 */
 .preview-col {
   width: 42%;
   min-width: 240px;
-  display: flex;
-  flex-direction: column;
+  max-width: 420px;
+  display: grid;
+  place-items: center;
   border: 1px solid #e5e7eb;
-  border-radius: 8px;
-  background: #f8fafc;
+  border-radius: 10px;
+  background: #f3f4f6;
   overflow: hidden;
-}
-
-.preview-tip {
-  padding: 8px 10px;
-  font-size: 12px;
-  color: #6b7280;
-  border-bottom: 1px solid #eef0f4;
-  background: #fff;
-}
-
-.preview-scroll {
-  flex: 1;
-  min-height: 0;
-  overflow: auto;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 8px;
+  padding: 12px;
+  container-type: size;
 }
 
 .image-wrapper {
   position: relative;
-  display: inline-block;
   cursor: crosshair;
+  width: fit-content;
+  height: fit-content;
   max-width: 100%;
+  max-height: 100%;
+  line-height: 0;
 }
 
 .capture-image {
-  max-width: 100%;
-  height: auto;
   display: block;
+  max-width: 100cqw;
+  max-height: 100cqh;
+  width: auto;
+  height: auto;
+  object-fit: contain;
   user-select: none;
+  border-radius: 14px;
+  background: #111827;
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.12);
 }
 
 .preview-empty {
-  flex: 1;
+  width: 100%;
+  height: 100%;
   display: flex;
   align-items: center;
   justify-content: center;
+}
+
+.preview-empty-phone {
+  width: min(220px, 70%);
+  aspect-ratio: 9 / 19.5;
+  border-radius: 14px;
+  border: 1px dashed #c0c4cc;
+  background: #fff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  color: #909399;
+  font-size: 13px;
+  text-align: center;
+  padding: 12px;
+}
+
+.preview-empty-phone .sub {
+  font-size: 12px;
+  color: #c0c4cc;
+}
+
+.element-tip {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1.5;
+  margin-bottom: 10px;
 }
 
 .selection-box {
@@ -1396,7 +1591,7 @@ onBeforeUnmount(() => {
 
 .source-tag {
   display: inline-block;
-  margin-bottom: 8px;
+  margin-bottom: 10px;
   padding: 2px 8px;
   border-radius: 4px;
   background: #eff6ff;
@@ -1405,10 +1600,19 @@ onBeforeUnmount(() => {
 }
 
 .section-title {
-  margin: 4px 0 10px;
+  margin: 2px 0 10px;
   font-weight: 600;
-  color: #374151;
+  color: #303133;
   font-size: 13px;
+}
+
+.element-form :deep(.el-form-item) {
+  margin-bottom: 14px;
+}
+
+.element-form :deep(.el-form-item__label) {
+  color: #606266;
+  font-weight: 500;
 }
 
 .category-row {
@@ -1418,7 +1622,7 @@ onBeforeUnmount(() => {
 }
 
 .hint-text {
-  color: #6b7280;
+  color: #909399;
   font-size: 12px;
   line-height: 1.5;
 }
@@ -1426,10 +1630,10 @@ onBeforeUnmount(() => {
 .form-actions {
   display: flex;
   gap: 10px;
-  padding: 12px 0 4px;
+  padding: 14px 0 8px;
   position: sticky;
   bottom: 0;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.2), #fff 35%);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0), #fff 28%);
 }
 
 .placeholder-pane {
@@ -1445,7 +1649,7 @@ onBeforeUnmount(() => {
 .debug-logs {
   height: 100%;
   overflow: auto;
-  padding: 12px;
+  padding: 12px 16px;
   font-family: Consolas, Monaco, monospace;
   font-size: 12px;
   color: #374151;
@@ -1459,18 +1663,22 @@ onBeforeUnmount(() => {
 
 .remote-page.is-fullscreen .mirror-panel {
   width: 100%;
-  height: 100%;
-  border-radius: 0;
+  max-width: none;
+  border-right: none;
 }
 
 @media (max-width: 1200px) {
-  .remote-workspace {
+  .session-body {
     flex-direction: column;
+    overflow: auto;
   }
 
   .mirror-panel {
     width: 100%;
-    height: 420px;
+    max-width: none;
+    min-height: 480px;
+    border-right: none;
+    border-bottom: 1px solid #eef0f4;
   }
 
   .element-body {
@@ -1480,7 +1688,7 @@ onBeforeUnmount(() => {
 
   .preview-col {
     width: 100%;
-    min-height: 320px;
+    min-height: 300px;
   }
 }
 </style>

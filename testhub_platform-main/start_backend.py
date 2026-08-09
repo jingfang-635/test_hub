@@ -47,9 +47,12 @@ def main() -> None:
 
     port = args.port or _read_backend_port(8000)
 
-    # 保证可导入 backend.*
-    if str(ROOT) not in sys.path:
-        sys.path.insert(0, str(ROOT))
+    # 保证可导入 backend.* 与 backend/config_loader、apps
+    backend_dir = ROOT / 'backend'
+    for path in (ROOT, backend_dir):
+        path_str = str(path)
+        if path_str not in sys.path:
+            sys.path.insert(0, path_str)
     os.chdir(ROOT)
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 

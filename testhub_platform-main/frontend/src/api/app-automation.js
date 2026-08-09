@@ -85,6 +85,40 @@ export function captureDeviceScreenshot(id) {
 }
 
 /**
+ * 获取设备实时性能指标
+ */
+export function getDevicePerformance(id) {
+  return request({
+    url: `/app-automation/devices/${id}/performance/`,
+    method: 'get',
+    timeout: 20000
+  })
+}
+
+/**
+ * 获取设备可选应用包名列表
+ */
+export function getAppPackages(id) {
+  return request({
+    url: `/app-automation/devices/${id}/app-packages/`,
+    method: 'get',
+    timeout: 20000
+  })
+}
+
+/**
+ * 获取指定应用实时性能指标
+ */
+export function getAppPerformance(id, params = {}) {
+  return request({
+    url: `/app-automation/devices/${id}/app-performance/`,
+    method: 'get',
+    params,
+    timeout: 20000
+  })
+}
+
+/**
  * 删除设备
  */
 export function deleteDevice(id) {

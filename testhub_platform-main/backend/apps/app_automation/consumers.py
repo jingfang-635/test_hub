@@ -60,13 +60,19 @@ class AppDeviceRemoteConsumer(AsyncJsonWebsocketConsumer):
         self.device_name = ''
         self.jpeg_quality = self.QUALITY_MAP['balanced']
 
+        await self.accept()
+
         device = await self._load_device()
         if not device:
+            await self.send_json({
+                'type': 'status',
+                'status': 'error',
+                'message': f'设备不存在 (id={self.device_pk})',
+            })
             await self.close(code=4404)
             return
 
         if device['status'] == 'offline':
-            await self.accept()
             await self.send_json({
                 'type': 'status',
                 'status': 'error',
@@ -79,7 +85,6 @@ class AppDeviceRemoteConsumer(AsyncJsonWebsocketConsumer):
         self.device_name = device['name'] or device['device_id']
         self.adb_path = await self._get_adb_path()
 
-        await self.accept()
         await self.send_json({
             'type': 'device_info',
             'id': device['id'],

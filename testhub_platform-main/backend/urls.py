@@ -98,6 +98,102 @@ def _migrate_view(request):
                 'unapplied_non_initial_migrations': sorted(unapplied_non_initial),
             })
 
+        # ================== fix：直接用 schema_editor 添加缺失列（绕过迁移系统） ==================
+        elif action == 'fix':
+            # 1. 诊断缺失列
+            real_tables = {}
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW TABLES")
+                table_names = [row[0] for row in cursor.fetchall()]
+                for t in table_names:
+                    try:
+                        cursor.execute(f"SHOW COLUMNS FROM `{t}`")
+                        real_tables[t] = [row[0] for row in cursor.fetchall()]
+                    except Exception:
+                        real_tables[t] = []
+
+            # 2. 找出缺失列并直接添加
+            added = 0
+            skipped = 0
+            failed = 0
+            fail_details = []
+            applied_migrations = set()
+            all_missing = {}
+
+            for model in apps.get_models():
+                db_table = model._meta.db_table
+                if db_table not in real_tables:
+                    continue  # 表不存在，skip（init 负责建表）
+
+                real_cols = set(real_tables[db_table])
+                missing_fields = []
+
+                for field in model._meta.concrete_fields:
+                    if field.column and field.column not in real_cols:
+                        missing_fields.append(field)
+
+                if not missing_fields:
+                    continue
+
+                all_missing[db_table] = [f.column for f in missing_fields]
+
+                # 用 schema_editor 逐个添加缺失字段
+                for field in missing_fields:
+                    try:
+                        with connection.schema_editor(atomic=True) as schema_editor:
+                            schema_editor.add_field(model, field)
+                        added += 1
+                    except Exception as e:
+                        msg = str(e).lower()
+                        if 'duplicate' in msg or 'already exists' in msg or '1060' in msg:
+                            skipped += 1
+                        else:
+                            failed += 1
+                            if len(fail_details) < 10:
+                                fail_details.append({
+                                    'table': db_table, 'column': field.column, 'error': str(e)[:200]
+                                })
+
+                # 3. 标记对应的非 initial 迁移为已应用
+                app_label = model._meta.app_label
+                for mig_name, migration in loader.disk_migrations.items():
+                    if migration.app_label != app_label:
+                        continue
+                    if _is_initial(migration):
+                        continue
+                    for operation in migration.operations:
+                        op_name = getattr(operation, 'name', None)
+                        if op_name in [f.name for f in missing_fields]:
+                            try:
+                                with connection.cursor() as cursor:
+                                    cursor.execute(
+                                        "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
+                                        [app_label, migration.name, timezone.now()]
+                                    )
+                                applied_migrations.add(migration.name)
+                            except Exception:
+                                pass
+                            break
+
+            if not all_missing:
+                return JsonResponse({'status': 'ok', 'message': '所有列已同步，无需修复'})
+
+            msg = f"添加 {added}, 跳过 {skipped}, 失败 {failed}"
+            if applied_migrations:
+                msg += f"; 标记迁移: {', '.join(sorted(applied_migrations))}"
+
+            return JsonResponse({
+                'status': 'ok' if failed == 0 else 'warn',
+                'message': msg,
+                'added': added,
+                'skipped': skipped,
+                'failed': failed,
+                'fail_details': fail_details,
+                'total_missing_columns': sum(len(v) for v in all_missing.values()),
+                'missing_columns': all_missing,
+                'applied_migrations': sorted(applied_migrations),
+            })
+
         # ================== migrate / repair：细粒度逐条执行，支持 batch ==================
         elif action in ('migrate', 'repair'):
             results = []

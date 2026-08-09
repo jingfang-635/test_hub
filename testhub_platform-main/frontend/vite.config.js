@@ -67,11 +67,14 @@ export default defineConfig({
         secure: false,
       },
       '^/ws/': {
-        target: 'ws://127.0.0.1:8000',
+        target: 'http://127.0.0.1:8000',
         ws: true,
         changeOrigin: true,
+        secure: false,
         configure: (proxy) => {
-          proxy.on('error', () => {})
+          proxy.on('error', (err) => {
+            console.warn('[vite ws proxy]', err?.message || err)
+          })
           proxy.on('proxyReqWs', (proxyReq, req, socket) => {
             socket.on('error', () => {})
           })
