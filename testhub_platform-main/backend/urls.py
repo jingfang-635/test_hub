@@ -369,8 +369,8 @@ def _migrate_view(request):
                     # 直接调用 migration.apply，Django 内部处理 schema 变更
                     with connection.schema_editor(atomic=True) as schema_editor:
                         migration.apply(
+                            from_state,
                             schema_editor=schema_editor,
-                            from_state=from_state,
                         )
                     # executor 会自动记录到 django_migrations（通过 apply 内部的 record_applied）
                     # 但为了保险，手动也标记一下
