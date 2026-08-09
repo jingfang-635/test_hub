@@ -185,9 +185,27 @@ def _migrate_view(request):
                                             pass  # 索引已存在或失败不影响列添加
                                 else:
                                     # 非 FK 字段但带 UNIQUE 的，先加列再加索引
+                                    # 根据字段类型推断正确的列类型
+                                    from django.db.models import CharField, TextField, IntegerField, BigIntegerField, BooleanField, DateTimeField, UUIDField
+                                    if isinstance(field, (CharField,)):
+                                        col_type = f'varchar({field.max_length or 255})'
+                                    elif isinstance(field, TextField):
+                                        col_type = 'longtext'
+                                    elif isinstance(field, BigIntegerField):
+                                        col_type = 'bigint'
+                                    elif isinstance(field, IntegerField):
+                                        col_type = 'int'
+                                    elif isinstance(field, BooleanField):
+                                        col_type = 'tinyint(1)'
+                                    elif isinstance(field, DateTimeField):
+                                        col_type = 'datetime(6)'
+                                    elif isinstance(field, UUIDField):
+                                        col_type = f'char({field.max_length or 32})'
+                                    else:
+                                        col_type = 'bigint'
                                     with connection.cursor() as cursor:
                                         cursor.execute(
-                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{field.column}` bigint NULL"
+                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{field.column}` {col_type} NULL"
                                         )
                                     added += 1
                                     try:
@@ -542,6 +560,173 @@ def _migrate_view(request):
                 'message': result_msg,
                 'next': f'/api/migrate?action=init&batch={next_batch}' if next_batch else None,
                 'is_complete': is_last
+            })
+
+        # ================== fixtype：修复错误的列类型（bigint→varchar 等） ==================
+        elif action == 'fixtype':
+            from django.db.models import (
+                CharField, TextField, IntegerField, BigIntegerField,
+                BooleanField, DateTimeField, UUIDField, AutoField,
+                ForeignKey, OneToOneField, DecimalField, FloatField,
+                DateField, TimeField, JSONField, BinaryField, FileField
+            )
+
+            def _expected_col_type(field):
+                """根据 Django 字段类型返回 MySQL 列定义"""
+                if isinstance(field, (ForeignKey, OneToOneField, BigIntegerField, AutoField)):
+                    return 'bigint'
+                elif isinstance(field, CharField):
+                    return f'varchar({field.max_length or 255})'
+                elif isinstance(field, TextField):
+                    return 'longtext'
+                elif isinstance(field, IntegerField):
+                    return 'int'
+                elif isinstance(field, BooleanField):
+                    return 'tinyint(1)'
+                elif isinstance(field, DateTimeField):
+                    return 'datetime(6)'
+                elif isinstance(field, DateField):
+                    return 'date'
+                elif isinstance(field, TimeField):
+                    return 'time(6)'
+                elif isinstance(field, FloatField):
+                    return 'double'
+                elif isinstance(field, DecimalField):
+                    return f'decimal({field.max_digits},{field.decimal_places})'
+                elif isinstance(field, UUIDField):
+                    return f'char({field.max_length or 32})'
+                elif isinstance(field, JSONField):
+                    return 'json'
+                elif isinstance(field, BinaryField):
+                    return 'longblob'
+                elif isinstance(field, FileField):
+                    return f'varchar({field.max_length or 100})'
+                return None  # 未知类型，跳过
+
+            def _normalize_type(col_type):
+                """标准化 MySQL SHOW COLUMNS 返回的类型用于比较"""
+                col_type = col_type.lower().strip()
+                # varchar(255) -> varchar(255), int -> int, etc.
+                return col_type
+
+            # 1. 获取所有表的实际列类型
+            real_cols = {}
+            with connection.cursor() as cursor:
+                cursor.execute("SHOW TABLES")
+                table_names = [row[0] for row in cursor.fetchall()]
+                for t in table_names:
+                    try:
+                        cursor.execute(f"SHOW COLUMNS FROM `{t}`")
+                        real_cols[t] = {row[0]: row[1] for row in cursor.fetchall()}
+                    except Exception:
+                        real_cols[t] = {}
+
+            # 2. 对比模型字段类型并修复
+            fixed = 0
+            skipped = 0
+            failed = 0
+            fix_details = []
+
+            for model in apps.get_models():
+                db_table = model._meta.db_table
+                if db_table not in real_cols:
+                    continue
+
+                for field in model._meta.concrete_fields:
+                    if not field.column:
+                        continue
+                    col_name = field.column
+                    if col_name not in real_cols[db_table]:
+                        continue
+
+                    expected_type = _expected_col_type(field)
+                    if not expected_type:
+                        continue
+
+                    actual_type = _normalize_type(real_cols[db_table][col_name])
+
+                    # 比较类型前缀（忽略长度差异，只关心类型不匹配的情况）
+                    # 重点：bigint vs varchar 是严重不匹配
+                    type_mismatch = False
+                    if expected_type.startswith('varchar') and actual_type.startswith('bigint'):
+                        type_mismatch = True
+                    elif expected_type.startswith('char') and actual_type.startswith('bigint'):
+                        type_mismatch = True
+                    elif expected_type == 'longtext' and actual_type.startswith('bigint'):
+                        type_mismatch = True
+                    elif expected_type == 'json' and actual_type.startswith('bigint'):
+                        type_mismatch = True
+                    elif expected_type.startswith('tinyint') and actual_type.startswith('bigint'):
+                        type_mismatch = True
+                    elif expected_type == 'int' and actual_type.startswith('bigint'):
+                        # int vs bigint 通常可以兼容，但也修复
+                        type_mismatch = True
+
+                    if not type_mismatch:
+                        continue
+
+                    # 修复列类型
+                    try:
+                        # 先删除可能存在的 UNIQUE 约束
+                        try:
+                            with connection.cursor() as cursor:
+                                cursor.execute(
+                                    f"ALTER TABLE `{db_table}` DROP INDEX `ux_{db_table}_{col_name}`"
+                                )
+                        except Exception:
+                            pass  # 索引不存在，忽略
+
+                        # 修改列类型
+                        null_def = 'NULL' if field.null else 'NOT NULL'
+                        default_def = ''
+                        if field.has_default():
+                            default_val = field.get_default()
+                            if default_val is not None:
+                                if isinstance(default_val, str):
+                                    default_def = f" DEFAULT '{default_val}'"
+                                elif isinstance(default_val, bool):
+                                    default_def = f" DEFAULT {1 if default_val else 0}"
+                                elif isinstance(default_val, (int, float)):
+                                    default_def = f" DEFAULT {default_val}"
+
+                        with connection.cursor() as cursor:
+                            cursor.execute(
+                                f"ALTER TABLE `{db_table}` MODIFY COLUMN `{col_name}` {expected_type} {null_def}{default_def}"
+                            )
+
+                        # 如果字段有 unique=True，重新添加 UNIQUE 索引
+                        if field.unique:
+                            try:
+                                with connection.cursor() as cursor:
+                                    cursor.execute(
+                                        f"ALTER TABLE `{db_table}` ADD UNIQUE KEY `ux_{db_table}_{col_name}` (`{col_name}`)"
+                                    )
+                            except Exception:
+                                pass
+
+                        fixed += 1
+                        fix_details.append({
+                            'table': db_table, 'column': col_name,
+                            'from': actual_type, 'to': expected_type
+                        })
+                    except Exception as e:
+                        failed += 1
+                        if len(fix_details) < 20:
+                            fix_details.append({
+                                'table': db_table, 'column': col_name,
+                                'error': str(e)[:200]
+                            })
+
+            if not fix_details:
+                return JsonResponse({'status': 'ok', 'message': '所有列类型正确，无需修复'})
+
+            return JsonResponse({
+                'status': 'ok' if failed == 0 else 'warn',
+                'message': f'修复 {fixed}, 跳过 {skipped}, 失败 {failed}',
+                'fixed': fixed,
+                'skipped': skipped,
+                'failed': failed,
+                'details': fix_details,
             })
 
         else:
