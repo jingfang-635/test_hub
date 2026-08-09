@@ -1,17 +1,16 @@
 <template>
-  <div class="layout">
+  <div class="layout" :class="{ 'is-dark': appStore.isDark }">
     <el-container>
       <!-- 侧边栏 -->
-      <el-aside width="240px">
-        <div class="logo" @click="router.push('/home')" style="cursor: pointer;">
-          <img :src="logoImage" alt="TestHub" class="logo-img" />
+      <el-aside :width="sidebarWidth">
+        <div class="logo" @click="router.push('/home')">
+          <img :src="logoHomePng" alt="TestHub" class="logo-img" />
+          <span class="logo-text">testhub</span>
         </div>
         <el-menu
           :default-active="$route.path"
           router
-          background-color="#001529"
-          text-color="#fff"
-          active-text-color="#1890ff"
+          class="side-menu"
         >
           <!-- AI用例生成模块菜单 -->
           <template v-if="currentModule === 'ai-generation'">
@@ -25,15 +24,15 @@
             </el-sub-menu>
             <el-menu-item index="/ai-generation/projects">
               <el-icon><Folder /></el-icon>
-              <span>{{ $t('menu.projectManagement') }}</span>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
             <el-menu-item index="/ai-generation/testcases">
               <el-icon><Document /></el-icon>
               <span>{{ $t('menu.testCases') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-generation/versions">
-              <el-icon><Flag /></el-icon>
-              <span>{{ $t('menu.versionManagement') }}</span>
+            <el-menu-item index="/ai-generation/knowledge-base">
+              <el-icon><Collection /></el-icon>
+              <span>{{ $t('menu.knowledgeBaseManage') }}</span>
             </el-menu-item>
             <el-sub-menu index="reviews">
               <template #title>
@@ -62,7 +61,7 @@
             </el-menu-item>
             <el-menu-item index="/api-testing/projects">
               <el-icon><Folder /></el-icon>
-              <span>{{ $t('menu.projectManagement') }}</span>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
             <el-menu-item index="/api-testing/interfaces">
               <el-icon><Link /></el-icon>
@@ -102,7 +101,7 @@
             </el-menu-item>
             <el-menu-item index="/ui-automation/projects">
               <el-icon><Folder /></el-icon>
-              <span>{{ $t('menu.projectManagement') }}</span>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
             <el-menu-item index="/ui-automation/elements-enhanced">
               <el-icon><Aim /></el-icon>
@@ -150,7 +149,7 @@
             </el-menu-item>
             <el-menu-item index="/app-automation/projects">
               <el-icon><Folder /></el-icon>
-              <span>项目管理</span>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
             <el-menu-item index="/app-automation/devices">
               <el-icon><Cellphone /></el-icon>
@@ -196,6 +195,10 @@
 
           <!-- AI 智能模式模块菜单 -->
           <template v-else-if="currentModule === 'ai-intelligent-mode'">
+            <el-menu-item index="/ai-intelligent-mode/projects">
+              <el-icon><Folder /></el-icon>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
+            </el-menu-item>
             <el-menu-item index="/ai-intelligent-mode/testing">
               <el-icon><VideoPlay /></el-icon>
               <span>{{ $t('menu.aiIntelligentTesting') }}</span>
@@ -234,7 +237,19 @@
                 <el-icon><Setting /></el-icon>
                 <span>{{ $t('menu.generationConfig') }}</span>
               </el-menu-item>
+              <el-menu-item index="/configuration/knowledge-base">
+                <el-icon><Collection /></el-icon>
+                <span>{{ $t('menu.knowledgeBaseManage') }}</span>
+              </el-menu-item>
             </el-sub-menu>
+            <el-menu-item index="/configuration/knowledge-llm">
+              <el-icon><Connection /></el-icon>
+              <span>{{ $t('menu.knowledgeBaseConfig') }}</span>
+            </el-menu-item>
+            <el-menu-item index="/configuration/projects">
+              <el-icon><Folder /></el-icon>
+              <span>{{ $t('menu.projectAndVersion') }}</span>
+            </el-menu-item>
             <el-menu-item index="/configuration/ui-env">
               <el-icon><Monitor /></el-icon>
               <span>{{ $t('menu.uiEnvConfig') }}</span>
@@ -255,14 +270,32 @@
               <el-icon><ChatDotRound /></el-icon>
               <span>{{ $t('menu.difyConfig') }}</span>
             </el-menu-item>
+            <el-sub-menu index="core-module">
+              <template #title>
+                <el-icon><DataAnalysis /></el-icon>
+                <span>{{ $t('menu.coreModule') }}</span>
+              </template>
+              <el-menu-item index="/configuration/performance-stats">
+                <el-icon><TrendCharts /></el-icon>
+                <span>{{ $t('menu.performanceStats') }}</span>
+              </el-menu-item>
+              <el-menu-item index="/configuration/request-performance-log">
+                <el-icon><Document /></el-icon>
+                <span>{{ $t('menu.requestPerformanceLog') }}</span>
+              </el-menu-item>
+              <el-menu-item index="/configuration/notification-template">
+                <el-icon><Bell /></el-icon>
+                <span>{{ $t('menu.notificationTemplate') }}</span>
+              </el-menu-item>
+            </el-sub-menu>
           </template>
         </el-menu>
       </el-aside>
 
       <!-- 主体内容 -->
-      <el-container>
+      <el-container class="main-shell">
         <!-- 顶部导航 -->
-        <el-header height="60px">
+        <el-header height="var(--th-header-height)">
           <div class="header-content">
             <div class="header-left">
               <el-breadcrumb separator="/">
@@ -272,39 +305,56 @@
               </el-breadcrumb>
             </div>
             <div class="header-right">
-              <!-- 语言切换 -->
-              <el-dropdown @command="handleLanguageChange" class="language-dropdown">
-                <span class="language-selector">
-                  <span class="language-flag">{{ appStore.language === 'zh-cn' ? '🇨🇳' : '🇺🇸' }}</span>
-                  <span>{{ currentLanguage }}</span>
-                  <el-icon class="el-icon--right"><ArrowDown /></el-icon>
-                </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="zh-cn" :disabled="appStore.language === 'zh-cn'">
-                      <span class="dropdown-flag">🇨🇳</span> 简体中文
-                    </el-dropdown-item>
-                    <el-dropdown-item command="en" :disabled="appStore.language === 'en'">
-                      <span class="dropdown-flag">🇺🇸</span> English
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+              <div class="th-utility-bar header-utility">
+                <el-dropdown @command="handleLanguageChange" trigger="click">
+                  <button type="button" class="th-utility-btn">
+                    <svg class="lang-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+                      <circle cx="12" cy="12" r="9" />
+                      <path d="M3 12h18M12 3c2.5 2.8 3.8 5.7 3.8 9S14.5 18.2 12 21c-2.5-2.8-3.8-5.7-3.8-9S9.5 5.8 12 3z" />
+                    </svg>
+                    <span>{{ appStore.language === 'zh-cn' ? 'ZH' : 'EN' }}</span>
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item command="zh-cn" :disabled="appStore.language === 'zh-cn'">
+                        简体中文
+                      </el-dropdown-item>
+                      <el-dropdown-item command="en" :disabled="appStore.language === 'en'">
+                        English
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
 
-              <!-- 用户信息 -->
-              <el-dropdown @command="handleCommand" class="user-dropdown">
-                <span class="user-info">
-                  <el-avatar :size="32" :src="userStore.user?.avatar" />
-                  <span class="username">{{ userStore.user?.username }}</span>
-                  <el-icon><ArrowDown /></el-icon>
-                </span>
-                <template #dropdown>
-                  <el-dropdown-menu>
-                    <el-dropdown-item command="profile">{{ $t('nav.profile') }}</el-dropdown-item>
-                    <el-dropdown-item divided command="logout">{{ $t('nav.logout') }}</el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
+                <button
+                  type="button"
+                  class="th-utility-btn"
+                  :title="appStore.isDark ? '切换浅色模式' : '切换深色模式'"
+                  @click="appStore.toggleDark()"
+                >
+                  <el-icon>
+                    <Moon v-if="!appStore.isDark" />
+                    <Sunny v-else />
+                  </el-icon>
+                </button>
+
+                <el-dropdown @command="handleCommand" trigger="click">
+                  <button type="button" class="th-utility-btn user-btn">
+                    <el-avatar :size="26" :src="userStore.user?.avatar">
+                      <el-icon><UserFilled /></el-icon>
+                    </el-avatar>
+                  </button>
+                  <template #dropdown>
+                    <el-dropdown-menu>
+                      <el-dropdown-item disabled>
+                        {{ userStore.user?.username || 'User' }}
+                      </el-dropdown-item>
+                      <el-dropdown-item command="profile">{{ $t('nav.profile') }}</el-dropdown-item>
+                      <el-dropdown-item divided command="logout">{{ $t('nav.logout') }}</el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </div>
             </div>
           </div>
         </el-header>
@@ -326,11 +376,11 @@ import { useAppStore } from '@/stores/app'
 import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import {
-  Monitor, Folder, Document, Flag, Check, Collection, VideoPlay,
+  Monitor, Folder, Document, Check, Collection, VideoPlay,
   DataAnalysis, ChatDotRound, DocumentCopy, Link, MagicStick,
-  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, ArrowDown, Cellphone, Connection, FolderOpened, Compass
+  Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, Cellphone, Connection, FolderOpened, Compass,
+  TrendCharts, Moon, Sunny, UserFilled
 } from '@element-plus/icons-vue'
-import logoSvg from '@/assets/images/logo.svg'
 import logoHomePng from '@/assets/images/logo_home.png'
 
 const router = useRouter()
@@ -339,17 +389,8 @@ const userStore = useUserStore()
 const appStore = useAppStore()
 const { t } = useI18n()
 
-const logoImage = computed(() => {
-		return route.path === '/home' ? logoSvg : logoHomePng
-	})
-	
+const sidebarWidth = 'var(--th-sidebar-width)'
 
-// 当前语言显示
-const currentLanguage = computed(() => {
-  return appStore.language === 'zh-cn' ? '简体中文' : 'English'
-})
-
-// 切换语言（无需刷新页面）
 const handleLanguageChange = (lang) => {
   appStore.setLanguage(lang)
   ElMessage.success(lang === 'zh-cn' ? '语言已切换为中文' : 'Language switched to English')
@@ -382,8 +423,9 @@ const breadcrumbTitle = computed(() => {
     // AI用例生成
     '/ai-generation/requirement-analysis': t('menu.aiCaseGeneration'),
     '/ai-generation/generated-testcases': t('menu.aiGeneratedTestcases'),
-    '/ai-generation/projects': t('menu.projectManagement'),
+    '/ai-generation/projects': t('menu.projectAndVersion'),
     '/ai-generation/testcases': t('menu.testCases'),
+    '/ai-generation/knowledge-base': t('menu.knowledgeBaseManage'),
     '/ai-generation/versions': t('menu.versionManagement'),
     '/ai-generation/reviews': t('menu.reviewList'),
     '/ai-generation/review-templates': t('menu.reviewTemplates'),
@@ -393,7 +435,7 @@ const breadcrumbTitle = computed(() => {
 
     // 接口测试
     '/api-testing/dashboard': t('menu.dashboard'),
-    '/api-testing/projects': t('menu.projectManagement'),
+    '/api-testing/projects': t('menu.projectAndVersion'),
     '/api-testing/interfaces': t('menu.interfaceManagement'),
     '/api-testing/automation': t('menu.automationTesting'),
     '/api-testing/history': t('menu.requestHistory'),
@@ -404,7 +446,7 @@ const breadcrumbTitle = computed(() => {
 
     // UI自动化测试
     '/ui-automation/dashboard': t('menu.dashboard'),
-    '/ui-automation/projects': t('menu.projectManagement'),
+    '/ui-automation/projects': t('menu.projectAndVersion'),
     '/ui-automation/elements-enhanced': t('menu.elementManagement'),
     '/ui-automation/test-cases': t('menu.caseManagement'),
     '/ui-automation/scripts-enhanced': t('menu.scriptGeneration'),
@@ -417,7 +459,7 @@ const breadcrumbTitle = computed(() => {
 
     // APP自动化测试
     '/app-automation/dashboard': 'Dashboard',
-    '/app-automation/projects': '项目管理',
+    '/app-automation/projects': t('menu.projectAndVersion'),
     '/app-automation/devices': '设备管理',
     '/app-automation/packages': '包名管理',
     '/app-automation/elements': '元素管理',
@@ -430,6 +472,7 @@ const breadcrumbTitle = computed(() => {
     '/app-automation/reports': '测试报告',
 
     // AI 智能模式
+    '/ai-intelligent-mode/projects': t('menu.projectAndVersion'),
     '/ai-intelligent-mode/testing': t('menu.aiIntelligentTesting'),
     '/ai-intelligent-mode/cases': t('menu.aiCaseManagement'),
     '/ai-intelligent-mode/execution-records': t('menu.aiExecutionRecords'),
@@ -438,8 +481,11 @@ const breadcrumbTitle = computed(() => {
 
     // 配置中心
     '/configuration/ai-model': t('menu.aiModelConfig'),
+    '/configuration/projects': t('menu.projectAndVersion'),
     '/configuration/prompt-config': t('menu.promptConfig'),
     '/configuration/generation-config': t('menu.generationConfig'),
+    '/configuration/knowledge-base': t('menu.knowledgeBaseManage'),
+    '/configuration/knowledge-llm': t('menu.knowledgeBaseConfig'),
     '/configuration/ui-env': t('menu.uiEnvConfig'),
     '/configuration/ai-mode': t('menu.aiModeConfig'),
     '/configuration/scheduled-task': t('menu.scheduledTaskConfig'),
@@ -466,6 +512,7 @@ const handleCommand = (command) => {
   height: 100vh;
   width: 100vw;
   overflow: hidden;
+  background: var(--th-bg-page);
 }
 
 .layout > .el-container {
@@ -474,77 +521,127 @@ const handleCommand = (command) => {
 }
 
 .logo {
-  height: 60px;
+  height: var(--th-header-height);
   display: flex;
   align-items: center;
-  justify-content: center;
-  background-color: #001529;
-  color: white;
-  border-bottom: 1px solid #1f1f1f;
+  gap: 10px;
+  padding: 0 20px;
+  background: transparent;
+  border-bottom: 1px solid var(--th-border);
   flex-shrink: 0;
+  cursor: pointer;
+  user-select: none;
 
-		.logo-img {
-			width: 100%;
-			height: 100%;
-			object-fit: fill;
-		}
-	}
+  .logo-img {
+    width: 32px;
+    height: 32px;
+    object-fit: contain;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+
+  .logo-text {
+    font-size: 18px;
+    font-weight: 700;
+    letter-spacing: -0.03em;
+    color: var(--th-text-primary);
+  }
+}
 
 .el-aside {
-  background-color: #001529;
+  background: var(--th-bg-sidebar);
   height: 100%;
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  transition: width 0.3s ease;
-  width: 240px !important;
+  border-right: 1px solid var(--th-border);
+  width: var(--th-sidebar-width) !important;
+  transition: background-color var(--th-transition), border-color var(--th-transition);
 
-  .el-menu {
+  .side-menu {
     flex: 1;
     overflow-y: auto;
     overflow-x: hidden;
-    border-right: none;
-    
+    padding: 12px 10px 20px;
+    border-right: none !important;
+    background: transparent !important;
+
     &::-webkit-scrollbar {
       width: 0;
     }
   }
 }
 
-.el-menu {
-  :deep(.el-sub-menu__title),
-  :deep(.el-menu-item) {
-    font-size: 14px;
+.side-menu {
+  :deep(.el-menu-item),
+  :deep(.el-sub-menu__title) {
+    height: 42px;
+    line-height: 42px;
+    margin: 2px 0;
+    border-radius: 10px;
+    color: var(--th-text-secondary) !important;
+    font-size: 13.5px;
+    font-weight: 500;
+    transition: all var(--th-transition);
+
+    .el-icon {
+      color: inherit;
+      font-size: 17px;
+    }
+
+    &:hover {
+      background: var(--th-bg-hover) !important;
+      color: var(--th-color-primary) !important;
+    }
+  }
+
+  :deep(.el-menu-item.is-active) {
+    background: var(--th-color-primary-soft) !important;
+    color: var(--th-color-primary) !important;
+    font-weight: 600;
+    position: relative;
+
+    &::before {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 10px;
+      bottom: 10px;
+      width: 3px;
+      border-radius: 0 3px 3px 0;
+      background: var(--th-color-primary);
+    }
+  }
+
+  :deep(.el-sub-menu.is-active > .el-sub-menu__title) {
+    color: var(--th-color-primary) !important;
+  }
+
+  :deep(.el-menu) {
+    background: transparent !important;
+  }
+
+  :deep(.el-sub-menu .el-menu-item) {
+    padding-left: 48px !important;
+    min-width: auto;
   }
 }
 
-.el-menu--collapse {
-  width: 64px !important;
-  
-  :deep(.el-sub-menu__title),
-  :deep(.el-menu-item) {
-    padding-left: 20px !important;
-  }
-  
-  :deep(.el-sub-menu__title span),
-  :deep(.el-menu-item span) {
-    display: none;
-  }
-}
-
-.el-container .el-container {
+.main-shell {
   height: 100%;
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  background: var(--th-bg-page);
 }
 
 .el-header {
-  background-color: white;
-  border-bottom: 1px solid #e8e8e8;
+  background: var(--th-bg-elevated);
+  border-bottom: 1px solid var(--th-border);
   padding: 0;
   flex-shrink: 0;
-  height: 60px !important;
+  height: var(--th-header-height) !important;
+  transition: background-color var(--th-transition), border-color var(--th-transition);
 
   .header-content {
     height: 100%;
@@ -552,211 +649,101 @@ const handleCommand = (command) => {
     justify-content: space-between;
     align-items: center;
     padding: 0 20px;
+    gap: 16px;
   }
 
   .header-left {
     flex: 1;
     overflow: hidden;
-    
+    min-width: 0;
+
     :deep(.el-breadcrumb) {
-      font-size: 14px;
-    }
-  }
-
-  .user-info {
-    display: flex;
-    align-items: center;
-    cursor: pointer;
-    white-space: nowrap;
-
-    .username {
-      margin: 0 8px;
-      color: #303133;
-      font-size: 14px;
+      font-size: 13px;
     }
   }
 }
 
 .header-right {
-    display: flex;
-    align-items: center;
-    gap: 20px;
+  display: flex;
+  align-items: center;
+  flex-shrink: 0;
+}
+
+.header-utility {
+  background: var(--th-bg-muted);
+  border: 1px solid var(--th-border);
+  box-shadow: none;
+  backdrop-filter: none;
+
+  .lang-icon {
+    width: 16px;
+    height: 16px;
   }
 
-  .language-dropdown {
-    .language-selector {
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      color: #303133;
-      font-size: 14px;
-      outline: none;
+  .user-btn {
+    padding: 0 6px;
 
-      &:focus {
-        outline: none;
-      }
-
-      .language-flag {
-        font-size: 18px;
-        margin-right: 5px;
-        line-height: 1;
-      }
-
-      span {
-        margin: 0 4px;
-      }
-
-      &:hover {
-        color: #1890ff;
-      }
+    :deep(.el-avatar) {
+      background: var(--th-color-primary-soft);
+      color: var(--th-color-primary);
     }
   }
-
-  .dropdown-flag {
-    font-size: 16px;
-    margin-right: 5px;
-  }
-
-  .user-dropdown {
-    .user-info {
-      display: flex;
-      align-items: center;
-      cursor: pointer;
-      white-space: nowrap;
-
-      .username {
-        margin: 0 8px;
-        color: #303133;
-      }
-    }
-  }
+}
 
 .el-main {
-  background-color: #f5f5f5;
-  padding: 20px;
+  background: var(--th-bg-page);
+  padding: 20px 22px;
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-}
-
-@media screen and (max-width: 1920px) {
-  .el-aside {
-    width: 220px !important;
-  }
-  
-  .el-main {
-    padding: 18px;
-  }
-}
-
-@media screen and (max-width: 1600px) {
-  .el-aside {
-    width: 200px !important;
-  }
-  
-  .el-main {
-    padding: 16px;
-  }
-
-  .el-menu {
-    :deep(.el-sub-menu__title),
-    :deep(.el-menu-item) {
-      font-size: 13px;
-    }
-  }
-}
-
-@media screen and (max-width: 1440px) {
-  .el-aside {
-    width: 180px !important;
-  }
-  
-  .el-main {
-    padding: 14px;
-  }
-
-  .el-menu {
-    :deep(.el-sub-menu__title),
-    :deep(.el-menu-item) {
-      font-size: 13px;
-    }
-  }
-}
-
-@media screen and (max-width: 1366px) {
-  .el-aside {
-    width: 180px !important;
-  }
-  
-  .el-main {
-    padding: 12px;
-  }
-
-  .el-header {
-    height: 56px !important;
-  }
-  
-  .el-menu {
-    :deep(.el-sub-menu__title),
-    :deep(.el-menu-item) {
-      font-size: 12px;
-    }
-  }
+  transition: background-color var(--th-transition);
 }
 
 @media screen and (max-width: 1280px) {
   .el-aside {
-    width: 160px !important;
-  }
-  
-  .el-main {
-    padding: 12px;
+    width: 200px !important;
   }
 
-  .el-header {
-    height: 56px !important;
-    
-    .header-content {
-      padding: 0 15px;
-    }
+  .el-main {
+    padding: 16px;
   }
-  
-  .el-menu {
-    :deep(.el-sub-menu__title),
-    :deep(.el-menu-item) {
-      font-size: 12px;
-      padding-left: 15px !important;
-    }
+
+  .logo .logo-text {
+    font-size: 16px;
   }
 }
 
 @media screen and (max-width: 1024px) {
   .el-aside {
-    width: 140px !important;
-  }
-  
-  .el-main {
-    padding: 10px;
+    width: 72px !important;
+
+    .logo {
+      justify-content: center;
+      padding: 0;
+
+      .logo-text {
+        display: none;
+      }
+    }
+
+    .side-menu {
+      padding: 8px 6px;
+
+      :deep(.el-menu-item),
+      :deep(.el-sub-menu__title) {
+        padding: 0 !important;
+        justify-content: center;
+
+        span,
+        .el-sub-menu__icon-arrow {
+          display: none;
+        }
+      }
+    }
   }
 
-  .el-header {
-    height: 52px !important;
-    
-    .header-content {
-      padding: 0 12px;
-    }
-  }
-  
-  .el-menu {
-    :deep(.el-sub-menu__title),
-    :deep(.el-menu-item) {
-      font-size: 12px;
-      padding-left: 12px !important;
-    }
-  }
-  
-  .user-info .username {
-    display: none;
+  .el-main {
+    padding: 12px;
   }
 }
 
@@ -766,57 +753,39 @@ const handleCommand = (command) => {
     left: 0;
     top: 0;
     z-index: 1000;
-    width: 240px !important;
+    width: 232px !important;
     transform: translateX(-100%);
     transition: transform 0.3s ease;
-    
+    box-shadow: var(--th-shadow-lg);
+
     &.mobile-open {
       transform: translateX(0);
     }
-  }
-  
-  .el-main {
-    padding: 8px;
-  }
 
-  .el-header {
-    height: 50px !important;
-    
-    .header-content {
-      padding: 0 10px;
+    .logo .logo-text {
+      display: inline;
     }
-    
-    .header-left {
-      :deep(.el-breadcrumb__item) {
-        &:not(:last-child) {
-          display: none;
+
+    .side-menu {
+      :deep(.el-menu-item),
+      :deep(.el-sub-menu__title) {
+        justify-content: flex-start;
+        padding-left: 20px !important;
+
+        span {
+          display: inline;
         }
       }
     }
   }
-}
 
-@media screen and (max-width: 480px) {
-  .el-aside {
-    width: 220px !important;
-  }
-  
   .el-main {
-    padding: 6px;
+    padding: 10px;
   }
 
-  .el-header {
-    height: 48px !important;
-    
-    .header-content {
-      padding: 0 8px;
-    }
-  }
-  
-  .user-info {
-    .el-avatar {
-      width: 28px !important;
-      height: 28px !important;
+  .el-header .header-left {
+    :deep(.el-breadcrumb__item:not(:last-child)) {
+      display: none;
     }
   }
 }

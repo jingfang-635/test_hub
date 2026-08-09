@@ -157,6 +157,23 @@
                             <el-option :label="t('uiAutomation.testCase.actionAssert')" value="assert" />
                             <el-option :label="t('uiAutomation.testCase.actionWait')" value="wait" />
                             <el-option :label="t('uiAutomation.testCase.actionSwitchTab')" value="switchTab" />
+                            <el-option :label="t('uiAutomation.testCase.actionNavigateUrl')" value="navigateUrl" />
+                          </el-select>
+                          <el-select
+                            v-if="needsElement(element.action_type)"
+                            v-model="element.page_filter"
+                            :placeholder="t('uiAutomation.testCase.selectPage')"
+                            size="small"
+                            style="width: 150px"
+                            filterable
+                            @change="onPageFilterChange(element)"
+                          >
+                            <el-option
+                              v-for="page in distinctPages"
+                              :key="page"
+                              :label="page"
+                              :value="page"
+                            />
                           </el-select>
                           <el-select
                             v-if="needsElement(element.action_type)"
@@ -168,7 +185,7 @@
                             @change="onElementChange(element)"
                           >
                             <el-option
-                              v-for="elem in availableElements"
+                              v-for="elem in getFilteredElements(element)"
                               :key="elem.id"
                               :label="`${elem.name} (${elem.locator_value})`"
                               :value="elem.id"
@@ -198,7 +215,7 @@
                           <div style="display: flex; gap: 5px; flex: 1">
                             <el-input
                               v-model="element.input_value"
-                              :placeholder="element.action_type === 'switchTab' ? t('uiAutomation.testCase.switchTabPlaceholder') : t('uiAutomation.testCase.inputPlaceholder')"
+                              :placeholder="element.action_type === 'switchTab' ? t('uiAutomation.testCase.switchTabPlaceholder') : (element.action_type === 'navigateUrl' ? t('uiAutomation.testCase.navigateUrlPlaceholder') : t('uiAutomation.testCase.inputPlaceholder'))"
                               size="small"
                             >
                               <template #append>
@@ -240,6 +257,7 @@
                             <el-option :label="t('uiAutomation.testCase.assertIsVisible')" value="isVisible" />
                             <el-option :label="t('uiAutomation.testCase.assertExists')" value="exists" />
                             <el-option :label="t('uiAutomation.testCase.assertHasAttribute')" value="hasAttribute" />
+                            <el-option :label="t('uiAutomation.testCase.assertUrlContains')" value="urlContains" />
                           </el-select>
                           <div style="display: flex; align-items: center; margin-left: 10px; width: 240px">
                             <el-input
@@ -572,6 +590,40 @@ const filteredTestCases = computed(() => {
   )
 })
 
+// 获取所有可用页面（去重）
+const distinctPages = computed(() => {
+  const pages = new Set()
+  availableElements.value.forEach(elem => {
+    if (elem.page) {
+      pages.add(elem.page)
+    }
+  })
+  return ['全部页面', ...Array.from(pages)]
+})
+
+// 根据页面筛选元素列表
+const getFilteredElements = (step) => {
+  if (!step.page_filter || step.page_filter === '全部页面') {
+    return availableElements.value
+  }
+  return availableElements.value.filter(elem => elem.page === step.page_filter)
+}
+
+// 页面筛选变更处理
+const onPageFilterChange = (step) => {
+  const filtered = getFilteredElements(step)
+  const currentElement = availableElements.value.find(e => e.id === step.element_id)
+  if (currentElement && step.page_filter !== '全部页面' && currentElement.page !== step.page_filter) {
+    step.element_id = ''
+  }
+  if (filtered.length === 0 && step.element_id) {
+    const stillValid = filtered.find(e => e.id === step.element_id)
+    if (!stillValid) {
+      step.element_id = ''
+    }
+  }
+}
+
 // 解析执行日志
 const parsedExecutionLogs = computed(() => {
   if (!executionResult.value || !executionResult.value.logs) return []
@@ -646,6 +698,7 @@ const selectTestCase = (testCase) => {
   if (testCase.steps && testCase.steps.length > 0) {
     currentSteps.value = testCase.steps.map(step => ({
       ...step,
+      page_filter: step.page_filter || '',
       element_id: step.element || '',
       expanded: false
     }))
@@ -661,6 +714,7 @@ const addStep = () => {
   const newStep = {
     id: Date.now(),
     action_type: 'click',
+    page_filter: '',
     element_id: '',
     input_value: '',
     wait_time: 1000,
@@ -704,7 +758,7 @@ const onElementChange = (step) => {
 }
 
 const needsInputValue = (actionType) => {
-  return ['fill', 'switchTab'].includes(actionType)
+  return ['fill', 'switchTab', 'navigateUrl'].includes(actionType)
 }
 
 const needsWaitTime = (actionType) => {
@@ -712,7 +766,7 @@ const needsWaitTime = (actionType) => {
 }
 
 const needsElement = (actionType) => {
-  return !['wait', 'switchTab', 'screenshot'].includes(actionType)
+  return !['wait', 'switchTab', 'screenshot', 'navigateUrl'].includes(actionType)
 }
 
 const expandAllSteps = () => {
@@ -1143,7 +1197,8 @@ const getActionTypeText = (actionType) => {
     'scroll': t('uiAutomation.testCase.actionType.scroll'),
     'screenshot': t('uiAutomation.testCase.actionType.screenshot'),
     'assert': t('uiAutomation.testCase.actionType.assert'),
-    'wait': t('uiAutomation.testCase.actionType.wait')
+    'wait': t('uiAutomation.testCase.actionType.wait'),
+    'navigateUrl': t('uiAutomation.testCase.actionType.navigateUrl')
   }
   return textMap[actionType] || actionType
 }
@@ -1165,7 +1220,8 @@ const getActionText = (actionType) => {
     'scroll': t('uiAutomation.testCase.actionText.scroll'),
     'screenshot': t('uiAutomation.testCase.actionText.screenshot'),
     'assert': t('uiAutomation.testCase.actionText.assert'),
-    'wait': t('uiAutomation.testCase.actionText.wait')
+    'wait': t('uiAutomation.testCase.actionText.wait'),
+    'navigateUrl': t('uiAutomation.testCase.actionText.navigateUrl')
   }
   return actionMap[actionType] || actionType
 }

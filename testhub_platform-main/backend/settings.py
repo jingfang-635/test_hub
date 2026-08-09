@@ -1,7 +1,7 @@
 # https://newpanjing.github.io/simpleui_docs/config.html#%E5%9B%BE%E6%A0%87%E8%AF%B4%E6%98%8E
 
 from pathlib import Path
-from decouple import config
+from config_loader import cfg as config  # 统一配置：环境变量 > config.yaml > 默认值
 import os
 
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -36,6 +36,7 @@ THIRD_PARTY_APPS = [
     'django_filters',
     'drf_spectacular',
     'channels',
+    'django_q',  # Django-Q2 任务队列（替代 Celery）
 ]
 
 LOCAL_APPS = [
@@ -52,8 +53,9 @@ LOCAL_APPS = [
     'apps.api_testing',
     'apps.ui_automation.apps.UiAutomationConfig',
     'apps.app_automation.apps.AppAutomationConfig',  # APP自动化测试
-    'apps.core',
+    'apps.core.apps.CoreConfig',
     'apps.data_factory',
+    'apps.scheduler',  # 统一定时任务调度模块
 ]
 
 INSTALLED_APPS = DJANGO_APPS + THIRD_PARTY_APPS + LOCAL_APPS
@@ -68,6 +70,7 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'backend.middleware.PerformanceLoggingMiddleware',  # 请求性能采集中间件
 ]
 
 ROOT_URLCONF = 'backend.urls'
@@ -286,6 +289,9 @@ CSRF_TRUSTED_ORIGINS = [
     "http://127.0.0.1:3000",
 ]
 
+# 允许同源 iframe 嵌入（前端通过 Vite 代理访问 Admin，属于同源）
+X_FRAME_OPTIONS = 'SAMEORIGIN'
+
 # Spectacular Settings
 SPECTACULAR_SETTINGS = {
     'TITLE': 'TestHub API',
@@ -294,10 +300,21 @@ SPECTACULAR_SETTINGS = {
     'SERVE_INCLUDE_SCHEMA': False,
 }
 
-# Celery Configuration
-CELERY_BROKER_URL = config('REDIS_URL', default='redis://:1234@127.0.0.1:6379/0')
-CELERY_RESULT_BACKEND = config('REDIS_URL', default='redis://:1234@127.0.0.1:6379/0')
-CELERY_BROKER_CONNECTION_RETRY_ON_STARTUP = True
+# Django-Q2 Configuration (替代 Celery)
+# 使用 Redis 作为 broker，workers 数量按 CPU 核心调整
+Q_CLUSTER = {
+    'name': 'testhub',
+    'workers': 4,
+    'recycle': 500,
+    'timeout': 60,
+    'retry': 120,
+    'queue_limit': 50,
+    'bulk': 10,
+    'broker': 'redis',
+    'redis': config('REDIS_URL', default='redis://:1234@127.0.0.1:6379/0'),
+    'cache': 'default',
+    'catch_up': False,  # 错过的定时任务不补执行
+}
 
 # Channels Configuration
 CHANNEL_LAYERS = {
@@ -330,6 +347,24 @@ DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
 
 # For 163 email with SSL, you might need this setting
 EMAIL_TIMEOUT = 30
+
+# Feishu Open Platform (self-built app + user OAuth for docx/wiki fetch)
+FEISHU_APP_ID = config('FEISHU_APP_ID', default='')
+FEISHU_APP_SECRET = config('FEISHU_APP_SECRET', default='')
+FEISHU_BASE_URL = config('FEISHU_BASE_URL', default='https://open.feishu.cn')
+FEISHU_ACCOUNTS_URL = config('FEISHU_ACCOUNTS_URL', default='https://accounts.feishu.cn')
+FEISHU_REDIRECT_URI = config(
+    'FEISHU_REDIRECT_URI',
+    default='http://localhost:3000/ai-generation/requirement-analysis',
+)
+FEISHU_FRONTEND_REDIRECT = config(
+    'FEISHU_FRONTEND_REDIRECT',
+    default='http://localhost:3000/ai-generation/requirement-analysis',
+)
+FEISHU_OAUTH_SCOPES = config(
+    'FEISHU_OAUTH_SCOPES',
+    default='offline_access docx:document:readonly wiki:wiki:readonly',
+)
 
 # 检测是否运行在 Vercel 等 Serverless 只读文件系统环境
 # Vercel 部署会自动设置 VERCEL=1 环境变量

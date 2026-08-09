@@ -10,6 +10,7 @@ export default {
   newPlan: 'New Test Plan',
   batchDelete: 'Batch Delete',
   viewExecution: 'View Execution',
+  assignCases: 'Assign Cases',
   createPlan: 'Create',
   updatePlan: 'Save',
   closePlan: 'Close',
@@ -51,6 +52,7 @@ export default {
   // Dialog titles
   createPlanDialog: 'New Test Plan',
   editPlanDialog: 'Edit Test Plan',
+  testcaseSelectorTitle: 'Select Test Cases',
 
   // Form labels
   planDescription: 'Plan Description',
@@ -61,17 +63,31 @@ export default {
   planStatus: 'Status',
   activeText: 'Active',
   inactiveText: 'Closed',
+  keyword: 'Keyword',
+  priority: 'Priority',
+  testType: 'Test Type',
+  caseNumber: 'ID',
+  caseTitle: 'Title',
+  belongsToProject: 'Project',
 
   // Placeholders
   planNamePlaceholder: 'Enter plan name',
   planDescriptionPlaceholder: 'Enter plan description',
   selectProjects: 'Select projects',
   selectVersion: 'Select version',
+  selectVersionDisabled: 'Please select project first',
   selectTestcases: 'Select test cases',
   selectTestcasesDisabled: 'Please select project first',
   loadingTestcases: 'Loading...',
+  fetchVersionsFailed: 'Failed to fetch versions',
   selectAssignees: 'Select assignees',
   commentsPlaceholder: 'Enter comments',
+  keywordPlaceholder: 'Search by title/ID',
+  allPriority: 'All priorities',
+  allTestType: 'All types',
+  selectedTestcasesCount: '{count} test case(s) selected',
+
+  confirmSelect: 'Confirm Selection',
 
   // Filters
   selectProject: 'Select Project',
@@ -96,6 +112,9 @@ export default {
   selectFirst: 'Please select test plans to delete first',
   selectCasesFirst: 'Please select cases to delete first',
   selectProjectFirst: 'Please select project first',
+  assignNeedProject: 'This test plan has no related projects. Please edit and link projects first.',
+  assignSuccess: 'Assigned successfully, {count} new case(s) added',
+  assignFailed: 'Failed to assign test cases',
   batchDeleteConfirm: 'Are you sure to delete selected {count} test plans? This action cannot be undone.',
   batchDeleteCasesConfirm: 'Are you sure to delete selected {count} cases? This action cannot be undone.',
   batchDeleteSuccess: 'Successfully deleted {successCount} test plans',
@@ -103,6 +122,9 @@ export default {
   batchDeletePartialSuccess: 'Successfully deleted {successCount} test plans, {failCount} failed',
   batchDeleteCasesPartialSuccess: 'Successfully deleted {successCount} cases, {failCount} failed',
   batchDeleteFailed: 'Delete failed',
+  deleteConfirm: 'Are you sure to delete test plan "{name}"? This action cannot be undone.',
+  deleteSuccess: 'Test plan deleted successfully',
+  deleteFailed: 'Failed to delete test plan',
   toggleStatusConfirm: 'Are you sure to {action} this test plan?',
   toggleStatusSuccess: '{action} successful',
   toggleStatusFailed: 'Operation failed',

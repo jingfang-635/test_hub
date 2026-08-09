@@ -4,7 +4,7 @@
       <!-- 左侧集合树 -->
       <div class="sidebar">
         <div class="sidebar-header">
-          <el-select v-model="selectedProject" :placeholder="$t('apiTesting.common.selectProject')" @change="onProjectChange" style="width: 100%;">
+          <el-select v-model="selectedHubProject" :placeholder="$t('apiTesting.common.selectProject')" @change="onProjectChange" style="width: 100%;">
             <el-option
               v-for="project in projects"
               :key="project.id"
@@ -31,6 +31,9 @@
             </el-button>
             <el-button type="success" size="small" @click="createEmptyRequest" :title="$t('apiTesting.interface.addInterface')">
               <el-icon><Plus /></el-icon>
+            </el-button>
+            <el-button type="primary" plain size="small" @click="openImportDialog" :title="$t('apiTesting.interface.importInterfaces')">
+              <el-icon><Upload /></el-icon>
             </el-button>
           </div>
         </div>
@@ -857,6 +860,14 @@
       </el-tabs>
     </el-dialog>
 
+    <!-- 批量导入接口对话框 -->
+    <ImportInterfaceDialog
+      v-model="showImportDialog"
+      :projects="projects"
+      :current-hub-project-id="selectedHubProject"
+      @imported="onInterfacesImported"
+    />
+
     <!-- CURL导入对话框 -->
     <el-dialog
       v-model="showCurlImportDialog"
@@ -932,9 +943,10 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Folder, Document, MagicStick, Search, Close } from '@element-plus/icons-vue'
+import { Plus, Folder, Document, MagicStick, Search, Close, Upload } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import KeyValueEditor from './components/KeyValueEditor.vue'
+import ImportInterfaceDialog from './components/ImportInterfaceDialog.vue'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
 import { RequestModelParser } from '@/utils/requestModel'
 import { getVariableFunctions } from '@/api/data-factory'
@@ -947,6 +959,9 @@ const { t } = useI18n()
 const treeRef = ref(null)
 const expandedKeys = ref([])
 const projects = ref([])
+/** 「项目与版本」主项目 ID（下拉绑定） */
+const selectedHubProject = ref(null)
+/** 对应的 ApiProject ID（集合/环境等接口使用） */
 const selectedProject = ref(null)
 const collections = ref([])
 const flatCollections = ref([])
@@ -990,6 +1005,9 @@ const currentAssertionIndex = ref(-1)
 const currentScriptField = ref('')
 const variableCategories = ref([])
 const loading = ref(false)
+
+// 批量导入相关
+const showImportDialog = ref(false)
 
 // CURL导入相关
 const showCurlImportDialog = ref(false)
@@ -1053,13 +1071,31 @@ const selectSearchResult = (item) => {
   filteredCollections.value = []
 }
 
-const onProjectChange = async (projectId) => {
-  if (!projectId) return
+const resolveApiProject = async (hubProjectId) => {
+  const response = await api.post('/api-testing/projects/ensure/', {
+    hub_project_id: hubProjectId
+  })
+  return response.data
+}
+
+const onProjectChange = async (hubProjectId) => {
+  if (!hubProjectId) {
+    selectedHubProject.value = null
+    selectedProject.value = null
+    collections.value = []
+    flatCollections.value = []
+    environments.value = []
+    return
+  }
 
   try {
-    await loadCollections(projectId)
-    await loadEnvironments(projectId)
+    selectedHubProject.value = hubProjectId
+    const apiProject = await resolveApiProject(hubProjectId)
+    selectedProject.value = apiProject.id
+    await loadCollections(selectedProject.value)
+    await loadEnvironments(selectedProject.value)
   } catch (error) {
+    selectedProject.value = null
     ElMessage.error('切换项目失败')
     console.error('切换项目失败:', error)
   }
@@ -1067,13 +1103,23 @@ const onProjectChange = async (projectId) => {
 
 const loadProjects = async () => {
   try {
-    const response = await api.get('/api-testing/projects/')
-    // 后端可能返回分页格式 { results: [...] } 或直接返回数组
+    // 与「项目与版本」一致：仅展示本模块已关联的主项目
+    const response = await api.get('/projects/', {
+      params: {
+        project_type: 'api_testing',
+        page_size: 100
+      }
+    })
     projects.value = response.data.results || response.data || []
     if (projects.value.length > 0) {
-      selectedProject.value = projects.value[0].id
-      await loadCollections(selectedProject.value)
-      await loadEnvironments(selectedProject.value)
+      await onProjectChange(projects.value[0].id)
+    } else {
+      selectedHubProject.value = null
+      selectedProject.value = null
+      collections.value = []
+      flatCollections.value = []
+      environments.value = []
+      ElMessage.warning('暂无关联 API测试 的项目，请先在「项目与版本」中创建并勾选 API测试')
     }
   } catch (error) {
     ElMessage.error('加载项目失败')
@@ -1082,6 +1128,12 @@ const loadProjects = async () => {
 }
 
 const loadCollections = async (projectId) => {
+  if (projectId == null || projectId === '' || projectId === 'undefined' || projectId === 'null') {
+    collections.value = []
+    flatCollections.value = []
+    return
+  }
+
   try {
     const response = await api.get('/api-testing/collections/', {
       params: {
@@ -1104,6 +1156,11 @@ const loadCollections = async (projectId) => {
 }
 
 const loadEnvironments = async (projectId) => {
+  if (projectId == null || projectId === '' || projectId === 'undefined' || projectId === 'null') {
+    environments.value = []
+    return
+  }
+
   try {
     const response = await api.get('/api-testing/environments/', {
       params: {
@@ -1998,6 +2055,26 @@ const updateCollection = async () => {
   }
 }
 
+const openImportDialog = () => {
+  if (!selectedHubProject.value) {
+    ElMessage.warning(t('apiTesting.common.selectProject'))
+    return
+  }
+  showImportDialog.value = true
+}
+
+const onInterfacesImported = async (payload = {}) => {
+  try {
+    if (payload.hubProjectId && payload.hubProjectId !== selectedHubProject.value) {
+      await onProjectChange(payload.hubProjectId)
+    } else if (selectedProject.value) {
+      await loadCollections(selectedProject.value)
+    }
+  } catch (error) {
+    console.error('刷新集合失败:', error)
+  }
+}
+
 const importCurl = () => {
   // 清空上次的 curl 命令
   curlCommand.value = ''
@@ -2695,7 +2772,7 @@ const useLocalVariableCategories = () => {
   display: flex;
   gap: 8px;
   align-items: center;
-  flex-wrap: wrap;
+  flex-wrap: nowrap;
 }
 
 .header-actions .el-input {

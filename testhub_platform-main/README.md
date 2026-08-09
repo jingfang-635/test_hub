@@ -18,7 +18,7 @@ TestHub 是一个功能强大的智能测试管理平台，集成了 **AI 需求
 ## ✨ 核心特性
 
 ### 🤖 AI 智能化能力
-- **AI 需求分析**: 自动解析需求文档（PDF/Word/TXT），智能提取业务需求
+- **AI 需求分析**: 自动解析需求文档（PDF/Word/TXT/飞书 docx·Wiki），智能提取业务需求并生成测试用例
 - **智能测试用例生成**: 基于需求自动生成测试用例，支持多种测试类型
 - **智能助手**: 集成 Dify AI 助手，提供测试咨询和问题解答
 - **多模型支持**: 支持 DeepSeek、通义千问、硅基流动等多种 AI 模型
@@ -383,11 +383,16 @@ npm run build
 ### 2. AI 需求分析模块 (`requirement_analysis`)
 
 **功能**:
-- 上传需求文档（PDF/Word/TXT）
+- 上传需求文档（PDF/Word/TXT/Markdown）
+- **飞书文档 / Wiki**：用户 OAuth 授权后粘贴链接拉取正文并生成用例
 - AI 自动解析需求文档内容
 - 提取业务需求和功能点
-- 基于需求自动生成测试用例
+- 基于需求自动生成测试用例（流式 / 完整输出，可选自动评审）
 - 支持多种 AI 模型配置
+
+**飞书接入说明**:
+- 使用说明：[`docs/飞书需求文档解析说明.md`](docs/飞书需求文档解析说明.md)
+- 技术方案：[`docs/飞书需求解析技术方案.md`](docs/飞书需求解析技术方案.md)
 
 **数据模型**:
 - `RequirementDocument`: 需求文档
@@ -396,6 +401,8 @@ npm run build
 - `GeneratedTestCase`: 生成的测试用例
 - `AnalysisTask`: 分析任务
 - `AIModelConfig`: AI 模型配置
+- `TestCaseGenerationTask`: AI 用例生成任务（含 `source_type` / `source_url`）
+- `FeishuUserAuth` / `FeishuOAuthState`: 飞书用户 OAuth 凭证与 state
 
 ### 3. 智能助手模块 (`assistant`)
 
@@ -619,6 +626,20 @@ SIMPLE_JWT = {
 - **通义千问**: 备选 AI 模型
 - **硅基流动**: 备选 AI 模型
 - **自定义模型**: 支持配置自定义 API
+
+#### 飞书需求文档（用户 OAuth）
+
+在 `config.yaml`（或环境变量）配置企业自建应用凭证与回调：
+
+```yaml
+FEISHU_APP_ID: ""
+FEISHU_APP_SECRET: ""
+FEISHU_REDIRECT_URI: http://127.0.0.1:8000/api/requirement-analysis/feishu/oauth_callback/
+FEISHU_FRONTEND_REDIRECT: http://localhost:3000/ai-generation/requirement-analysis
+FEISHU_OAUTH_SCOPES: "offline_access docx:document:readonly wiki:wiki:readonly"
+```
+
+飞书开发者后台需开通对应 API 权限，并将重定向 URL 配置为与 `FEISHU_REDIRECT_URI` 一致。完整步骤见 [`docs/飞书需求文档解析说明.md`](docs/飞书需求文档解析说明.md)。
 
 ### Dify 助手配置
 

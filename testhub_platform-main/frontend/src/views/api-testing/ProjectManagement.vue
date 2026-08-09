@@ -291,7 +291,8 @@ const loadProjects = async () => {
 
 const loadUsers = async () => {
   try {
-    const response = await api.get('/api-testing/users/')
+    // 项目成员选择使用系统用户列表；通知邮箱另走 /api-testing/users/（EMAIL_HOST_USER）
+    const response = await api.get('/users/users/')
     users.value = response.data.results || response.data
   } catch (error) {
     ElMessage.error(t('apiTesting.messages.error.loadUsers'))

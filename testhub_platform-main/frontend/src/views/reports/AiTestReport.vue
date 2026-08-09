@@ -176,10 +176,12 @@ const defectChartRef = ref(null)
 const aiEfficiencyChartRef = ref(null)
 const workloadChartRef = ref(null)
 
-// Fetch projects
+// Fetch projects — 与「项目与版本」一致：仅显示关联了 AI用例生成 的项目
 const fetchProjects = async () => {
   try {
-    const response = await api.get('/projects/')
+    const response = await api.get('/projects/', {
+      params: { project_type: 'ai_generation', page_size: 100 }
+    })
     projects.value = response.data.results || []
   } catch (error) {
     console.error(t('report.fetchProjectsFailed'), error)

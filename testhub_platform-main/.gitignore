@@ -35,6 +35,11 @@ apps/*/migrations/*
 !apps/*/migrations/__init__.py
 !apps/*/migrations/0*.py
 
+# 重构后 apps 迁移至 backend/apps，同样规则需覆盖新路径
+backend/apps/*/migrations/*
+!backend/apps/*/migrations/__init__.py
+!backend/apps/*/migrations/0*.py
+
 # 忽略 allure-static 下的所有文件（运行时生成）
 media/allure-static/*
 !media/allure-static/.gitkeep
@@ -81,3 +86,17 @@ docker-compose*.yml
 nginx.conf
 Makefile
 build-multiplatform.sh
+
+# ========== 重构升级新增排除项 ==========
+# 忽略统一配置文件（含真实密钥，请勿提交；使用 config.yaml.example 作为模板）
+config.yaml
+# 忽略 AI 探索截图运行时文件，但保留 .gitkeep
+media/exploration_screenshots/*
+!media/exploration_screenshots/.gitkeep
+# 忽略知识库文档上传文件，但保留 .gitkeep
+media/knowledge_docs/*
+!media/knowledge_docs/.gitkeep
+# 忽略 AI 录屏二进制文件
+backend/agent_history.gif
+# 忽略临时测试脚本
+backend/_run_delete_test.py

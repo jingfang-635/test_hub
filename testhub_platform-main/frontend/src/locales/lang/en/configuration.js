@@ -136,6 +136,52 @@ export default {
     }
   },
 
+  // Knowledge Base LLM Configuration
+  knowledgeLLM: {
+    title: 'Knowledge Base LLM Configuration',
+    description: 'Configure models for embedding, document parsing, and content refining',
+    apiConfig: 'API Configuration',
+    currentConfig: 'Current Configuration',
+    embeddingTitle: 'Embedding Model Configuration',
+    refinerTitle: 'Refiner Model Configuration',
+    visionTitle: 'Vision Model Configuration',
+    bailianOnlyTip: 'Currently only Alibaba Bailian models are supported (will switch to OpenAI-compatible later)',
+    visionTip: 'Supports any OpenAI-compatible vision model. Zhipu file parsing API works better; OpenAI-compatible mode parses page by page with vision models.',
+    baseUrl: 'Base URL',
+    modelName: 'Model Name',
+    maxTokens: 'Max Tokens',
+    temperature: 'Temperature',
+    provider: 'Provider',
+    embeddingApiKey: 'Embedding API Key',
+    refinerApiKey: 'Refiner API Key',
+    visionApiKey: 'Vision API Key',
+    apiKeyPlaceholder: 'Enter API Key',
+    apiKeyPlaceholderEdit: 'Keep masked value to leave unchanged, or enter a new key',
+    apiKeyMaskHint: 'Showing masked key. Clear and enter a new API Key to replace it',
+    embeddingModelPlaceholder: 'e.g. text-embedding-v3',
+    refinerModelPlaceholder: 'e.g. qwen-plus',
+    visionBaseUrlPlaceholder: 'e.g. https://open.bigmodel.cn/api/paas/v4',
+    visionModelPlaceholder: 'e.g. glm-4.6v',
+    visionModelHint: 'Recommended: Zhipu vision model GLM-4.6V',
+    providers: {
+      zhipu: 'Zhipu (File Parsing API)',
+      openai_compatible: 'OpenAI Compatible (Vision Model)'
+    },
+    messages: {
+      loadFailed: 'Failed to load configuration',
+      saveSuccess: 'Configuration saved successfully!',
+      updateSuccess: 'Configuration updated successfully!',
+      saveFailed: 'Failed to save configuration',
+      apiKeyRequired: 'API Keys for {keys} are required on first save',
+      validationFailed: 'Please complete all required fields'
+    },
+    validation: {
+      baseUrlRequired: 'Please enter Base URL',
+      modelNameRequired: 'Please enter model name',
+      providerRequired: 'Please select a provider'
+    }
+  },
+
   // AI Model Configuration (Test Case Generation)
   aiModel: {
     title: '🤖 AI Test Case Model Config',

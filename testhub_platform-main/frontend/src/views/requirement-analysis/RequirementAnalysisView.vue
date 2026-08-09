@@ -1,10 +1,5 @@
 <template>
   <div class="requirement-analysis">
-    <div class="page-header">
-      <h1>{{ $t('requirementAnalysis.title') }}</h1>
-      <p>{{ $t('requirementAnalysis.subtitle') }}</p>
-    </div>
-
     <!-- 配置引导弹出窗口 -->
     <div v-if="showConfigGuide && !checkingConfig" class="modal-overlay" @click.self="showConfigGuide = false" :key="modalKey">
       <div class="guide-config-modal">
@@ -20,7 +15,6 @@
       </div>
 
       <div class="config-groups">
-        <!-- 模型配置行 -->
         <div class="config-group">
           <div class="group-label">{{ $t('configGuide.modelConfig') }}</div>
           <div class="config-items-row">
@@ -42,7 +36,6 @@
           </div>
         </div>
 
-        <!-- 提示词配置行 -->
         <div class="config-group">
           <div class="group-label">{{ $t('configGuide.promptConfig') }}</div>
           <div class="config-items-row">
@@ -64,7 +57,6 @@
           </div>
         </div>
 
-        <!-- 生成行为配置行 -->
         <div class="config-group">
           <div class="group-label">{{ $t('configGuide.generationConfig') }}</div>
           <div class="config-items-row">
@@ -89,250 +81,534 @@
       </div>
     </div>
 
-    <!-- 输出模式选择器 - 全局设置 -->
-    <div class="output-mode-section" v-if="!isGenerating && !showResults">
-      <div class="output-mode-card">
-        <h3>{{ $t('requirementAnalysis.outputModeTitle') }}</h3>
-        <p class="mode-section-desc">{{ $t('requirementAnalysis.outputModeDesc') }}</p>
+    <div class="page-body" v-if="!isGenerating && !showResults">
+      <!-- 输出模式设置 -->
+      <section class="section-card">
+        <h3 class="section-title">
+          <span class="section-title-icon output-icon" aria-hidden="true"></span>
+          {{ $t('requirementAnalysis.outputModeTitle') }}
+        </h3>
+        <p class="section-desc">{{ $t('requirementAnalysis.outputModeDesc') }}</p>
         <div class="output-mode-selector">
           <label class="mode-option" :class="{ active: globalOutputMode === 'stream' }">
             <input type="radio" v-model="globalOutputMode" value="stream">
             <div class="mode-content">
-              <div class="mode-title">{{ $t('requirementAnalysis.realtimeStream') }}</div>
-              <div class="mode-desc">{{ $t('requirementAnalysis.realtimeStreamDesc') }}</div>
+              <div class="mode-icon stream">⚡</div>
+              <div class="mode-text">
+                <div class="mode-title">{{ $t('requirementAnalysis.realtimeStream') }}</div>
+                <div class="mode-desc">{{ $t('requirementAnalysis.realtimeStreamDesc') }}</div>
+              </div>
             </div>
           </label>
           <label class="mode-option" :class="{ active: globalOutputMode === 'complete' }">
             <input type="radio" v-model="globalOutputMode" value="complete">
             <div class="mode-content">
-              <div class="mode-title">{{ $t('requirementAnalysis.completeOutput') }}</div>
-              <div class="mode-desc">{{ $t('requirementAnalysis.completeOutputDesc') }}</div>
+              <div class="mode-icon complete">📄</div>
+              <div class="mode-text">
+                <div class="mode-title">{{ $t('requirementAnalysis.completeOutput') }}</div>
+                <div class="mode-desc">{{ $t('requirementAnalysis.completeOutputDesc') }}</div>
+              </div>
             </div>
           </label>
         </div>
-      </div>
-    </div>
+      </section>
 
-    <div class="main-content">
-      <!-- 手动输入需求描述区域 -->
-      <div class="manual-input-section" v-if="!isGenerating && !showResults">
-        <div class="manual-input-card">
-          <h2>{{ $t('requirementAnalysis.manualInputTitle') }}</h2>
-          <div class="input-form">
-            <div class="form-group">
-              <label>{{ $t('requirementAnalysis.requirementTitle') }} <span class="required">*</span></label>
-              <input
-                v-model="manualInput.title"
-                type="text"
-                class="form-input"
-                :placeholder="$t('requirementAnalysis.titlePlaceholder')">
-            </div>
-
-            <div class="form-group">
-              <label>{{ $t('requirementAnalysis.requirementDescription') }} <span class="required">*</span></label>
-              <textarea
-                v-model="manualInput.description"
-                class="form-textarea"
-                rows="8"
-                :placeholder="$t('requirementAnalysis.descriptionPlaceholder')"></textarea>
-              <div class="char-count">{{ manualInput.description.length }}/2000</div>
-            </div>
-
-            <div class="form-group">
-              <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
-              <select v-model="manualInput.selectedProject" class="form-select">
-                <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
-                <option v-for="project in projects" :key="project.id" :value="project.id">
-                  {{ project.name }}
-                </option>
-              </select>
-            </div>
-
-            <button
-              class="generate-manual-btn"
-              @click="generateFromManualInput"
-              :disabled="!canGenerateManual || isGenerating">
-              <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
-              <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 分隔线 -->
-      <div class="divider" v-if="!isGenerating && !showResults">
-        <span>{{ $t('requirementAnalysis.dividerOr') }}</span>
+      <!-- 需求来源选择 -->
+      <div class="source-type-grid">
+        <button
+          type="button"
+          class="source-card"
+          :class="{ active: activeSource === 'manual' }"
+          @click="activeSource = 'manual'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceManual') }}</div>
+          <div class="source-card-icon manual">✏️</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceManualDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          class="source-card"
+          :class="{ active: activeSource === 'upload' }"
+          @click="activeSource = 'upload'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceUpload') }}</div>
+          <div class="source-card-icon upload">📑</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceUploadDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          class="source-card"
+          :class="{ active: activeSource === 'knowledge' }"
+          @click="activeSource = 'knowledge'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceKnowledge') }}</div>
+          <div class="source-card-icon knowledge">📚</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceKnowledgeDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          class="source-card"
+          :class="{ active: activeSource === 'axure' }"
+          @click="activeSource = 'axure'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceAxure') }}</div>
+          <div class="source-card-icon axure">🎨</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceAxureDesc') }}</p>
+        </button>
+        <button
+          type="button"
+          class="source-card"
+          :class="{ active: activeSource === 'feishu' }"
+          @click="activeSource = 'feishu'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceFeishu') }}</div>
+          <div class="source-card-icon feishu">📄</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceFeishuDesc') }}</p>
+        </button>
       </div>
 
-      <!-- 文档上传区域 -->
-      <div class="upload-section" v-if="!isGenerating && !showResults">
-        <div class="upload-card">
-          <h2>{{ $t('requirementAnalysis.uploadTitle') }}</h2>
-          <div class="upload-area"
-               @dragover.prevent
-               @drop="handleDrop"
-               :class="{ 'drag-over': isDragOver }"
-               @dragenter="isDragOver = true"
-               @dragleave="isDragOver = false">
-            <div v-if="!selectedFile" class="upload-placeholder">
-              <i class="upload-icon">📁</i>
-              <p>{{ $t('requirementAnalysis.dragDropText') }}</p>
-              <p class="upload-hint">{{ $t('requirementAnalysis.supportedFormats') }}</p>
-              <input
-                type="file"
-                ref="fileInput"
-                @change="handleFileSelect"
-                accept=".pdf,.doc,.docx,.txt,.md"
-                style="display: none;">
-              <button class="select-file-btn" @click="$refs.fileInput.click()">
-                {{ $t('requirementAnalysis.selectFile') }}
-              </button>
-            </div>
-
-            <div v-else class="file-selected">
-              <div class="file-info">
-                <i class="file-icon">📄</i>
-                <div class="file-details">
-                  <p class="file-name">{{ selectedFile.name }}</p>
-                  <p class="file-size">{{ formatFileSize(selectedFile.size) }}</p>
-                </div>
-                <button class="remove-file" @click="removeFile">❌</button>
-              </div>
-            </div>
+      <!-- 手动输入 -->
+      <section class="section-card" v-if="activeSource === 'manual'">
+        <h3 class="section-title">
+          <span class="panel-emoji">✏️</span>
+          {{ $t('requirementAnalysis.manualInputTitle') }}
+        </h3>
+        <div class="input-form">
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.requirementTitle') }} <span class="required">*</span></label>
+            <input
+              v-model="manualInput.title"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.titlePlaceholder')">
           </div>
 
-          <div v-if="selectedFile" class="document-info">
-            <div class="form-group">
-              <label>{{ $t('requirementAnalysis.documentTitle') }}</label>
-              <input
-                v-model="documentTitle"
-                type="text"
-                class="form-input"
-                :placeholder="$t('requirementAnalysis.documentPlaceholder')">
-            </div>
-
-            <div class="form-group">
-              <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
-              <select v-model="selectedProject" class="form-select">
-                <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
-                <option v-for="project in projects" :key="project.id" :value="project.id">
-                  {{ project.name }}
-                </option>
-              </select>
-            </div>
-
-            <button
-              class="generate-btn"
-              @click="generateFromDocument"
-              :disabled="!documentTitle || isGenerating">
-              <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
-              <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <!-- 生成进度和结果 -->
-      <div v-if="isGenerating || showResults" class="generation-progress">
-        <div class="progress-card">
-          <h3>
-            {{ $t('requirementAnalysis.aiGeneratingTitle') }}
-            <span class="current-mode-badge">
-              ({{ globalOutputMode === 'stream' ? $t('requirementAnalysis.realtimeStream') : $t('requirementAnalysis.completeOutput') }})
-            </span>
-          </h3>
-          <div class="progress-info">
-            <div class="progress-item">
-              <span class="label">{{ $t('requirementAnalysis.taskId') }}</span>
-              <span class="value">{{ currentTaskId || $t('requirementAnalysis.preparing') }}</span>
-            </div>
-            <div class="progress-item">
-              <span class="label">{{ $t('requirementAnalysis.currentStatus') }}</span>
-              <span class="value">{{ showResults ? $t('requirementAnalysis.generationComplete') : progressText }}</span>
-            </div>
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.requirementDescription') }} <span class="required">*</span></label>
+            <textarea
+              v-model="manualInput.description"
+              class="form-textarea"
+              rows="8"
+              :placeholder="$t('requirementAnalysis.descriptionPlaceholder')"></textarea>
+            <div class="char-count">{{ manualInput.description.length }}/2000</div>
           </div>
 
-          <!-- 流式内容实时显示区域 -->
-          <div v-if="streamedContent" class="stream-content-display">
-            <div class="stream-header">
-              <span class="stream-title">{{ $t('requirementAnalysis.realtimeGeneratedContent') }}</span>
-              <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: streamedContent.length }) }}</span>
-            </div>
-            <div class="stream-content" v-html="formatMarkdown(streamedContent)"></div>
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
+            <select v-model="manualInput.selectedProject" class="form-select">
+              <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
           </div>
 
-          <!-- 评审内容显示区域 -->
-          <div v-if="streamedReviewContent" class="stream-content-display" style="margin-top: 15px;">
-            <div class="stream-header">
-              <span class="stream-title">{{ $t('requirementAnalysis.aiReviewComments') }}</span>
-              <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: streamedReviewContent.length }) }}</span>
-            </div>
-            <div class="stream-content" v-html="formatMarkdown(streamedReviewContent)"></div>
-          </div>
-
-          <!-- 最终版用例显示区域 -->
-          <div v-if="finalTestCases" class="stream-content-display" style="margin-top: 15px;">
-            <div class="stream-header">
-              <span class="stream-title">
-                {{ $t('requirementAnalysis.finalVersionTestCases') }}
-                <span v-if="isGenerating" class="streaming-indicator">{{ $t('requirementAnalysis.generating') }}</span>
-              </span>
-              <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: finalTestCases.length }) }}</span>
-            </div>
-            <div class="stream-content final-testcases" v-html="formatMarkdown(finalTestCases)"></div>
-          </div>
-
-          <div class="progress-steps">
-            <div class="step" :class="{ active: currentStep >= 1 }">
-              <span class="step-number">1</span>
-              <span class="step-text">{{ $t('requirementAnalysis.stepAnalysis') }}</span>
-            </div>
-            <div class="step" :class="{ active: currentStep >= 2 }">
-              <span class="step-number">2</span>
-              <span class="step-text">{{ $t('requirementAnalysis.stepWriting') }}</span>
-            </div>
-            <div v-if="showReviewStep" class="step" :class="{ active: currentStep >= 3 }">
-              <span class="step-number">3</span>
-              <span class="step-text">{{ $t('requirementAnalysis.stepReview') }}</span>
-            </div>
-            <div class="step" :class="{ active: currentStep >= (showReviewStep ? 4 : 3) }">
-              <span class="step-number">{{ showReviewStep ? 4 : 3 }}</span>
-              <span class="step-text">{{ $t('requirementAnalysis.stepComplete') }}</span>
-            </div>
-          </div>
-
-          <!-- 任务完成后的操作按钮 -->
-          <div v-if="showResults" class="completion-actions">
-            <button class="download-btn" @click="downloadTestCases">
-              <span>📥 {{ $t('requirementAnalysis.downloadExcel') }}</span>
-            </button>
-            <button class="save-btn" @click="saveToTestCaseRecords">
-              <span>💾 {{ $t('requirementAnalysis.saveToRecords') }}</span>
-            </button>
-            <button class="new-generation-btn" @click="resetGeneration">
-              <span>📝 {{ $t('requirementAnalysis.newGeneration') }}</span>
-            </button>
-          </div>
-          <button v-else class="cancel-generation-btn" @click="cancelGeneration">
-            {{ $t('requirementAnalysis.cancelGeneration') }}
+          <button
+            class="generate-manual-btn"
+            @click="generateFromManualInput"
+            :disabled="!canGenerateManual || isGenerating">
+            <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
+            <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
           </button>
         </div>
-      </div>
+      </section>
 
-      <!-- 旧的生成结果区域已废弃，保留用于兼容 -->
-      <!-- 现在使用流式显示区域 + 最终版用例区域 -->
-      <div v-if="false && showResults && generationResult" class="generation-result">
-        <div class="result-header">
-          <h2>{{ $t('requirementAnalysis.generationComplete') }}</h2>
-          <div class="result-summary">
-            <span class="summary-item">
-              {{ $t('requirementAnalysis.summaryTaskId', { taskId: generationResult.task_id }) }}
-            </span>
-            <span class="summary-item">
-              {{ $t('requirementAnalysis.summaryGenerationTime', { time: formatDateTime(generationResult.completed_at) }) }}
-            </span>
+      <!-- 文档上传 -->
+      <section class="section-card" v-if="activeSource === 'upload'">
+        <h3 class="section-title">
+          <span class="panel-emoji">📑</span>
+          {{ $t('requirementAnalysis.uploadTitle') }}
+        </h3>
+        <div class="upload-area"
+             @dragover.prevent
+             @drop="handleDrop"
+             :class="{ 'drag-over': isDragOver }"
+             @dragenter="isDragOver = true"
+             @dragleave="isDragOver = false">
+          <div v-if="!selectedFile" class="upload-placeholder">
+            <i class="upload-icon">📁</i>
+            <p>{{ $t('requirementAnalysis.dragDropText') }}</p>
+            <p class="upload-hint">{{ $t('requirementAnalysis.supportedFormats') }}</p>
+            <input
+              type="file"
+              ref="fileInput"
+              @change="handleFileSelect"
+              accept=".pdf,.doc,.docx,.txt,.md"
+              style="display: none;">
+            <button class="select-file-btn" @click="$refs.fileInput.click()">
+              {{ $t('requirementAnalysis.selectFile') }}
+            </button>
+          </div>
+
+          <div v-else class="file-selected">
+            <div class="file-info">
+              <i class="file-icon">📄</i>
+              <div class="file-details">
+                <p class="file-name">{{ selectedFile.name }}</p>
+                <p class="file-size">{{ formatFileSize(selectedFile.size) }}</p>
+              </div>
+              <button class="remove-file" @click="removeFile">❌</button>
+            </div>
           </div>
         </div>
+
+        <div v-if="selectedFile" class="document-info">
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.documentTitle') }}</label>
+            <input
+              v-model="documentTitle"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.documentPlaceholder')">
+          </div>
+
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
+            <select v-model="selectedProject" class="form-select">
+              <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </div>
+
+          <button
+            class="generate-btn"
+            @click="generateFromDocument"
+            :disabled="!documentTitle || isGenerating">
+            <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
+            <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
+          </button>
+        </div>
+      </section>
+
+      <!-- 知识库需求 -->
+      <section class="section-card" v-if="activeSource === 'knowledge'">
+        <h3 class="section-title">
+          <span class="panel-emoji">📚</span>
+          {{ $t('requirementAnalysis.sourceKnowledge') }}
+        </h3>
+
+        <div class="kb-form-grid">
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.selectKnowledgeBase') }}</label>
+            <select v-model="knowledgeForm.knowledgeBaseId" class="form-select">
+              <option value="">{{ $t('requirementAnalysis.selectKnowledgeBasePlaceholder') }}</option>
+              <option v-for="base in knowledgeBases" :key="base.id" :value="base.id">
+                {{ base.name }}{{ base.document_count != null ? ` (${base.document_count})` : '' }}
+              </option>
+            </select>
+            <p v-if="!knowledgeBasesLoading && knowledgeBases.length === 0" class="kb-empty-hint">
+              {{ $t('requirementAnalysis.noKnowledgeBaseHint') }}
+              <router-link to="/ai-generation/knowledge-base">{{ $t('requirementAnalysis.goToKnowledgeBase') }}</router-link>
+            </p>
+          </div>
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
+            <select v-model="knowledgeForm.selectedProject" class="form-select">
+              <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </div>
+        </div>
+
+        <div class="kb-search-settings">
+          <div class="form-group kb-search-type">
+            <label>{{ $t('requirementAnalysis.searchType') }}</label>
+            <div class="search-type-group">
+              <button
+                type="button"
+                class="search-type-btn"
+                :class="{ active: knowledgeForm.searchType === 'hybrid' }"
+                @click="knowledgeForm.searchType = 'hybrid'">
+                {{ $t('requirementAnalysis.searchHybrid') }}
+              </button>
+              <button
+                type="button"
+                class="search-type-btn"
+                :class="{ active: knowledgeForm.searchType === 'semantic' }"
+                @click="knowledgeForm.searchType = 'semantic'">
+                {{ $t('requirementAnalysis.searchSemantic') }}
+              </button>
+              <button
+                type="button"
+                class="search-type-btn"
+                :class="{ active: knowledgeForm.searchType === 'keyword' }"
+                @click="knowledgeForm.searchType = 'keyword'">
+                {{ $t('requirementAnalysis.searchKeyword') }}
+              </button>
+            </div>
+          </div>
+
+          <div class="form-group kb-slider-group">
+            <label>{{ $t('requirementAnalysis.similarityThreshold') }}</label>
+            <div class="slider-row">
+              <input
+                type="range"
+                min="0"
+                max="100"
+                v-model.number="knowledgeForm.similarity"
+                class="form-slider">
+              <span class="slider-value">{{ knowledgeForm.similarity }}%</span>
+            </div>
+          </div>
+
+          <div class="form-group kb-recall-group">
+            <label>{{ $t('requirementAnalysis.recallCount') }}</label>
+            <input
+              type="number"
+              min="1"
+              max="50"
+              v-model.number="knowledgeForm.recallCount"
+              class="form-input form-input-sm">
+          </div>
+
+          <div class="form-group kb-slider-group" v-if="knowledgeForm.searchType === 'hybrid'">
+            <label>{{ $t('requirementAnalysis.vectorRatio') }}</label>
+            <div class="slider-row">
+              <input
+                type="range"
+                min="0"
+                max="100"
+                v-model.number="knowledgeForm.vectorRatio"
+                class="form-slider">
+              <span class="slider-value">{{ knowledgeForm.vectorRatio }}%</span>
+            </div>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label>{{ $t('requirementAnalysis.searchContent') }}</label>
+          <div class="kb-search-row">
+            <input
+              v-model="knowledgeForm.query"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.searchContentPlaceholder')">
+            <button
+              type="button"
+              class="kb-search-btn"
+              :disabled="!knowledgeForm.knowledgeBaseId || !knowledgeForm.query.trim()"
+              @click="searchKnowledgeBase">
+              {{ $t('requirementAnalysis.search') }}
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Axure 解析 -->
+      <section class="section-card axure-panel" v-if="activeSource === 'axure'">
+        <h3 class="section-title">{{ $t('requirementAnalysis.sourceAxure') }}</h3>
+
+        <div class="form-group">
+          <label>{{ $t('requirementAnalysis.axureOnlineLink') }}</label>
+          <div class="axure-link-row">
+            <input
+              v-model="axureForm.url"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.axureLinkPlaceholder')">
+            <button
+              type="button"
+              class="axure-parse-btn"
+              :disabled="!axureForm.url.trim()"
+              @click="parseAxureLink">
+              {{ $t('requirementAnalysis.confirmParse') }}
+            </button>
+          </div>
+        </div>
+
+        <div class="axure-options-row">
+          <label class="axure-radio">
+            <input type="radio" v-model="axureForm.contentMode" value="full">
+            <span>{{ $t('requirementAnalysis.axureFullContent') }}</span>
+          </label>
+          <label class="axure-radio">
+            <input type="radio" v-model="axureForm.contentMode" value="incremental">
+            <span>{{ $t('requirementAnalysis.axureIncrementalContent') }}</span>
+          </label>
+          <label class="axure-checkbox">
+            <input type="checkbox" v-model="axureForm.useAiStructure">
+            <span>{{ $t('requirementAnalysis.axureUseAiStructure') }}</span>
+          </label>
+        </div>
+
+        <div class="form-group axure-project-group">
+          <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
+          <select v-model="axureForm.selectedProject" class="form-select">
+            <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
+            <option v-for="project in projects" :key="project.id" :value="project.id">
+              {{ project.name }}
+            </option>
+          </select>
+        </div>
+      </section>
+
+      <!-- 飞书文档 -->
+      <section class="section-card feishu-panel" v-if="activeSource === 'feishu'">
+        <h3 class="section-title">
+          <span class="panel-emoji">📄</span>
+          {{ $t('requirementAnalysis.sourceFeishu') }}
+        </h3>
+        <p class="section-desc">{{ $t('requirementAnalysis.feishuHint') }}</p>
+
+        <div class="feishu-oauth-bar">
+          <template v-if="feishuOAuth.connected">
+            <span class="feishu-oauth-status">
+              {{ $t('requirementAnalysis.feishuConnectedAs', { name: feishuOAuth.feishuName || 'Feishu' }) }}
+            </span>
+            <button type="button" class="feishu-oauth-secondary" @click="disconnectFeishu" :disabled="feishuOAuth.loading">
+              {{ $t('requirementAnalysis.feishuDisconnect') }}
+            </button>
+          </template>
+          <template v-else>
+            <button
+              type="button"
+              class="feishu-oauth-primary"
+              :disabled="feishuOAuth.loading"
+              @click="connectFeishu">
+              <span v-if="feishuOAuth.loading">{{ $t('requirementAnalysis.feishuConnecting') }}</span>
+              <span v-else>{{ $t('requirementAnalysis.feishuConnect') }}</span>
+            </button>
+          </template>
+        </div>
+
+        <div class="form-group">
+          <label>{{ $t('requirementAnalysis.feishuDocLink') }} <span class="required">*</span></label>
+          <div class="axure-link-row">
+            <input
+              v-model="feishuForm.url"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.feishuLinkPlaceholder')">
+            <button
+              type="button"
+              class="axure-parse-btn"
+              :disabled="!feishuForm.url.trim() || feishuForm.parsing || !feishuOAuth.connected"
+              @click="parseFeishuLink">
+              <span v-if="feishuForm.parsing">{{ $t('requirementAnalysis.feishuParsing') }}</span>
+              <span v-else>{{ $t('requirementAnalysis.confirmParse') }}</span>
+            </button>
+          </div>
+        </div>
+
+        <div v-if="feishuForm.parsed" class="feishu-preview">
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.requirementTitle') }} <span class="required">*</span></label>
+            <input
+              v-model="feishuForm.title"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.titlePlaceholder')">
+          </div>
+
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.feishuContentPreview') }}</label>
+            <textarea
+              v-model="feishuForm.content"
+              class="form-textarea feishu-content-preview"
+              rows="10"></textarea>
+            <div class="char-count">{{ feishuForm.content.length }} {{ $t('requirementAnalysis.feishuChars') }}</div>
+          </div>
+
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
+            <select v-model="feishuForm.selectedProject" class="form-select">
+              <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
+              <option v-for="project in projects" :key="project.id" :value="project.id">
+                {{ project.name }}
+              </option>
+            </select>
+          </div>
+
+          <button
+            class="generate-manual-btn"
+            @click="generateFromFeishu"
+            :disabled="!canGenerateFeishu || isGenerating">
+            <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
+            <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
+          </button>
+        </div>
+      </section>
+    </div>
+
+    <!-- 生成进度和结果 -->
+    <div v-if="isGenerating || showResults" class="generation-progress">
+      <div class="progress-card">
+        <h3>
+          {{ $t('requirementAnalysis.aiGeneratingTitle') }}
+          <span class="current-mode-badge">
+            ({{ globalOutputMode === 'stream' ? $t('requirementAnalysis.realtimeStream') : $t('requirementAnalysis.completeOutput') }})
+          </span>
+        </h3>
+        <div class="progress-info">
+          <div class="progress-item">
+            <span class="label">{{ $t('requirementAnalysis.taskId') }}</span>
+            <span class="value">{{ currentTaskId || $t('requirementAnalysis.preparing') }}</span>
+          </div>
+          <div class="progress-item">
+            <span class="label">{{ $t('requirementAnalysis.currentStatus') }}</span>
+            <span class="value">{{ showResults ? $t('requirementAnalysis.generationComplete') : progressText }}</span>
+          </div>
+        </div>
+
+        <div v-if="streamedContent" class="stream-content-display">
+          <div class="stream-header">
+            <span class="stream-title">{{ $t('requirementAnalysis.realtimeGeneratedContent') }}</span>
+            <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: streamedContent.length }) }}</span>
+          </div>
+          <div class="stream-content" v-html="formatMarkdown(streamedContent)"></div>
+        </div>
+
+        <div v-if="streamedReviewContent" class="stream-content-display" style="margin-top: 15px;">
+          <div class="stream-header">
+            <span class="stream-title">{{ $t('requirementAnalysis.aiReviewComments') }}</span>
+            <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: streamedReviewContent.length }) }}</span>
+          </div>
+          <div class="stream-content" v-html="formatMarkdown(streamedReviewContent)"></div>
+        </div>
+
+        <div v-if="finalTestCases" class="stream-content-display" style="margin-top: 15px;">
+          <div class="stream-header">
+            <span class="stream-title">
+              {{ $t('requirementAnalysis.finalVersionTestCases') }}
+              <span v-if="isGenerating" class="streaming-indicator">{{ $t('requirementAnalysis.generating') }}</span>
+            </span>
+            <span class="stream-status">{{ $t('requirementAnalysis.characters', { count: finalTestCases.length }) }}</span>
+          </div>
+          <div class="stream-content final-testcases" v-html="formatMarkdown(finalTestCases)"></div>
+        </div>
+
+        <div class="progress-steps">
+          <div class="step" :class="{ active: currentStep >= 1 }">
+            <span class="step-number">1</span>
+            <span class="step-text">{{ $t('requirementAnalysis.stepAnalysis') }}</span>
+          </div>
+          <div class="step" :class="{ active: currentStep >= 2 }">
+            <span class="step-number">2</span>
+            <span class="step-text">{{ $t('requirementAnalysis.stepWriting') }}</span>
+          </div>
+          <div v-if="showReviewStep" class="step" :class="{ active: currentStep >= 3 }">
+            <span class="step-number">3</span>
+            <span class="step-text">{{ $t('requirementAnalysis.stepReview') }}</span>
+          </div>
+          <div class="step" :class="{ active: currentStep >= (showReviewStep ? 4 : 3) }">
+            <span class="step-number">{{ showReviewStep ? 4 : 3 }}</span>
+            <span class="step-text">{{ $t('requirementAnalysis.stepComplete') }}</span>
+          </div>
+        </div>
+
+        <div v-if="showResults" class="completion-actions">
+          <button class="download-btn" @click="downloadTestCases">
+            <span>📥 {{ $t('requirementAnalysis.downloadExcel') }}</span>
+          </button>
+          <button class="save-btn" @click="saveToTestCaseRecords">
+            <span>💾 {{ $t('requirementAnalysis.saveToRecords') }}</span>
+          </button>
+          <button class="new-generation-btn" @click="resetGeneration">
+            <span>📝 {{ $t('requirementAnalysis.newGeneration') }}</span>
+          </button>
+        </div>
+        <button v-else class="cancel-generation-btn" @click="cancelGeneration">
+          {{ $t('requirementAnalysis.cancelGeneration') }}
+        </button>
       </div>
     </div>
   </div>
@@ -340,6 +616,7 @@
 
 <script>
 import api from '@/utils/api'
+import { getKnowledgeBases } from '@/api/requirement-analysis'
 import { ElMessage } from 'element-plus'
 import * as XLSX from 'xlsx'
 import { useUserStore } from '@/stores/user'
@@ -351,11 +628,51 @@ export default {
       // 全局输出模式设置
       globalOutputMode: 'stream',  // 默认使用流式输出
 
+      // 需求来源：manual | upload | knowledge | axure | feishu
+      activeSource: 'manual',
+
       // 手动输入需求
       manualInput: {
         title: '',
         description: '',
         selectedProject: ''
+      },
+
+      // 知识库检索表单（与 /configuration/knowledge-base 同源）
+      knowledgeBases: [],
+      knowledgeBasesLoading: false,
+      knowledgeForm: {
+        knowledgeBaseId: '',
+        selectedProject: '',
+        searchType: 'hybrid',
+        similarity: 50,
+        recallCount: 5,
+        vectorRatio: 70,
+        query: ''
+      },
+
+      // Axure 解析表单（UI）
+      axureForm: {
+        url: '',
+        contentMode: 'full',
+        useAiStructure: true,
+        selectedProject: ''
+      },
+
+      // 飞书文档表单
+      feishuForm: {
+        url: '',
+        title: '',
+        content: '',
+        sourceUrl: '',
+        selectedProject: '',
+        parsing: false,
+        parsed: false
+      },
+      feishuOAuth: {
+        connected: false,
+        feishuName: '',
+        loading: false
       },
 
       // 文件上传
@@ -435,13 +752,33 @@ export default {
       return this.manualInput.title.trim() &&
              this.manualInput.description.trim() &&
              this.manualInput.description.length <= 2000
+    },
+    canGenerateFeishu() {
+      return this.feishuForm.parsed &&
+             this.feishuForm.title.trim() &&
+             this.feishuForm.content.trim()
     }
   },
 
-  mounted() {
+  async mounted() {
     this.progressText = this.$t('requirementAnalysis.preparing')
     this.loadProjects()
+    this.loadKnowledgeBases()
     this.checkConfigStatus()
+    const handled = await this.handleFeishuOAuthCallback()
+    if (!handled) {
+      await this.loadFeishuOAuthStatus()
+    }
+  },
+
+  watch: {
+    activeSource(val) {
+      if (val === 'feishu') {
+        this.loadFeishuOAuthStatus()
+      } else if (val === 'knowledge') {
+        this.loadKnowledgeBases()
+      }
+    }
   },
 
   activated() {
@@ -454,6 +791,11 @@ export default {
     // 延迟检查配置，确保页面完全加载后再显示弹窗
     setTimeout(async () => {
       await this.checkConfigStatus()
+      this.loadKnowledgeBases()
+      const handled = await this.handleFeishuOAuthCallback()
+      if (!handled) {
+        await this.loadFeishuOAuthStatus()
+      }
     }, 200)
   },
 
@@ -467,10 +809,245 @@ export default {
   },
 
   methods: {
-    async loadProjects() {
+    searchKnowledgeBase() {
+      if (!this.knowledgeForm.knowledgeBaseId) {
+        ElMessage.warning(this.$t('requirementAnalysis.selectKnowledgeBasePlaceholder'))
+        return
+      }
+      if (!this.knowledgeForm.query.trim()) return
+      ElMessage.info(this.$t('requirementAnalysis.featureComingSoon'))
+    },
+
+    async loadKnowledgeBases() {
+      // 与「系统配置 / 知识库」同一数据源：GET /requirement-analysis/knowledge-bases/
+      this.knowledgeBasesLoading = true
       try {
-        const response = await api.get('/projects/')
-        this.projects = response.data.results || response.data
+        const response = await getKnowledgeBases({ is_active: true })
+        let list = []
+        if (response.data?.results && Array.isArray(response.data.results)) {
+          list = response.data.results
+        } else if (Array.isArray(response.data)) {
+          list = response.data
+        }
+        this.knowledgeBases = list
+        if (
+          this.knowledgeForm.knowledgeBaseId &&
+          !list.some((b) => String(b.id) === String(this.knowledgeForm.knowledgeBaseId))
+        ) {
+          this.knowledgeForm.knowledgeBaseId = ''
+        }
+      } catch (error) {
+        this.knowledgeBases = []
+        console.error(this.$t('requirementAnalysis.loadKnowledgeBasesFailed'), error)
+        if (error.response?.status !== 401) {
+          ElMessage.error(this.$t('requirementAnalysis.loadKnowledgeBasesFailed'))
+        }
+      } finally {
+        this.knowledgeBasesLoading = false
+      }
+    },
+
+    parseAxureLink() {
+      if (!this.axureForm.url.trim()) return
+      ElMessage.info(this.$t('requirementAnalysis.featureComingSoon'))
+    },
+
+    async loadFeishuOAuthStatus() {
+      try {
+        const response = await api.get('/requirement-analysis/feishu/oauth_status/')
+        const data = response.data || {}
+        this.feishuOAuth.connected = !!data.connected
+        this.feishuOAuth.feishuName = data.feishu_name || ''
+      } catch (e) {
+        this.feishuOAuth.connected = false
+        this.feishuOAuth.feishuName = ''
+      }
+    },
+
+    clearFeishuOAuthQuery(extraKeys = []) {
+      const q = { ...(this.$route?.query || {}) }
+      ;['feishu_oauth', 'feishu_msg', 'code', 'state', 'error', ...extraKeys].forEach((k) => {
+        delete q[k]
+      })
+      this.$router.replace({ path: this.$route.path, query: q }).catch(() => {})
+    },
+
+    /**
+     * 处理飞书 OAuth 回跳。
+     * @returns {Promise<boolean>} 是否已处理 code 换票（调用方无需再 load status）
+     */
+    async handleFeishuOAuthCallback() {
+      const q = this.$route?.query || {}
+
+      // 前端中转：飞书直接回调到本页并带上 code/state
+      if (q.code && q.state) {
+        this.activeSource = 'feishu'
+        this.feishuOAuth.loading = true
+        try {
+          const response = await api.post('/requirement-analysis/feishu/oauth_complete/', {
+            code: q.code,
+            state: q.state
+          })
+          const data = response.data || {}
+          this.feishuOAuth.connected = !!data.connected
+          this.feishuOAuth.feishuName = data.feishu_name || ''
+          if (this.feishuOAuth.connected) {
+            ElMessage.success(this.$t('requirementAnalysis.feishuOAuthSuccess'))
+          } else {
+            ElMessage.error(this.$t('requirementAnalysis.feishuOAuthError'))
+          }
+        } catch (error) {
+          const payload = error.response?.data || {}
+          ElMessage.error(payload.error || this.$t('requirementAnalysis.feishuOAuthError'))
+          this.feishuOAuth.connected = false
+          this.feishuOAuth.feishuName = ''
+        } finally {
+          this.feishuOAuth.loading = false
+          this.clearFeishuOAuthQuery()
+        }
+        return true
+      }
+
+      const status = q.feishu_oauth
+      if (!status) return false
+
+      this.activeSource = 'feishu'
+      if (status === 'success') {
+        ElMessage.success(this.$t('requirementAnalysis.feishuOAuthSuccess'))
+        await this.loadFeishuOAuthStatus()
+      } else if (status === 'denied') {
+        ElMessage.warning(this.$t('requirementAnalysis.feishuOAuthDenied'))
+      } else {
+        ElMessage.error(q.feishu_msg || this.$t('requirementAnalysis.feishuOAuthError'))
+      }
+      this.clearFeishuOAuthQuery()
+      return status === 'success'
+    },
+
+    async connectFeishu() {
+      this.feishuOAuth.loading = true
+      try {
+        const response = await api.get('/requirement-analysis/feishu/oauth_authorize_url/')
+        const url = response.data?.authorize_url
+        if (!url) {
+          ElMessage.error(this.$t('requirementAnalysis.feishuOAuthError'))
+          return
+        }
+        window.location.href = url
+      } catch (error) {
+        const payload = error.response?.data || {}
+        const code = payload.code || ''
+        if (code === 'not_configured') {
+          ElMessage.error(this.$t('requirementAnalysis.feishuErrorNotConfigured'))
+        } else {
+          ElMessage.error(payload.error || this.$t('requirementAnalysis.feishuOAuthError'))
+        }
+        this.feishuOAuth.loading = false
+      }
+    },
+
+    async disconnectFeishu() {
+      this.feishuOAuth.loading = true
+      try {
+        await api.post('/requirement-analysis/feishu/oauth_disconnect/')
+        this.feishuOAuth.connected = false
+        this.feishuOAuth.feishuName = ''
+        this.feishuForm.parsed = false
+        ElMessage.success(this.$t('requirementAnalysis.feishuDisconnectSuccess'))
+      } catch (error) {
+        ElMessage.error(error.response?.data?.error || error.message)
+      } finally {
+        this.feishuOAuth.loading = false
+      }
+    },
+
+    async parseFeishuLink() {
+      if (!this.feishuForm.url.trim()) return
+      if (!this.feishuOAuth.connected) {
+        ElMessage.warning(this.$t('requirementAnalysis.feishuNeedConnect'))
+        return
+      }
+      this.feishuForm.parsing = true
+      this.feishuForm.parsed = false
+      try {
+        const response = await api.post('/requirement-analysis/feishu/fetch/', {
+          url: this.feishuForm.url.trim()
+        })
+        const data = response.data || {}
+        this.feishuForm.title = data.title || ''
+        this.feishuForm.content = data.content || ''
+        this.feishuForm.sourceUrl = data.source_url || this.feishuForm.url.trim()
+        this.feishuForm.parsed = true
+        ElMessage.success(this.$t('requirementAnalysis.feishuParseSuccess'))
+      } catch (error) {
+        const payload = error.response?.data || {}
+        const code = payload.code || ''
+        const msg = payload.error || error.message
+        const i18nKey = {
+          not_configured: 'feishuErrorNotConfigured',
+          invalid_url: 'feishuErrorInvalidUrl',
+          unsupported_url: 'feishuErrorUnsupportedUrl',
+          permission_denied: 'feishuErrorPermission',
+          unsupported_wiki_type: 'feishuErrorWikiType',
+          empty_content: 'feishuErrorEmpty',
+          auth_failed: 'feishuErrorAuth',
+          content_too_long: 'feishuErrorTooLong',
+          network_error: 'feishuErrorNetwork',
+          feishu_server_error: 'feishuErrorNetwork',
+          need_oauth: 'feishuErrorNeedOAuth',
+          need_reauth: 'feishuErrorNeedReauth'
+        }[code]
+        if (code === 'need_oauth' || code === 'need_reauth') {
+          this.feishuOAuth.connected = false
+        }
+        ElMessage.error(i18nKey ? this.$t(`requirementAnalysis.${i18nKey}`) : msg)
+      } finally {
+        this.feishuForm.parsing = false
+      }
+    },
+
+    async generateFromFeishu() {
+      if (!this.canGenerateFeishu) {
+        ElMessage.error(this.$t('requirementAnalysis.fillRequiredInfo'))
+        return
+      }
+      await this.startGeneration(
+        this.feishuForm.title.trim(),
+        this.feishuForm.content,
+        this.feishuForm.selectedProject,
+        this.globalOutputMode,
+        {
+          sourceType: 'feishu',
+          sourceUrl: this.feishuForm.sourceUrl || this.feishuForm.url.trim()
+        }
+      )
+    },
+
+    async loadProjects() {
+      // 与「项目与版本」一致：仅加载关联了 AI用例生成(ai_generation) 的项目
+      try {
+        const pageSize = 100
+        let page = 1
+        let hasMore = true
+        const all = []
+        while (hasMore) {
+          const response = await api.get('/projects/', {
+            params: {
+              project_type: 'ai_generation',
+              page,
+              page_size: pageSize
+            }
+          })
+          const results = response.data.results || response.data || []
+          const list = Array.isArray(results) ? results : []
+          all.push(...list)
+          if (!response.data.results || list.length < pageSize) {
+            hasMore = false
+          } else {
+            page++
+          }
+        }
+        this.projects = all
       } catch (error) {
         console.error(this.$t('requirementAnalysis.loadProjectsFailed'), error)
       }
@@ -719,7 +1296,7 @@ export default {
       }
     },
 
-    async startGeneration(title, requirementText, projectId, outputMode = 'stream') {
+    async startGeneration(title, requirementText, projectId, outputMode = 'stream', sourceMeta = {}) {
       // 在开始生成前，主动刷新token确保生成过程中不会过期
       try {
         const userStore = useUserStore()
@@ -752,12 +1329,18 @@ export default {
           requirement_text: requirementText,
           use_writer_model: true,
           use_reviewer_model: true,
-          output_mode: outputMode  // 添加输出模式参数
+          output_mode: outputMode,  // 添加输出模式参数
+          source_type: (['manual', 'upload', 'feishu'].includes(sourceMeta.sourceType || this.activeSource)
+            ? (sourceMeta.sourceType || this.activeSource)
+            : 'manual')
         }
 
         // 如果选择了项目，添加到请求中
         if (projectId) {
           requestData.project = projectId
+        }
+        if (sourceMeta.sourceUrl) {
+          requestData.source_url = sourceMeta.sourceUrl
         }
 
         const response = await api.post('/requirement-analysis/testcase-generation/generate/', requestData)
@@ -848,7 +1431,7 @@ export default {
               this.fetchFinalResult()
             } else if (data.status === 'failed') {
               this.progressText = this.$t('requirementAnalysis.statusFailed')
-              this.handleGenerationError()
+              this.handleGenerationError(data.error_message)
             }
           } else if (data.type === 'done') {
             // 流式结束，立即关闭EventSource，获取最终结果
@@ -964,7 +1547,7 @@ export default {
       }
     },
 
-    handleGenerationError() {
+    handleGenerationError(errorMessage) {
       this.isGenerating = false
       if (this.eventSource) {
         this.eventSource.close()
@@ -974,6 +1557,8 @@ export default {
         clearInterval(this.pollInterval)
         this.pollInterval = null
       }
+      const detail = errorMessage || this.$t('requirementAnalysis.unknownError')
+      ElMessage.error(this.$t('requirementAnalysis.generateFailed') + ': ' + detail)
     },
 
     startPolling() {
@@ -1474,60 +2059,53 @@ export default {
 
 <style scoped>
 .requirement-analysis {
-  padding: 20px;
+  padding: 20px 24px 32px;
   max-width: 1200px;
   margin: 0 auto;
   position: relative;
 }
 
-.page-header {
-  text-align: center;
-  margin-bottom: 40px;
+.page-body {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
 }
 
-.page-header h1 {
-  font-size: 2.5rem;
-  color: #2c3e50;
-  margin-bottom: 10px;
-}
-
-.page-header p {
-  color: #666;
-  font-size: 1.1rem;
-}
-
-/* 输出模式设置区域 - 全局 */
-.output-mode-section {
-  margin-bottom: 30px;
-}
-
-.output-mode-card {
-  background: linear-gradient(135deg, #ffffff 0%, #f8f9fa 100%);
-  border-radius: 16px;
+.section-card {
+  background: var(--th-bg-elevated);
+  border-radius: var(--th-radius-lg);
   padding: 24px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
-  border: 1px solid rgba(226, 232, 240, 0.8);
-  transition: all 0.3s ease;
+  box-shadow: var(--th-shadow-xs);
+  border: 1px solid var(--th-border);
 }
 
-.output-mode-card:hover {
-  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
-}
-
-.output-mode-card h3 {
-  font-size: 1.3rem;
-  color: #1a202c;
-  margin: 0 0 8px 0;
+.section-title {
+  font-size: 1.125rem;
+  color: var(--th-text-primary);
+  margin: 0 0 8px;
   font-weight: 600;
   display: flex;
   align-items: center;
   gap: 8px;
 }
 
-.mode-section-desc {
-  color: #64748b;
-  font-size: 0.9rem;
-  margin: 0 0 16px 0;
+.section-title-icon.output-icon {
+  width: 18px;
+  height: 18px;
+  border-radius: 4px;
+  background: linear-gradient(135deg, #60a5fa 0%, #a78bfa 50%, #f472b6 100%);
+  flex-shrink: 0;
+}
+
+.panel-emoji {
+  font-size: 1.1rem;
+  line-height: 1;
+}
+
+.section-desc {
+  color: #8c8c8c;
+  font-size: 0.875rem;
+  margin: 0 0 20px;
   line-height: 1.5;
 }
 
@@ -1574,7 +2152,7 @@ export default {
   left: 0;
   right: 0;
   height: 5px;
-  background: linear-gradient(90deg, #667eea 0%, #764ba2 100%);
+  background: linear-gradient(90deg, #6c5ce7 0%, #8b7cf0 100%);
   border-radius: 24px 24px 0 0;
 }
 
@@ -1754,7 +2332,7 @@ export default {
 }
 
 .guide-actions .generate-manual-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background: linear-gradient(135deg, #6c5ce7 0%, #5a4bd1 100%) !important;
   color: white !important;
   border: 2px solid transparent !important;
   box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);
@@ -1775,21 +2353,6 @@ export default {
 }
 
 
-.manual-input-card, .upload-card {
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e1e8ed;
-  margin-bottom: 30px;
-}
-
-.manual-input-card h2, .upload-card h2 {
-  color: #2c3e50;
-  margin-bottom: 20px;
-  font-size: 1.5rem;
-}
-
 .form-group {
   margin-bottom: 20px;
 }
@@ -1797,15 +2360,16 @@ export default {
 .form-group label {
   display: block;
   margin-bottom: 8px;
-  font-weight: 600;
-  color: #2c3e50;
+  font-weight: 500;
+  color: #374151;
+  font-size: 0.9rem;
 }
 
 /* 输出模式选择器 */
 .output-mode-selector {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 16px;
   align-items: stretch;
 }
 
@@ -1823,63 +2387,438 @@ export default {
 }
 
 .mode-content {
-  border: 2px solid #e2e8f0;
-  border-radius: 12px;
-  padding: 16px;
-  transition: all 0.3s ease;
-  background: white;
+  border: 1.5px solid var(--th-border);
+  border-radius: var(--th-radius-md);
+  padding: 18px 20px;
+  transition: all 0.2s ease;
+  background: var(--th-bg-elevated);
   display: flex;
-  flex-direction: column;
-  justify-content: center;
+  align-items: flex-start;
+  gap: 14px;
   width: 100%;
   box-sizing: border-box;
+  min-height: 88px;
+}
+
+.mode-icon {
+  font-size: 1.35rem;
+  line-height: 1;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.mode-text {
+  flex: 1;
+  min-width: 0;
 }
 
 .mode-option:hover .mode-content {
-  border-color: #3b82f6;
-  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.1);
+  border-color: var(--th-color-primary-light);
 }
 
 .mode-option.active .mode-content {
-  border-color: #3b82f6;
-  background: linear-gradient(135deg, #eff6ff 0%, #dbeafe 100%);
-  box-shadow: 0 4px 16px rgba(59, 130, 246, 0.2);
+  border-color: var(--th-color-primary);
+  background: var(--th-color-primary-softer);
+  box-shadow: 0 0 0 1px var(--th-color-primary-soft);
 }
 
 .mode-title {
-  font-size: 1rem;
+  font-size: 0.95rem;
   font-weight: 600;
-  color: #1e293b;
+  color: var(--th-text-primary);
   margin-bottom: 6px;
 }
 
 .mode-desc {
-  font-size: 0.85rem;
-  color: #64748b;
-  line-height: 1.4;
+  font-size: 0.8rem;
+  color: var(--th-text-secondary);
+  line-height: 1.45;
 }
 
 .mode-option.active .mode-title {
-  color: #2563eb;
+  color: var(--th-color-primary);
 }
 
 .mode-option.active .mode-desc {
-  color: #475569;
+  color: var(--th-text-regular);
+}
+
+/* 需求来源卡片 */
+.source-type-grid {
+  display: grid;
+  grid-template-columns: repeat(5, 1fr);
+  gap: 16px;
+}
+
+.source-card {
+  background: var(--th-bg-elevated);
+  border: 1.5px solid var(--th-border);
+  border-radius: var(--th-radius-md);
+  padding: 20px 16px 18px;
+  text-align: center;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  box-shadow: var(--th-shadow-xs);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  min-height: 168px;
+  font: inherit;
+  color: inherit;
+}
+
+.source-card:hover {
+  border-color: var(--th-color-primary-light);
+  box-shadow: var(--th-shadow-sm);
+  transform: translateY(-2px);
+}
+
+.source-card.active {
+  border-color: var(--th-color-primary);
+  background: var(--th-color-primary-softer);
+  box-shadow: 0 0 0 1px var(--th-color-primary-soft), var(--th-shadow-sm);
+}
+
+.source-card-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
+  margin-bottom: 14px;
+  line-height: 1.35;
+}
+
+.source-card.active .source-card-title {
+  color: var(--th-color-primary);
+}
+
+.source-card-icon {
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.6rem;
+  margin-bottom: 14px;
+  background: #f5f7fa;
+}
+
+.source-card-icon.manual {
+  background: linear-gradient(145deg, #fff7e6, #ffe7ba);
+}
+
+.source-card-icon.upload {
+  background: linear-gradient(145deg, #e6f4ff, #bae0ff);
+}
+
+.source-card-icon.knowledge {
+  background: linear-gradient(145deg, #f6ffed, #d9f7be);
+}
+
+.source-card-icon.axure {
+  background: linear-gradient(145deg, #fff0f6, #ffd6e7);
+}
+
+.source-card-icon.feishu {
+  background: linear-gradient(145deg, #e6f4ff, #bae0ff);
+}
+
+.source-card-desc {
+  margin: 0;
+  font-size: 0.75rem;
+  color: #8c8c8c;
+  line-height: 1.5;
+  text-align: center;
+}
+
+/* 知识库表单 */
+.kb-form-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 20px;
+}
+
+.kb-empty-hint {
+  margin: 8px 0 0;
+  font-size: 0.85rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+.kb-empty-hint a {
+  color: #1677ff;
+  text-decoration: none;
+}
+
+.kb-empty-hint a:hover {
+  text-decoration: underline;
+}
+
+.kb-search-settings {
+  display: grid;
+  grid-template-columns: 1.4fr 1.2fr 0.7fr 1.2fr;
+  gap: 16px 20px;
+  align-items: end;
+  margin-bottom: 4px;
+}
+
+.search-type-group {
+  display: flex;
+  gap: 0;
+  border: 1px solid #d9d9d9;
+  border-radius: 6px;
+  overflow: hidden;
+  width: fit-content;
+  max-width: 100%;
+}
+
+.search-type-btn {
+  border: none;
+  background: #fff;
+  color: #595959;
+  padding: 8px 14px;
+  font-size: 0.85rem;
+  cursor: pointer;
+  border-right: 1px solid #d9d9d9;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.search-type-btn:last-child {
+  border-right: none;
+}
+
+.search-type-btn:hover {
+  color: #1677ff;
+}
+
+.search-type-btn.active {
+  background: #1677ff;
+  color: #fff;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.form-slider {
+  flex: 1;
+  accent-color: #1677ff;
+  height: 4px;
+  cursor: pointer;
+}
+
+.slider-value {
+  min-width: 42px;
+  font-size: 0.875rem;
+  color: #1677ff;
+  font-weight: 600;
+  text-align: right;
+}
+
+.form-input-sm {
+  max-width: 88px;
+}
+
+.kb-search-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.kb-search-row .form-input {
+  flex: 1;
+}
+
+.kb-search-btn {
+  flex-shrink: 0;
+  min-width: 88px;
+  height: 42px;
+  border: none;
+  border-radius: 6px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+}
+
+.kb-search-btn:hover:not(:disabled) {
+  background: #4096ff;
+}
+
+.kb-search-btn:disabled {
+  background: #d9d9d9;
+  color: #fff;
+  cursor: not-allowed;
+}
+
+/* Axure 解析面板 */
+.axure-panel .section-title {
+  margin-bottom: 20px;
+}
+
+.axure-link-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+
+.axure-link-row .form-input {
+  flex: 1;
+}
+
+.axure-parse-btn {
+  flex-shrink: 0;
+  min-width: 96px;
+  height: 42px;
+  border: none;
+  border-radius: 6px;
+  background: #1677ff;
+  color: #fff;
+  font-size: 0.9rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.2s ease;
+  padding: 0 16px;
+}
+
+.axure-parse-btn:hover:not(:disabled) {
+  background: #4096ff;
+}
+
+.axure-parse-btn:disabled {
+  background: #d9d9d9;
+  color: #fff;
+  cursor: not-allowed;
+}
+
+.axure-options-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 24px;
+  margin: 4px 0 20px;
+}
+
+.axure-radio,
+.axure-checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.9rem;
+  color: #374151;
+  cursor: pointer;
+  user-select: none;
+}
+
+.axure-radio input[type="radio"],
+.axure-checkbox input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  accent-color: #1677ff;
+  cursor: pointer;
+}
+
+.axure-project-group {
+  margin-bottom: 0;
+}
+
+.feishu-panel .section-desc {
+  margin: 0 0 16px;
+  font-size: 0.875rem;
+  color: #6b7280;
+  line-height: 1.5;
+}
+
+.feishu-oauth-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  background: #f8fafc;
+  border: 1px solid #e5e7eb;
+  border-radius: 10px;
+}
+
+.feishu-oauth-status {
+  font-size: 0.9rem;
+  color: #166534;
+  font-weight: 500;
+  margin-right: auto;
+}
+
+.feishu-oauth-primary,
+.feishu-oauth-secondary {
+  border: none;
+  border-radius: 8px;
+  padding: 8px 14px;
+  font-size: 0.875rem;
+  cursor: pointer;
+}
+
+.feishu-oauth-primary {
+  background: #1677ff;
+  color: #fff;
+}
+
+.feishu-oauth-primary:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.feishu-oauth-secondary {
+  background: #fff;
+  color: #374151;
+  border: 1px solid #d1d5db;
+}
+
+.feishu-preview {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #f0f0f0;
+}
+
+.feishu-content-preview {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+  font-size: 0.875rem;
+  line-height: 1.55;
+  min-height: 200px;
+}
+
+@media (max-width: 768px) {
+  .axure-link-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .axure-options-row {
+    gap: 14px;
+  }
 }
 
 .form-input, .form-select, .form-textarea {
   width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
+  padding: 10px 12px;
+  border: 1px solid #d9d9d9;
   border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.3s ease;
+  font-size: 0.9rem;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  background: #fff;
+  color: #1f2937;
+  box-sizing: border-box;
 }
 
 .form-input:focus, .form-select:focus, .form-textarea:focus {
   outline: none;
-  border-color: #3498db;
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+  border-color: #1677ff;
+  box-shadow: 0 0 0 2px rgba(22, 119, 255, 0.12);
 }
 
 .form-textarea {
@@ -1889,72 +2828,85 @@ export default {
 
 .char-count {
   text-align: right;
-  font-size: 0.85rem;
-  color: #666;
+  font-size: 0.8rem;
+  color: #8c8c8c;
   margin-top: 5px;
 }
 
 .required {
-  color: #e74c3c;
+  color: #ff4d4f;
 }
 
 .generate-manual-btn, .generate-btn {
-  background: #27ae60;
+  background: #1677ff;
   color: white;
   border: none;
-  padding: 15px 30px;
+  padding: 12px 24px;
   border-radius: 8px;
   cursor: pointer;
-  font-size: 1.1rem;
-  transition: background 0.3s ease;
+  font-size: 1rem;
+  font-weight: 500;
+  transition: background 0.2s ease;
   width: 100%;
   margin-top: 10px;
 }
 
 .generate-manual-btn:hover:not(:disabled), .generate-btn:hover:not(:disabled) {
-  background: #219a52;
+  background: #4096ff;
 }
 
 .generate-manual-btn:disabled, .generate-btn:disabled {
-  background: #bdc3c7;
+  background: #d9d9d9;
   cursor: not-allowed;
 }
 
-.divider {
-  text-align: center;
-  margin: 40px 0;
-  position: relative;
-}
-
-.divider::before {
-  content: '';
-  position: absolute;
-  top: 50%;
-  left: 0;
-  right: 0;
-  height: 1px;
-  background: #ddd;
-}
-
-.divider span {
-  background: white;
-  padding: 0 20px;
-  color: #666;
-  font-size: 1rem;
-}
-
 .upload-area {
-  border: 2px dashed #ddd;
-  border-radius: 8px;
+  border: 1.5px dashed #d9d9d9;
+  border-radius: 10px;
   padding: 40px;
   text-align: center;
-  transition: border-color 0.3s ease;
+  transition: border-color 0.2s ease, background 0.2s ease;
   margin-bottom: 20px;
+  background: #fafafa;
 }
 
 .upload-area.drag-over {
-  border-color: #3498db;
-  background: #f8f9fa;
+  border-color: #1677ff;
+  background: #f0f7ff;
+}
+
+@media (max-width: 1100px) {
+  .source-type-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+
+  .kb-search-settings {
+    grid-template-columns: 1fr 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .output-mode-selector,
+  .source-type-grid,
+  .kb-form-grid,
+  .kb-search-settings {
+    grid-template-columns: 1fr;
+  }
+
+  .kb-search-row {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .search-type-group {
+    width: 100%;
+  }
+
+  .search-type-btn {
+    flex: 1;
+    padding: 8px 6px;
+    font-size: 0.8rem;
+  }
 }
 
 .upload-placeholder {
@@ -1974,13 +2926,18 @@ export default {
 }
 
 .select-file-btn {
-  background: #3498db;
+  background: #1677ff;
   color: white;
   border: none;
   padding: 10px 20px;
   border-radius: 6px;
   cursor: pointer;
   margin-top: 15px;
+  transition: background 0.2s ease;
+}
+
+.select-file-btn:hover {
+  background: #4096ff;
 }
 
 .file-selected {
@@ -2029,8 +2986,8 @@ export default {
   background: white;
   border-radius: 12px;
   padding: 30px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e1e8ed;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.06);
+  border: 1px solid #eef0f3;
   text-align: center;
 }
 
@@ -2046,14 +3003,14 @@ export default {
 
 .current-mode-badge {
   display: inline-block;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background: #1677ff;
   color: white;
   padding: 4px 12px;
   border-radius: 20px;
   font-size: 0.85rem;
   font-weight: 500;
   margin-left: 8px;
-  box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
+  box-shadow: 0 2px 8px rgba(22, 119, 255, 0.25);
 }
 
 .progress-info {
@@ -2531,7 +3488,7 @@ export default {
 }
 
 .guide-actions .generate-manual-btn {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%) !important;
+  background: linear-gradient(135deg, #6c5ce7 0%, #5a4bd1 100%) !important;
   color: white !important;
   border: 2px solid transparent !important;
   box-shadow: 0 2px 10px rgba(102, 126, 234, 0.3);

@@ -538,12 +538,13 @@ const loadEnvironments = async () => {
 }
 
 const loadRequestTree = async () => {
-  if (!selectedProject.value) return
+  const projectId = selectedProject.value
+  if (projectId == null || projectId === '' || projectId === 'undefined' || projectId === 'null') return
 
   try {
     // 加载集合
     const collectionsRes = await api.get('/api-testing/collections/', {
-      params: { project: selectedProject.value }
+      params: { project: projectId }
     })
     const collections = collectionsRes.data.results || collectionsRes.data
 

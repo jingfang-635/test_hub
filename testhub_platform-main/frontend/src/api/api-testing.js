@@ -105,6 +105,24 @@ export function getApiCollections(params) {
   })
 }
 
+// 解析导入文件（Swagger / Postman / HAR / cURL）
+export function parseImportInterfaces(data) {
+  return request({
+    url: '/api-testing/requests/parse-import/',
+    method: 'post',
+    data
+  })
+}
+
+// 批量导入接口
+export function bulkImportInterfaces(data) {
+  return request({
+    url: '/api-testing/requests/bulk-import/',
+    method: 'post',
+    data
+  })
+}
+
 // 执行测试套件
 export function executeTestSuite(id, data) {
   return request({

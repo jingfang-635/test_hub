@@ -6,7 +6,7 @@ export default {
     language: 'Language'
   },
   modules: {
-    aiGeneration: 'AI Test Case Generation',
+    aiGeneration: 'Case Management',
     apiTesting: 'API Testing',
     uiAutomation: 'UI Automation Testing',
     aiIntelligentMode: 'AI Intelligent Mode',
@@ -19,7 +19,8 @@ export default {
     aiGeneratedTestcases: 'AI Generated Test Cases',
     promptConfig: 'Prompt Configuration',
     projectManagement: 'Project Management',
-    testCases: 'Test Cases',
+    projectAndVersion: 'Projects & Versions',
+    testCases: 'Case Library',
     versionManagement: 'Version Management',
     reviewManagement: 'Review Management',
     reviewList: 'Review List',
@@ -54,9 +55,16 @@ export default {
     aiModelConfig: 'Model Config',
     promptConfig: 'Prompt Configuration',
     generationConfig: 'Generation Behavior Config',
+    knowledgeBaseManage: 'Knowledge Base',
+    knowledgeBaseConfig: 'Knowledge Base Config',
     uiEnvConfig: 'UI Environment Configuration',
     aiModeConfig: 'AI Mode Configuration',
     scheduledTaskConfig: 'Scheduled Task Configuration',
-    difyConfig: 'Dify Configuration'
+    difyConfig: 'Dify Configuration',
+    // Core Module
+    coreModule: 'Core Module',
+    performanceStats: 'Performance Statistics',
+    requestPerformanceLog: 'Request Performance Log',
+    notificationTemplate: 'Notification Template'
   }
 }

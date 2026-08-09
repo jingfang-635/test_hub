@@ -78,19 +78,19 @@
           {{ formatDate(scope.row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column :label="$t('execution.actions')" width="200" fixed="right">
+      <el-table-column :label="$t('execution.actions')" width="300" fixed="right">
         <template #default="scope">
+          <el-button size="small" type="success" @click="openAssignTestcases(scope.row)">
+            {{ $t('execution.assignCases') }}
+          </el-button>
           <el-button size="small" type="primary" @click="viewPlan(scope.row.id)">
             {{ $t('execution.viewExecution') }}
           </el-button>
           <el-button size="small" type="warning" @click="editPlan(scope.row)">
             {{ $t('common.edit') }}
           </el-button>
-          <el-button
-            size="small"
-            :type="scope.row.is_active ? 'danger' : 'success'"
-            @click="togglePlanStatus(scope.row)">
-            {{ scope.row.is_active ? $t('execution.closePlan') : $t('execution.activatePlan') }}
+          <el-button size="small" type="danger" @click="deletePlan(scope.row)">
+            {{ $t('common.delete') }}
           </el-button>
         </template>
       </el-table-column>
@@ -134,23 +134,23 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('execution.relatedVersion')">
-          <el-select v-model="newPlanForm.version" :placeholder="$t('execution.selectVersion')" style="width: 100%">
-            <el-option v-for="item in versions" :key="item.id" :label="item.name" :value="item.id"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('execution.testCases')" prop="testcases">
           <el-select
-            v-model="newPlanForm.testcases"
-            multiple
-            :placeholder="loadingTestcases ? $t('execution.loadingTestcases') : (!newPlanForm.projects || newPlanForm.projects.length === 0 ? $t('execution.selectTestcasesDisabled') : $t('execution.selectTestcases'))"
+            v-model="newPlanForm.version"
+            :placeholder="!newPlanForm.projects || newPlanForm.projects.length === 0 ? $t('execution.selectVersionDisabled') : $t('execution.selectVersion')"
             style="width: 100%"
             :disabled="!newPlanForm.projects || newPlanForm.projects.length === 0"
-            :loading="loadingTestcases"
-            @visible-change="handleTestcaseSelectOpen">
-            <el-option v-for="item in filteredTestcases" :key="item.id" :label="item.title" :value="item.id">
-              <span style="float: left">{{ item.title }}</span>
-              <span style="float: right; color: #8492a6; font-size: 13px">{{ item.project__name }}</span>
-            </el-option>
+            :loading="loadingVersions"
+            clearable>
+            <el-option-group
+              v-for="group in versionGroups"
+              :key="group.projectId"
+              :label="group.projectName">
+              <el-option
+                v-for="item in group.versions"
+                :key="`${group.projectId}-${item.id}`"
+                :label="item.name"
+                :value="item.id" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('execution.assignees')">
@@ -163,6 +163,101 @@
         <span class="dialog-footer">
           <el-button @click="isCreatePlanDialogOpen = false">{{ $t('common.cancel') }}</el-button>
           <el-button type="primary" @click="createPlan" :loading="creating">{{ $t('execution.createPlan') }}</el-button>
+        </span>
+      </template>
+    </el-dialog>
+
+    <!-- 选择测试用例对话框 -->
+    <el-dialog
+      :title="$t('execution.testcaseSelectorTitle')"
+      v-model="isTestcaseSelectorOpen"
+      width="900px"
+      :close-on-click-modal="false"
+      class="testcase-selector-dialog"
+      @closed="onTestcaseSelectorClosed">
+      <div class="testcase-selector-filters">
+        <el-form :inline="true" @submit.prevent>
+          <el-form-item :label="$t('execution.keyword')">
+            <el-input
+              v-model="testcaseFilters.keyword"
+              :placeholder="$t('execution.keywordPlaceholder')"
+              clearable
+              style="width: 180px"
+              @keyup.enter="applyTestcaseFilters" />
+          </el-form-item>
+          <el-form-item :label="$t('execution.priority')">
+            <el-select v-model="testcaseFilters.priority" :placeholder="$t('execution.allPriority')" clearable style="width: 140px">
+              <el-option :label="$t('execution.allPriority')" value="" />
+              <el-option label="P0" value="P0" />
+              <el-option label="P1" value="P1" />
+              <el-option label="P2" value="P2" />
+              <el-option label="P3" value="P3" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('execution.testType')">
+            <el-select v-model="testcaseFilters.test_type" :placeholder="$t('execution.allTestType')" clearable style="width: 140px">
+              <el-option :label="$t('execution.allTestType')" value="" />
+              <el-option :label="$t('testcase.functional')" value="functional" />
+              <el-option :label="$t('testcase.integration')" value="integration" />
+              <el-option :label="$t('testcase.api')" value="api" />
+              <el-option :label="$t('testcase.ui')" value="ui" />
+              <el-option :label="$t('testcase.performance')" value="performance" />
+              <el-option :label="$t('testcase.security')" value="security" />
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="applyTestcaseFilters">{{ $t('common.search') }}</el-button>
+            <el-button @click="resetTestcaseFilters">{{ $t('common.reset') }}</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
+
+      <el-table
+        ref="testcaseTableRef"
+        :data="paginatedTestcases"
+        v-loading="loadingTestcases"
+        row-key="id"
+        max-height="400"
+        @selection-change="handleTestcaseSelectionChange">
+        <el-table-column type="selection" width="48" reserve-selection />
+        <el-table-column :label="$t('execution.caseNumber')" width="70" align="center">
+          <template #default="{ $index }">
+            {{ (testcasePage - 1) * testcasePageSize + $index + 1 }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="title" :label="$t('execution.caseTitle')" min-width="220" show-overflow-tooltip />
+        <el-table-column prop="priority" :label="$t('execution.priority')" width="90" align="center">
+          <template #default="{ row }">
+            <el-tag :class="`priority-tag ${row.priority}`" size="small" effect="light">
+              {{ getPriorityText(row.priority) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="test_type" :label="$t('execution.testType')" width="110" align="center">
+          <template #default="{ row }">
+            {{ getTypeText(row.test_type) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="project__name" :label="$t('execution.belongsToProject')" width="140" show-overflow-tooltip />
+      </el-table>
+
+      <div class="testcase-selector-pagination">
+        <el-pagination
+          v-model:current-page="testcasePage"
+          v-model:page-size="testcasePageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :total="filteredSelectorTestcases.length"
+          layout="total, sizes, prev, pager, next"
+          @size-change="handleTestcaseSizeChange"
+          @current-change="handleTestcasePageChange" />
+      </div>
+
+      <template #footer>
+        <span class="dialog-footer">
+          <el-button @click="isTestcaseSelectorOpen = false">{{ $t('common.cancel') }}</el-button>
+          <el-button type="primary" @click="confirmTestcaseSelection" :loading="assigning">
+            {{ $t('execution.confirmSelect') }} ({{ tempSelectedTestcases.length }})
+          </el-button>
         </span>
       </template>
     </el-dialog>
@@ -182,13 +277,33 @@
           </el-input>
         </el-form-item>
         <el-form-item :label="$t('execution.relatedProjects')" prop="projects">
-          <el-select v-model="editPlanForm.projects" multiple :placeholder="$t('execution.selectProjects')" style="width: 100%">
+          <el-select
+            v-model="editPlanForm.projects"
+            multiple
+            :placeholder="$t('execution.selectProjects')"
+            style="width: 100%"
+            @change="handleEditProjectChange">
             <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id"></el-option>
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('execution.relatedVersion')">
-          <el-select v-model="editPlanForm.version" :placeholder="$t('execution.selectVersion')" style="width: 100%">
-            <el-option v-for="item in versions" :key="item.id" :label="item.name" :value="item.id"></el-option>
+          <el-select
+            v-model="editPlanForm.version"
+            :placeholder="!editPlanForm.projects || editPlanForm.projects.length === 0 ? $t('execution.selectVersionDisabled') : $t('execution.selectVersion')"
+            style="width: 100%"
+            :disabled="!editPlanForm.projects || editPlanForm.projects.length === 0"
+            :loading="loadingVersions"
+            clearable>
+            <el-option-group
+              v-for="group in versionGroups"
+              :key="group.projectId"
+              :label="group.projectName">
+              <el-option
+                v-for="item in group.versions"
+                :key="`${group.projectId}-${item.id}`"
+                :label="item.name"
+                :value="item.id" />
+            </el-option-group>
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('execution.assignees')">
@@ -197,11 +312,7 @@
           </el-select>
         </el-form-item>
         <el-form-item :label="$t('execution.planStatus')">
-          <el-switch
-            v-model="editPlanForm.is_active"
-            :active-text="$t('execution.activeText')"
-            :inactive-text="$t('execution.inactiveText')">
-          </el-switch>
+          <el-switch v-model="editPlanForm.is_active" />
         </el-form-item>
       </el-form>
       <template #footer>
@@ -215,7 +326,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, watch, computed } from 'vue'
+import { ref, reactive, onMounted, computed, nextTick } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
@@ -231,12 +342,33 @@ const updating = ref(false)
 const testPlans = ref([])
 const projects = ref([])
 const versions = ref([])
-const testcases = ref([])
 const filteredTestcases = ref([])
 const loadingTestcases = ref(false)
+const versionGroups = ref([])
+const loadingVersions = ref(false)
 const users = ref([])
 const selectedPlans = ref([])
 const isDeleting = ref(false)
+
+// 测试用例选择弹窗
+const isTestcaseSelectorOpen = ref(false)
+const testcaseTableRef = ref()
+const tempSelectedTestcases = ref([])
+const syncingTestcaseSelection = ref(false)
+const assigning = ref(false)
+const assigningPlanId = ref(null)
+const testcasePage = ref(1)
+const testcasePageSize = ref(20)
+const testcaseFilters = reactive({
+  keyword: '',
+  priority: '',
+  test_type: ''
+})
+const appliedTestcaseFilters = reactive({
+  keyword: '',
+  priority: '',
+  test_type: ''
+})
 
 // 分页
 const currentPage = ref(1)
@@ -260,7 +392,6 @@ const newPlanForm = reactive({
   description: '',
   projects: [], // 改为数组
   version: null,
-  testcases: [],
   assignees: []
 })
 
@@ -280,24 +411,32 @@ const planRules = {
   ],
   projects: [
     { required: true, message: computed(() => t('execution.projectsRequired')), trigger: 'change' }
-  ],
-  testcases: [
-    {
-      required: true,
-      message: computed(() => t('execution.testcasesRequired')),
-      trigger: 'change',
-      validator: (rule, value, callback) => {
-        if (!newPlanForm.projects || newPlanForm.projects.length === 0) {
-          callback(new Error(t('execution.selectProjectBeforeTestcases')))
-        } else if (!value || value.length === 0) {
-          callback(new Error(t('execution.testcasesRequired')))
-        } else {
-          callback()
-        }
-      }
-    }
   ]
 }
+
+const filteredSelectorTestcases = computed(() => {
+  let list = filteredTestcases.value || []
+  const keyword = (appliedTestcaseFilters.keyword || '').trim().toLowerCase()
+  if (keyword) {
+    list = list.filter(item => {
+      const title = (item.title || '').toLowerCase()
+      const idText = String(item.id || '')
+      return title.includes(keyword) || idText.includes(keyword)
+    })
+  }
+  if (appliedTestcaseFilters.priority) {
+    list = list.filter(item => item.priority === appliedTestcaseFilters.priority)
+  }
+  if (appliedTestcaseFilters.test_type) {
+    list = list.filter(item => item.test_type === appliedTestcaseFilters.test_type)
+  }
+  return list
+})
+
+const paginatedTestcases = computed(() => {
+  const start = (testcasePage.value - 1) * testcasePageSize.value
+  return filteredSelectorTestcases.value.slice(start, start + testcasePageSize.value)
+})
 
 const fetchTestPlans = async () => {
   loading.value = true
@@ -327,7 +466,8 @@ const fetchTestPlans = async () => {
 const fetchBasicData = async () => {
   try {
     const [projectsRes, versionsRes, usersRes] = await Promise.all([
-      api.get('/projects/'), // 只显示用户参与的项目
+      // 与「项目与版本」一致：仅显示关联了 AI用例生成 的项目
+      api.get('/projects/', { params: { project_type: 'ai_generation', page_size: 100 } }),
       api.get('/versions/'),
       api.get('/users/users/') // 修正用户API路径
     ])
@@ -338,6 +478,52 @@ const fetchBasicData = async () => {
   } catch (error) {
     console.error('获取基础数据失败:', error)
   }
+}
+
+// 根据选中的项目加载版本（按项目分组）
+const loadVersionsByProjects = async (projectIds, form = newPlanForm) => {
+  if (!projectIds || projectIds.length === 0) {
+    versionGroups.value = []
+    return
+  }
+
+  loadingVersions.value = true
+  try {
+    const groups = await Promise.all(
+      projectIds.map(async (projectId) => {
+        const project = projects.value.find(p => p.id === projectId)
+        const response = await api.get(`/versions/projects/${projectId}/versions/`)
+        const list = (response.data.results || response.data || []).filter(item => item != null)
+        return {
+          projectId,
+          projectName: project?.name || String(projectId),
+          versions: list
+        }
+      })
+    )
+    versionGroups.value = groups
+
+    // 若当前选中版本已不在可选列表中，则清空
+    const availableIds = new Set(groups.flatMap(group => group.versions.map(v => v.id)))
+    if (form.version && !availableIds.has(form.version)) {
+      form.version = null
+    }
+  } catch (error) {
+    console.error('Load versions error:', error)
+    versionGroups.value = []
+    ElMessage.error(t('execution.fetchVersionsFailed'))
+  } finally {
+    loadingVersions.value = false
+  }
+}
+
+const findVersionIdByName = (versionName) => {
+  if (!versionName) return null
+  const fromGroups = versionGroups.value
+    .flatMap(group => group.versions)
+    .find(v => v.name === versionName)
+  if (fromGroups) return fromGroups.id
+  return versions.value.find(v => v.name === versionName)?.id || null
 }
 
 // 根据选中的项目加载测试用例
@@ -375,24 +561,163 @@ const loadTestcasesByProjects = async (projectIds) => {
   }
 }
 
-// 处理测试用例选择器打开事件
-const handleTestcaseSelectOpen = (visible) => {
-  if (visible && (!newPlanForm.projects || newPlanForm.projects.length === 0)) {
-    ElMessage.warning(t('execution.selectProjectFirst'))
-    return false
+const getPriorityText = (priority) => {
+  const textMap = {
+    P0: t('testcase.p0'),
+    P1: t('testcase.p1'),
+    P2: t('testcase.p2'),
+    P3: t('testcase.p3'),
+    high: t('testcase.high'),
+    medium: t('testcase.medium'),
+    low: t('testcase.low'),
+    critical: t('testcase.critical')
   }
+  return textMap[priority] || priority
+}
+
+const getTypeText = (type) => {
+  const textMap = {
+    functional: t('testcase.functional'),
+    integration: t('testcase.integration'),
+    api: t('testcase.api'),
+    ui: t('testcase.ui'),
+    performance: t('testcase.performance'),
+    security: t('testcase.security')
+  }
+  return textMap[type] || type || '-'
+}
+
+const syncTestcaseTableSelection = async () => {
+  await nextTick()
+  const table = testcaseTableRef.value
+  if (!table) return
+  syncingTestcaseSelection.value = true
+  table.clearSelection()
+  const selectedIds = new Set(tempSelectedTestcases.value.map(item => item.id))
+  filteredTestcases.value.forEach(row => {
+    if (selectedIds.has(row.id)) {
+      table.toggleRowSelection(row, true)
+    }
+  })
+  await nextTick()
+  syncingTestcaseSelection.value = false
+}
+
+const openAssignTestcases = async (plan) => {
+  try {
+    assigningPlanId.value = plan.id
+    loadingTestcases.value = true
+
+    const assignedRes = await api.get(`/executions/plans/${plan.id}/assigned_testcases/`)
+    const projectIds = assignedRes.data.project_ids || []
+    const assignedIds = new Set(assignedRes.data.testcase_ids || [])
+
+    if (!projectIds.length) {
+      ElMessage.warning(t('execution.assignNeedProject'))
+      assigningPlanId.value = null
+      return
+    }
+
+    await loadTestcasesByProjects(projectIds)
+
+    testcasePage.value = 1
+    Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
+    Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
+    tempSelectedTestcases.value = filteredTestcases.value.filter(item => assignedIds.has(item.id))
+
+    isTestcaseSelectorOpen.value = true
+    await syncTestcaseTableSelection()
+  } catch (error) {
+    console.error('Open assign testcases failed:', error)
+    ElMessage.error(t('execution.fetchTestcasesFailed'))
+    assigningPlanId.value = null
+  } finally {
+    loadingTestcases.value = false
+  }
+}
+
+const applyTestcaseFilters = () => {
+  Object.assign(appliedTestcaseFilters, { ...testcaseFilters })
+  testcasePage.value = 1
+}
+
+const resetTestcaseFilters = () => {
+  Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
+  Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
+  testcasePage.value = 1
+}
+
+const handleTestcaseSelectionChange = (selection) => {
+  if (syncingTestcaseSelection.value) return
+  // 客户端分页时 selection 通常仅含当前页，需与跨页已选合并
+  const currentPageIds = new Set(paginatedTestcases.value.map(item => item.id))
+  const kept = tempSelectedTestcases.value.filter(item => !currentPageIds.has(item.id))
+  const merged = [...kept]
+  selection.forEach(item => {
+    if (!merged.some(existing => existing.id === item.id)) {
+      merged.push(item)
+    }
+  })
+  tempSelectedTestcases.value = merged
+}
+
+const handleTestcaseSizeChange = () => {
+  testcasePage.value = 1
+}
+
+const handleTestcasePageChange = () => {
+  // 分页切换后保留勾选状态由 reserve-selection 处理
+}
+
+const confirmTestcaseSelection = async () => {
+  if (!assigningPlanId.value) {
+    isTestcaseSelectorOpen.value = false
+    return
+  }
+  if (!tempSelectedTestcases.value.length) {
+    ElMessage.warning(t('execution.testcasesRequired'))
+    return
+  }
+
+  assigning.value = true
+  try {
+    const response = await api.post(`/executions/plans/${assigningPlanId.value}/assign_testcases/`, {
+      testcases: tempSelectedTestcases.value.map(item => item.id)
+    })
+    const addedCount = response.data?.added_count ?? 0
+    ElMessage.success(t('execution.assignSuccess', { count: addedCount }))
+    isTestcaseSelectorOpen.value = false
+  } catch (error) {
+    const detail = error.response?.data?.detail || error.response?.data?.error
+    ElMessage.error(detail || t('execution.assignFailed'))
+  } finally {
+    assigning.value = false
+  }
+}
+
+const onTestcaseSelectorClosed = () => {
+  tempSelectedTestcases.value = []
+  assigningPlanId.value = null
+  filteredTestcases.value = []
 }
 
 // 处理项目选择变化
 const handleProjectChange = (selectedProjects) => {
-  // 清空已选择的测试用例
-  newPlanForm.testcases = []
-  
-  // 加载新项目的测试用例
+  newPlanForm.version = null
+
   if (selectedProjects && selectedProjects.length > 0) {
-    loadTestcasesByProjects(selectedProjects)
+    loadVersionsByProjects(selectedProjects, newPlanForm)
   } else {
-    filteredTestcases.value = []
+    versionGroups.value = []
+  }
+}
+
+const handleEditProjectChange = (selectedProjects) => {
+  editPlanForm.version = null
+  if (selectedProjects && selectedProjects.length > 0) {
+    loadVersionsByProjects(selectedProjects, editPlanForm)
+  } else {
+    versionGroups.value = []
   }
 }
 
@@ -428,20 +753,26 @@ const editPlan = async (plan) => {
     // 设置当前编辑的计划
     currentEditingPlan.value = planDetail
 
+    const projectIds = planDetail.projects?.map(p => {
+      // 如果是字符串，需要找到对应的项目ID
+      const project = projects.value.find(proj => proj.name === p)
+      return project ? project.id : p
+    }) || []
+
     // 填充编辑表单数据
     Object.assign(editPlanForm, {
       id: planDetail.id,
       name: planDetail.name,
       description: planDetail.description || '',
-      projects: planDetail.projects?.map(p => {
-        // 如果是字符串，需要找到对应的项目ID
-        const project = projects.value.find(proj => proj.name === p)
-        return project ? project.id : p
-      }) || [],
-      version: planDetail.version ? versions.value.find(v => v.name === planDetail.version)?.id : null,
+      projects: projectIds,
+      version: null,
       assignees: planDetail.assignees || [],
       is_active: planDetail.is_active
     })
+
+    // 按关联项目加载版本分组后再回填版本
+    await loadVersionsByProjects(projectIds, editPlanForm)
+    editPlanForm.version = findVersionIdByName(planDetail.version)
 
     isEditPlanDialogOpen.value = true
   } catch (error) {
@@ -487,26 +818,30 @@ const resetEditForm = () => {
     assignees: [],
     is_active: true
   })
+  versionGroups.value = []
+  loadingVersions.value = false
   currentEditingPlan.value = null
   editPlanFormRef.value?.resetFields()
 }
 
-const togglePlanStatus = async (plan) => {
+const deletePlan = async (plan) => {
   try {
-    const action = plan.is_active ? t('execution.closePlan') : t('execution.activatePlan')
-    await ElMessageBox.confirm(t('execution.toggleStatusConfirm', { action }), t('common.confirm'), {
-      type: 'warning'
-    })
+    await ElMessageBox.confirm(
+      t('execution.deleteConfirm', { name: plan.name }),
+      t('common.warning'),
+      {
+        confirmButtonText: t('common.confirm'),
+        cancelButtonText: t('common.cancel'),
+        type: 'warning'
+      }
+    )
 
-    await api.patch(`/executions/plans/${plan.id}/`, {
-      is_active: !plan.is_active
-    })
-
-    ElMessage.success(t('execution.toggleStatusSuccess', { action }))
+    await api.delete(`/executions/plans/${plan.id}/`)
+    ElMessage.success(t('execution.deleteSuccess'))
     fetchTestPlans()
   } catch (error) {
     if (error !== 'cancel') {
-      ElMessage.error(t('execution.toggleStatusFailed'))
+      ElMessage.error(t('execution.deleteFailed'))
     }
   }
 }
@@ -522,11 +857,10 @@ const resetPlanForm = () => {
     description: '',
     projects: [], // 改为数组
     version: null,
-    testcases: [],
     assignees: []
   })
-  filteredTestcases.value = [] // 清空过滤后的测试用例
-  loadingTestcases.value = false // 重置加载状态
+  versionGroups.value = []
+  loadingVersions.value = false
   planFormRef.value?.resetFields()
 }
 
@@ -625,23 +959,6 @@ const batchDeletePlans = async () => {
   }
 }
 
-// 监听项目选择变化
-watch(
-  () => newPlanForm.projects,
-  (newProjects, oldProjects) => {
-    // 清空已选择的测试用例
-    newPlanForm.testcases = []
-    
-    // 加载新项目的测试用例
-    if (newProjects && newProjects.length > 0) {
-      loadTestcasesByProjects(newProjects)
-    } else {
-      filteredTestcases.value = []
-    }
-  },
-  { deep: true }
-)
-
 onMounted(() => {
   fetchTestPlans()
   fetchBasicData()
@@ -675,12 +992,50 @@ onMounted(() => {
 .pagination {
   margin-top: 20px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 .dialog-footer {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+
+.testcase-selector-filters {
+  margin-bottom: 12px;
+}
+
+.testcase-selector-pagination {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.priority-tag.P0,
+.priority-tag.critical {
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-color: #f5dab1;
+}
+
+.priority-tag.P1,
+.priority-tag.high {
+  color: #e6a23c;
+  background: #fdf6ec;
+  border-color: #f5dab1;
+}
+
+.priority-tag.P2,
+.priority-tag.medium {
+  color: #67c23a;
+  background: #f0f9eb;
+  border-color: #c2e7b0;
+}
+
+.priority-tag.P3,
+.priority-tag.low {
+  color: #909399;
+  background: #f4f4f5;
+  border-color: #d3d4d6;
 }
 </style>

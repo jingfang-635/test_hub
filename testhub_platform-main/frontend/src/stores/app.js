@@ -1,21 +1,41 @@
 import { defineStore } from 'pinia'
-import { ref } from 'vue'
+import { ref, watch } from 'vue'
 import i18n from '@/locales'
 
-export const useAppStore = defineStore('app', () => {
-  // 状态：当前语言
-  const language = ref(localStorage.getItem('app-lang') || 'zh-cn')
+function applyTheme(isDark) {
+  const root = document.documentElement
+  if (isDark) {
+    root.classList.add('dark')
+  } else {
+    root.classList.remove('dark')
+  }
+}
 
-  // 动作：切换语言
+export const useAppStore = defineStore('app', () => {
+  const language = ref(localStorage.getItem('app-lang') || 'zh-cn')
+  const isDark = ref(localStorage.getItem('app-theme') === 'dark')
+
+  // 初始化主题
+  applyTheme(isDark.value)
+
   const setLanguage = (lang) => {
     language.value = lang
-    // 1. 修改 i18n 实例语言
     i18n.global.locale.value = lang
-    // 2. 持久化
     localStorage.setItem('app-lang', lang)
-    // 3. 设置 HTML 标签 lang 属性，利于 SEO 和浏览器识别
     document.querySelector('html')?.setAttribute('lang', lang)
   }
 
-  return { language, setLanguage }
+  const setDark = (dark) => {
+    isDark.value = dark
+    localStorage.setItem('app-theme', dark ? 'dark' : 'light')
+    applyTheme(dark)
+  }
+
+  const toggleDark = () => {
+    setDark(!isDark.value)
+  }
+
+  watch(isDark, (val) => applyTheme(val))
+
+  return { language, isDark, setLanguage, setDark, toggleDark }
 })

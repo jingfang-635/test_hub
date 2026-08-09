@@ -9,7 +9,6 @@ import ProjectList from '@/views/projects/ProjectList.vue'
 import Home from '@/views/Home.vue'
 import DataFactory from '@/views/data-factory/DataFactory.vue'
 import ApiDashboard from '@/views/api-testing/Dashboard.vue'
-import ApiProjectManagement from '@/views/api-testing/ProjectManagement.vue'
 import ApiInterfaceManagement from '@/views/api-testing/InterfaceManagement.vue'
 import ApiAutomationTesting from '@/views/api-testing/AutomationTesting.vue'
 import ApiRequestHistory from '@/views/api-testing/RequestHistory.vue'
@@ -19,7 +18,6 @@ import ApiScheduledTasks from '@/views/api-testing/ScheduledTasks.vue'
 import ApiAIServiceConfig from '@/views/api-testing/AIServiceConfig.vue'
 import NotificationLogs from '@/views/notification/NotificationLogs.vue'
 import UiDashboard from '@/views/ui-automation/dashboard/Dashboard.vue'
-import UiProjectList from '@/views/ui-automation/projects/ProjectList.vue'
 import UiElementManagerEnhanced from '@/views/ui-automation/elements/ElementManagerEnhanced.vue'
 import UiTestCaseManager from '@/views/ui-automation/test-cases/TestCaseManager.vue'
 import UiScriptEditorEnhanced from '@/views/ui-automation/scripts/ScriptEditorEnhanced.vue'
@@ -92,6 +90,11 @@ const routes = [
         path: 'testcases',
         name: 'TestCases',
         component: () => import('@/views/testcases/TestCaseList.vue')
+      },
+      {
+        path: 'knowledge-base',
+        name: 'AiGenerationKnowledgeBase',
+        component: () => import('@/views/requirement-analysis/KnowledgeBaseManage.vue')
       },
       {
         path: 'testcases/create',
@@ -192,7 +195,12 @@ const routes = [
       {
         path: 'projects',
         name: 'ApiProjects',
-        component: ApiProjectManagement
+        component: ProjectList
+      },
+      {
+        path: 'projects/:id',
+        name: 'ApiProjectDetail',
+        component: () => import('@/views/projects/ProjectDetail.vue')
       },
       {
         path: 'interfaces',
@@ -253,7 +261,12 @@ const routes = [
       {
         path: 'projects',
         name: 'UiProjects',
-        component: UiProjectList
+        component: ProjectList
+      },
+      {
+        path: 'projects/:id',
+        name: 'UiProjectDetail',
+        component: () => import('@/views/projects/ProjectDetail.vue')
       },
       {
         path: 'elements-enhanced',
@@ -317,6 +330,16 @@ const routes = [
         redirect: 'testing'
       },
       {
+        path: 'projects',
+        name: 'AIIntelligentProjects',
+        component: ProjectList
+      },
+      {
+        path: 'projects/:id',
+        name: 'AIIntelligentProjectDetail',
+        component: () => import('@/views/projects/ProjectDetail.vue')
+      },
+      {
         path: 'testing',
         name: 'AITesting',
         component: UiAITesting
@@ -363,6 +386,16 @@ const routes = [
             component: () => import('@/views/requirement-analysis/AIModelConfig.vue')
           },
           {
+            path: 'projects',
+            name: 'ConfigProjects',
+            component: ProjectList
+          },
+          {
+            path: 'projects/:id',
+            name: 'ConfigProjectDetail',
+            component: () => import('@/views/projects/ProjectDetail.vue')
+          },
+          {
             path: 'prompt-config',
             name: 'ConfigPromptConfig',
             component: () => import('@/views/requirement-analysis/PromptConfig.vue')
@@ -371,6 +404,16 @@ const routes = [
             path: 'generation-config',
             name: 'ConfigGenerationConfig',
             component: () => import('@/views/requirement-analysis/GenerationConfigView.vue')
+          },
+          {
+            path: 'knowledge-base',
+            name: 'ConfigKnowledgeBase',
+            component: () => import('@/views/requirement-analysis/KnowledgeBaseManage.vue')
+          },
+          {
+            path: 'knowledge-llm',
+            name: 'ConfigKnowledgeLLM',
+            component: () => import('@/views/configuration/KnowledgeBaseLLMConfig.vue')
           },
           {
             path: 'ui-env',
@@ -396,6 +439,27 @@ const routes = [
             path: 'dify',
             name: 'DifyConfig',
             component: () => import('@/views/configuration/DifyConfig.vue')
+          },
+          {
+            path: 'performance-stats',
+            name: 'ConfigPerformanceStats',
+            component: () => import('@/views/configuration/AdminEmbed.vue'),
+            props: { path: '/admin/core/performancestatistics/' },
+            meta: { title: '性能统计' }
+          },
+          {
+            path: 'request-performance-log',
+            name: 'ConfigRequestPerformanceLog',
+            component: () => import('@/views/configuration/AdminEmbed.vue'),
+            props: { path: '/admin/core/requestperformancelog/' },
+            meta: { title: '请求性能日志' }
+          },
+          {
+            path: 'notification-template',
+            name: 'ConfigNotificationTemplate',
+            component: () => import('@/views/configuration/AdminEmbed.vue'),
+            props: { path: '/admin/core/notificationtemplate/' },
+            meta: { title: '通知模板' }
           }
         ]
       }
@@ -419,7 +483,12 @@ const routes = [
       {
         path: 'projects',
         name: 'AppProjectList',
-        component: () => import('@/views/app-automation/projects/ProjectList.vue')
+        component: ProjectList
+      },
+      {
+        path: 'projects/:id',
+        name: 'AppProjectDetail',
+        component: () => import('@/views/projects/ProjectDetail.vue')
       },
       {
         path: 'devices',
@@ -508,7 +577,8 @@ router.beforeEach(async (to, from, next) => {
 
   if (to.meta.requiresAuth && !userStore.isAuthenticated) {
     console.log('需要认证但未认证，跳转到登录页')
-    next('/login')
+    // 保留完整路径（含飞书 OAuth 的 code/state），登录后回跳才能完成绑定
+    next({ path: '/login', query: { redirect: to.fullPath } })
   } else if (to.meta.requiresGuest && userStore.isAuthenticated) {
     console.log('访客页面但已认证，跳转到项目页')
     next('/home')

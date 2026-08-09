@@ -164,7 +164,7 @@
 
 <script setup>
 import { ref, reactive, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage } from 'element-plus'
 import { User, Lock, Document, MagicStick, Connection, TrendCharts, ArrowDown } from '@element-plus/icons-vue'
@@ -172,6 +172,7 @@ import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 
 const router = useRouter()
+const route = useRoute()
 const userStore = useUserStore()
 const appStore = useAppStore()
 const { t } = useI18n()
@@ -246,10 +247,13 @@ const handleLogin = async () => {
         })
 
         ElMessage.success(t('auth.loginSuccess'))
-        console.log('Preparing to redirect to /home')
 
-        // Use replace instead of push to prevent returning to login page
-        await router.replace('/home')
+        // 支持飞书 OAuth 等场景：登录后回到原页面（含 query）
+        const redirect = typeof route.query.redirect === 'string' && route.query.redirect.startsWith('/')
+          ? route.query.redirect
+          : '/home'
+        console.log('Preparing to redirect to', redirect)
+        await router.replace(redirect)
         console.log('Redirect completed')
 
       } catch (error) {
@@ -267,7 +271,7 @@ const handleLogin = async () => {
 .login-container {
   height: 100vh;
   display: flex;
-  background: #f5f7fa;
+  background: var(--th-bg-page);
   overflow: hidden;
 }
 
@@ -279,7 +283,10 @@ const handleLogin = async () => {
 /* 左侧展示区域 */
 .showcase-section {
   flex: 1;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+  background:
+    radial-gradient(800px 500px at 20% 20%, rgba(167, 243, 208, 0.35), transparent 55%),
+    radial-gradient(700px 480px at 90% 10%, rgba(196, 181, 253, 0.45), transparent 50%),
+    linear-gradient(145deg, #5a4bd1 0%, #6c5ce7 45%, #7c6bf0 100%);
   position: relative;
   display: flex;
   align-items: center;
@@ -518,7 +525,7 @@ const handleLogin = async () => {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: white;
+  background: var(--th-bg-elevated);
   padding: 60px;
   position: relative;
 
@@ -535,13 +542,13 @@ const handleLogin = async () => {
     h2 {
       font-size: 28px;
       font-weight: 700;
-      color: #303133;
+      color: var(--th-text-primary);
       margin: 0 0 12px 0;
     }
 
     p {
       font-size: 14px;
-      color: #909399;
+      color: var(--th-text-secondary);
       margin: 0;
       line-height: 1.6;
     }
@@ -558,7 +565,7 @@ const handleLogin = async () => {
       }
 
       &.is-focus {
-        box-shadow: 0 0 0 1px #667eea inset;
+        box-shadow: 0 0 0 1px var(--th-color-primary) inset;
       }
     }
 
@@ -571,13 +578,14 @@ const handleLogin = async () => {
       height: 48px;
       font-size: 16px;
       font-weight: 600;
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+      background: linear-gradient(135deg, #6c5ce7 0%, #5a4bd1 100%);
       border: none;
+      border-radius: 12px;
       transition: all 0.3s ease;
 
       &:hover {
         transform: translateY(-2px);
-        box-shadow: 0 10px 20px rgba(102, 126, 234, 0.3);
+        box-shadow: 0 10px 20px rgba(108, 92, 231, 0.32);
       }
 
       &:active {
@@ -591,18 +599,18 @@ const handleLogin = async () => {
     margin-top: 24px;
 
     .register-link {
-      color: #909399;
+      color: var(--th-text-secondary);
       text-decoration: none;
       font-size: 14px;
       transition: all 0.3s ease;
 
       span {
-        color: #667eea;
+        color: var(--th-color-primary);
         font-weight: 600;
       }
 
       &:hover {
-        color: #667eea;
+        color: var(--th-color-primary);
       }
     }
   }

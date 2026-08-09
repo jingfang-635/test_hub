@@ -67,6 +67,11 @@
             </div>
           </template>
         </el-table-column>
+        <el-table-column prop="status" :label="$t('version.status')" width="110">
+          <template #default="{ row }">
+            <el-tag :type="getVersionStatusType(row.status)">{{ getVersionStatusText(row.status) }}</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column prop="projects" :label="$t('version.relatedProject')" width="300">
           <template #default="{ row }">
             <div v-if="row.projects && row.projects.length > 0" class="project-tags">
@@ -129,6 +134,15 @@
       <el-form :model="versionForm" :rules="versionRules" ref="versionFormRef" label-width="120px">
         <el-form-item :label="$t('version.versionName')" prop="name">
           <el-input v-model="versionForm.name" :placeholder="$t('version.versionNamePlaceholder')" />
+        </el-form-item>
+
+        <el-form-item :label="$t('version.status')" prop="status">
+          <el-select v-model="versionForm.status" :placeholder="$t('version.selectStatus')">
+            <el-option :label="$t('version.statusDraft')" value="draft" />
+            <el-option :label="$t('version.statusInProgress')" value="in_progress" />
+            <el-option :label="$t('version.statusReleased')" value="released" />
+            <el-option :label="$t('version.statusDeprecated')" value="deprecated" />
+          </el-select>
         </el-form-item>
 
         <el-form-item :label="$t('version.relatedProject')" prop="project_ids">
@@ -198,6 +212,7 @@ const editingVersionId = ref(null)
 
 const versionForm = reactive({
   name: '',
+  status: 'draft',
   description: '',
   project_ids: [],
   is_baseline: false
@@ -205,6 +220,7 @@ const versionForm = reactive({
 
 const versionRules = {
   name: [{ required: true, message: computed(() => t('version.versionNameRequired')), trigger: 'blur' }],
+  status: [{ required: true, message: computed(() => t('version.selectStatus')), trigger: 'change' }],
   project_ids: [{ required: true, message: computed(() => t('version.projectRequired')), trigger: 'change' }]
 }
 
@@ -261,6 +277,7 @@ const editVersion = (version) => {
   editingVersionId.value = version.id
   
   versionForm.name = version.name
+  versionForm.status = version.status || 'draft'
   versionForm.description = version.description
   versionForm.project_ids = version.projects.map(p => p.id)
   versionForm.is_baseline = version.is_baseline
@@ -382,10 +399,31 @@ const batchDeleteVersions = async () => {
 
 const resetVersionForm = () => {
   versionForm.name = ''
+  versionForm.status = 'draft'
   versionForm.description = ''
   versionForm.project_ids = []
   versionForm.is_baseline = false
   editingVersionId.value = null
+}
+
+const getVersionStatusType = (status) => {
+  const typeMap = {
+    draft: 'info',
+    in_progress: 'warning',
+    released: 'success',
+    deprecated: 'danger'
+  }
+  return typeMap[status] || 'info'
+}
+
+const getVersionStatusText = (status) => {
+  const textMap = {
+    draft: t('version.statusDraft'),
+    in_progress: t('version.statusInProgress'),
+    released: t('version.statusReleased'),
+    deprecated: t('version.statusDeprecated')
+  }
+  return textMap[status] || status
 }
 
 const formatDate = (dateString) => {

@@ -18,6 +18,12 @@ export default {
   testCaseCount: 'Test Cases',
   creator: 'Creator',
   createdAt: 'Created At',
+  status: 'Status',
+  statusDraft: 'Draft',
+  statusInProgress: 'In Progress',
+  statusReleased: 'Released',
+  statusDeprecated: 'Deprecated',
+  selectStatus: 'Select status',
 
   // Dialog
   editVersion: 'Edit Version',
@@ -27,10 +33,14 @@ export default {
   versionDescription: 'Version Description',
   versionDescriptionPlaceholder: 'Enter version description',
   setAsBaseline: 'Set as baseline version',
+  owner: 'Owner',
+  selectOwner: 'Enter owner',
+  selectProject: 'Select project',
 
   // Validation
   versionNameRequired: 'Please enter version name',
   projectRequired: 'Please select related project',
+  ownerRequired: 'Please select owner',
 
   // Messages
   fetchListFailed: 'Failed to fetch version list',

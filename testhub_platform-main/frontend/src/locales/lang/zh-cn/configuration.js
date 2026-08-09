@@ -136,6 +136,52 @@ export default {
     }
   },
 
+  // 知识库大模型配置
+  knowledgeLLM: {
+    title: '知识库大模型配置',
+    description: '配置向量化、文档解析与需求整理所用的大模型参数',
+    apiConfig: 'API 配置',
+    currentConfig: '当前配置信息',
+    embeddingTitle: '向量化 (Embedding) 模型配置',
+    refinerTitle: '内容整理 (Refiner) 模型配置',
+    visionTitle: '文档解析 (Vision) 模型配置',
+    bailianOnlyTip: '暂仅支持配置阿里百炼供应商模型（后续将调整为兼容 OpenAI 接口）',
+    visionTip: '支持任意兼容 OpenAI 接口的视觉模型。智谱使用文件解析API效果更佳，OpenAI兼容模式使用视觉模型逐页解析。',
+    baseUrl: 'Base URL',
+    modelName: '模型名称',
+    maxTokens: '最大 Token 数',
+    temperature: '温度',
+    provider: '服务商',
+    embeddingApiKey: 'Embedding API Key',
+    refinerApiKey: 'Refiner API Key',
+    visionApiKey: 'Vision API Key',
+    apiKeyPlaceholder: '请输入 API Key',
+    apiKeyPlaceholderEdit: '不修改请保持掩码不变，填写新值则更新',
+    apiKeyMaskHint: '当前为掩码显示。如需更换请清空后输入新的 API Key',
+    embeddingModelPlaceholder: '例如：text-embedding-v3',
+    refinerModelPlaceholder: '例如：qwen-plus',
+    visionBaseUrlPlaceholder: '例如：https://open.bigmodel.cn/api/paas/v4',
+    visionModelPlaceholder: '例如：glm-4.6v',
+    visionModelHint: '推荐使用智谱视觉模型 GLM-4.6V',
+    providers: {
+      zhipu: '智谱（文件解析API）',
+      openai_compatible: 'OpenAI兼容（视觉模型）'
+    },
+    messages: {
+      loadFailed: '加载配置失败',
+      saveSuccess: '配置保存成功！',
+      updateSuccess: '配置更新成功！',
+      saveFailed: '保存配置失败',
+      apiKeyRequired: '首次保存需填写 {keys} 的 API Key',
+      validationFailed: '请先完整填写必填项'
+    },
+    validation: {
+      baseUrlRequired: '请输入 Base URL',
+      modelNameRequired: '请输入模型名称',
+      providerRequired: '请选择服务商'
+    }
+  },
+
   // AI 模型配置 (测试用例生成)
   aiModel: {
     title: '🤖 AI用例生成模型配置',

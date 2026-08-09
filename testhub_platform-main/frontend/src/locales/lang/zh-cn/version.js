@@ -18,6 +18,12 @@ export default {
   testCaseCount: '用例数量',
   creator: '创建者',
   createdAt: '创建时间',
+  status: '状态',
+  statusDraft: '草稿',
+  statusInProgress: '进行中',
+  statusReleased: '已发布',
+  statusDeprecated: '已废弃',
+  selectStatus: '请选择状态',
 
   // Dialog
   editVersion: '编辑版本',
@@ -27,10 +33,14 @@ export default {
   versionDescription: '版本描述',
   versionDescriptionPlaceholder: '请输入版本描述',
   setAsBaseline: '设为基线版本',
+  owner: '负责人',
+  selectOwner: '请填写负责人',
+  selectProject: '请选择项目',
 
   // Validation
   versionNameRequired: '请输入版本名称',
   projectRequired: '请选择关联项目',
+  ownerRequired: '请选择负责人',
 
   // Messages
   fetchListFailed: '获取版本列表失败',

@@ -32,6 +32,9 @@
         </el-descriptions-item>
         <el-descriptions-item :label="$t('testcase.author')">{{ testcase.author?.username }}</el-descriptions-item>
         <el-descriptions-item :label="$t('testcase.createdAt')" :span="2">{{ formatDate(testcase.created_at) }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('testcase.l1')">{{ testcase.l1 || $t('testcase.none') }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('testcase.l2')">{{ testcase.l2 || $t('testcase.none') }}</el-descriptions-item>
+        <el-descriptions-item :label="$t('testcase.l3')" :span="2">{{ testcase.l3 || $t('testcase.none') }}</el-descriptions-item>
         <el-descriptions-item :label="$t('testcase.caseDescription')" :span="2">{{ testcase.description || $t('testcase.noDescription') }}</el-descriptions-item>
         <el-descriptions-item :label="$t('testcase.preconditions')" :span="2">
           <div v-html="testcase.preconditions || $t('testcase.none')"></div>
@@ -75,10 +78,10 @@ const editTestCase = () => {
 
 const getPriorityText = (priority) => {
   const textMap = {
-    low: t('testcase.low'),
-    medium: t('testcase.medium'),
-    high: t('testcase.high'),
-    critical: t('testcase.critical')
+    P0: t('testcase.p0'),
+    P1: t('testcase.p1'),
+    P2: t('testcase.p2'),
+    P3: t('testcase.p3')
   }
   return textMap[priority] || priority
 }
@@ -106,6 +109,11 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .priority-tag {
+  &.P0 { color: #f56c6c; font-weight: bold; }
+  &.P1 { color: #f56c6c; }
+  &.P2 { color: #e6a23c; }
+  &.P3 { color: #67c23a; }
+  /* 兼容旧值（迁移前的数据） */
   &.low { color: #67c23a; }
   &.medium { color: #e6a23c; }
   &.high { color: #f56c6c; }

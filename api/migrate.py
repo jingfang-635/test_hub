@@ -10,8 +10,11 @@ import json
 from pathlib import Path
 
 _PROJECT_ROOT = str(Path(__file__).resolve().parent.parent / 'testhub_platform-main')
-if _PROJECT_ROOT not in sys.path:
-    sys.path.insert(0, _PROJECT_ROOT)
+# apps 已移入 backend/，需同时把 backend 目录加入 sys.path，使 `from apps.xxx` 可导入
+_BACKEND_DIR = str(Path(_PROJECT_ROOT) / 'backend')
+for _p in (_PROJECT_ROOT, _BACKEND_DIR):
+    if _p not in sys.path:
+        sys.path.insert(0, _p)
 
 os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
 

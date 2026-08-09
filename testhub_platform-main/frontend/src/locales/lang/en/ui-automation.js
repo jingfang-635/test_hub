@@ -248,6 +248,14 @@ export default {
       edit: 'Edit',
       delete: 'Delete'
     },
+    // Node hover actions
+    nodeActions: {
+      copy: 'Copy',
+      copyTooltip: 'Copy this element with one click',
+      delete: 'Delete',
+      deleteTooltip: 'Delete this element',
+      moveHint: 'Drag element to move it to another page'
+    },
     locatorTip: {
       title: 'Tip: Enter locator value based on strategy',
       id: 'ID: Enter element id attribute value',
@@ -294,7 +302,13 @@ export default {
       elementsLoaded: 'Loaded {count} elements',
       insertCode: 'Insert element code',
       validatePassed: 'Element validation passed',
-      validateFailedReason: 'Element validation failed'
+      validateFailedReason: 'Element validation failed',
+      copySuccess: 'Element copied successfully',
+      copyFailed: 'Failed to copy element',
+      moveSuccess: 'Element moved to target page',
+      moveFailed: 'Failed to move element',
+      invalidDropTarget: 'Elements can only be dropped onto pages',
+      pageCannotDrag: 'Page nodes cannot be dragged'
     }
   },
 
@@ -725,9 +739,49 @@ export default {
       cron: 'Cron Expression',
       interval: 'Fixed Interval',
       once: 'One-time Execution',
+      hourly: 'Hourly',
+      daily: 'Daily',
+      weekly: 'Weekly',
+      monthly: 'Monthly',
+      yearly: 'Yearly',
       cronShort: 'Cron',
       intervalShort: 'Interval',
       onceShort: 'Once'
+    },
+    schedule: {
+      minute: 'Minute',
+      minuteHint: '(run at this minute of every hour)',
+      executeAt: 'Execute At',
+      selectTime: 'Please select time',
+      weekday: 'Weekday',
+      selectWeekday: 'Please select weekday',
+      dayOfMonth: 'Day',
+      dayUnit: '',
+      month: 'Month',
+      selectMonth: 'Please select month'
+    },
+    weekdays: {
+      sunday: 'Sunday',
+      monday: 'Monday',
+      tuesday: 'Tuesday',
+      wednesday: 'Wednesday',
+      thursday: 'Thursday',
+      friday: 'Friday',
+      saturday: 'Saturday'
+    },
+    months: {
+      m1: 'January',
+      m2: 'February',
+      m3: 'March',
+      m4: 'April',
+      m5: 'May',
+      m6: 'June',
+      m7: 'July',
+      m8: 'August',
+      m9: 'September',
+      m10: 'October',
+      m11: 'November',
+      m12: 'December'
     },
     notificationTypes: {
       email: 'Email Notification',
@@ -1100,6 +1154,7 @@ export default {
     foldAll: 'Collapse All',
     expandAll: 'Expand All',
     selectAction: 'Select Action',
+    selectPage: 'Select Page',
     actionClick: 'Click',
     actionFill: 'Fill Text',
     actionGetText: 'Get Text',
@@ -1110,10 +1165,12 @@ export default {
     actionAssert: 'Assert',
     actionWait: 'Wait',
     actionSwitchTab: 'Switch Tab',
+    actionNavigateUrl: 'Navigate URL',
     selectElement: 'Select Element',
     inputValue: 'Input Value:',
     inputPlaceholder: 'Enter content, supports variables like \'{random_phone()}\'',
     switchTabPlaceholder: 'Enter index (0,1...) or leave empty for latest',
+    navigateUrlPlaceholder: 'Enter target URL, supports variables',
     insertVariable: 'Insert Dynamic Variable',
     referenceDataFactory: 'Reference Data Factory',
     waitTime: 'Wait Time (ms):',
@@ -1123,6 +1180,7 @@ export default {
     assertIsVisible: 'Element Visible',
     assertExists: 'Element Exists',
     assertHasAttribute: 'Attribute Value',
+    assertUrlContains: 'URL Contains',
     expectedValue: 'Expected Value',
     stepDescription: 'Step Description:',
     stepDescPlaceholder: 'Describe the purpose of this step',
@@ -1228,7 +1286,8 @@ export default {
       scroll: 'Scroll',
       screenshot: 'Screenshot',
       assert: 'Assert',
-      wait: 'Wait'
+      wait: 'Wait',
+      navigateUrl: 'Navigate URL'
     },
     // Action text (for displaying action descriptions in execution logs)
     actionText: {
@@ -1240,7 +1299,8 @@ export default {
       scroll: 'Scroll',
       screenshot: 'Screenshot',
       assert: 'Assert',
-      wait: 'Wait'
+      wait: 'Wait',
+      navigateUrl: 'Navigate URL'
     },
     // Status text
     status: {

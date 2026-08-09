@@ -49,6 +49,7 @@ export default {
   generatedTestCases: requirementModule.generatedTestCases,
   promptConfig: requirementModule.promptConfig,
   generationConfig: requirementModule.generationConfig,
+  knowledgeBase: requirementModule.knowledgeBase,
   taskDetail: requirementModule.taskDetail,
   configGuide: requirementModule.configGuide,
 

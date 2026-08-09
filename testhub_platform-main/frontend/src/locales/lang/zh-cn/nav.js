@@ -6,7 +6,7 @@ export default {
     language: '语言切换'
   },
   modules: {
-    aiGeneration: 'AI用例生成',
+    aiGeneration: '用例管理',
     apiTesting: '接口测试',
     uiAutomation: 'UI自动化测试',
     aiIntelligentMode: 'AI 智能模式',
@@ -19,7 +19,8 @@ export default {
     aiGeneratedTestcases: 'AI生成用例记录',
     promptConfig: '提示词配置',
     projectManagement: '项目管理',
-    testCases: '测试用例',
+    projectAndVersion: '项目与版本',
+    testCases: '用例库',
     versionManagement: '版本管理',
     reviewManagement: '评审管理',
     reviewList: '评审列表',
@@ -54,9 +55,16 @@ export default {
     aiModelConfig: '用例模型配置',
     promptConfig: '提示词配置',
     generationConfig: '生成行为配置',
+    knowledgeBaseManage: '知识库管理',
+    knowledgeBaseConfig: '知识库配置',
     uiEnvConfig: 'UI环境配置',
     aiModeConfig: 'AI智能模式配置',
     scheduledTaskConfig: '定时任务配置',
-    difyConfig: 'AI评测师配置'
+    difyConfig: 'AI评测师配置',
+    // 核心模块
+    coreModule: '核心模块',
+    performanceStats: '性能统计',
+    requestPerformanceLog: '请求性能日志',
+    notificationTemplate: '通知模板'
   }
 }

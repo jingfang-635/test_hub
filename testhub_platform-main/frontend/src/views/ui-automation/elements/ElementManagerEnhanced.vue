@@ -31,13 +31,17 @@
             node-key="id"
             :expand-on-click-node="false"
             :default-expanded-keys="expandedKeys"
+            :draggable="true"
+            :allow-drag="allowDrag"
+            :allow-drop="allowDrop"
             @node-click="onNodeClick"
             @node-contextmenu="onNodeRightClick"
             @node-expand="onNodeExpand"
             @node-collapse="onNodeCollapse"
+            @node-drop="onNodeDrop"
           >
             <template #default="{ node, data }">
-              <div class="tree-node">
+              <div class="tree-node" :class="{ 'is-element': data.type === 'element' }">
                 <el-icon v-if="data.type === 'page'">
                   <Folder />
                 </el-icon>
@@ -62,6 +66,20 @@
 
                 <span v-if="data.type === 'element'" class="element-type-tag" :class="data.element_type?.toLowerCase()">
                   {{ getElementTypeLabel(data.element_type) }}
+                </span>
+
+                <!-- 元素节点悬浮操作按钮 -->
+                <span v-if="data.type === 'element' && data.id !== 'unassigned'" class="node-actions" @click.stop>
+                  <el-tooltip :content="$t('uiAutomation.element.nodeActions.copyTooltip')" placement="top">
+                    <el-icon class="action-icon copy-icon" @click="copyElementNode(data)">
+                      <DocumentCopy />
+                    </el-icon>
+                  </el-tooltip>
+                  <el-tooltip :content="$t('uiAutomation.element.nodeActions.deleteTooltip')" placement="top">
+                    <el-icon class="action-icon delete-icon" @click="deleteElementNode(data)">
+                      <Delete />
+                    </el-icon>
+                  </el-tooltip>
                 </span>
               </div>
             </template>
@@ -445,6 +463,7 @@ const editInputRef = ref(null)
 // 状态
 const saving = ref(false)
 const validating = ref(false)
+const moving = ref(false) // 拖拽移动锁，防止并发操作
 const generating = ref(false)
 const suggestions = ref([])
 
@@ -918,6 +937,207 @@ const onNodeCollapse = (data) => {
   }
 }
 
+// === 拖拽相关 ===
+// 是否允许拖拽：只有元素节点可以拖拽
+// 注意：el-tree 的 allowDrag 回调参数是 Node 对象，需通过 .data 访问原始数据
+const allowDrag = (node) => {
+  return node?.data?.type === 'element'
+}
+
+// 是否允许放置：
+// 1. 元素可以放置到页面节点内部（inner）
+// 2. 元素可以放置到其他元素节点的前后（prev/next），表示加入该元素所在的页面
+const allowDrop = (draggingNode, dropNode, type) => {
+  const dropData = dropNode?.data
+  if (!dropData) return false
+  // 拖到页面节点内部
+  if (type === 'inner' && dropData.type === 'page') return true
+  // 拖到元素节点前后（加入该元素所在页面）
+  if ((type === 'prev' || type === 'next') && dropData.type === 'element') return true
+  return false
+}
+
+// 拖拽完成：更新元素的所属分组和所属页面字段
+// 注意：node-drop 事件参数为 Node 对象，dropType 为 'before'/'after'/'inner'
+// 性能优化：成功时只做本地 treeData 更新（O(树深度)），失败时才全量重载
+const onNodeDrop = async (draggingNode, dropNode, dropType) => {
+  const dragData = draggingNode?.data
+  const dropData = dropNode?.data
+
+  // 仅处理元素拖拽
+  if (!dragData || dragData.type !== 'element') return
+
+  // 加锁：防止用户快速连续拖拽导致并发请求和数据错乱
+  if (moving.value) return
+  moving.value = true
+
+  let targetGroupId
+  let targetPageName
+
+  if (dropType === 'inner' && dropData?.type === 'page') {
+    // 拖到页面节点内部
+    targetGroupId = dropData.id === 'unassigned' ? null : dropData.id
+    targetPageName = dropData.id === 'unassigned' ? '' : dropData.name
+  } else if ((dropType === 'before' || dropType === 'after') && dropData?.type === 'element') {
+    // 拖到元素节点前后，目标页面为该元素所在的页面（父节点）
+    const parentNode = dropNode.parent
+    const parentData = parentNode?.data
+    if (!parentData || parentData.type !== 'page') {
+      ElMessage.warning(t('uiAutomation.element.messages.invalidDropTarget'))
+      await loadElementTree()
+      treeKey.value += 1
+      moving.value = false
+      return
+    }
+    targetGroupId = parentData.id === 'unassigned' ? null : parentData.id
+    targetPageName = parentData.id === 'unassigned' ? '' : parentData.name
+  } else {
+    ElMessage.warning(t('uiAutomation.element.messages.invalidDropTarget'))
+    await loadElementTree()
+    treeKey.value += 1
+    moving.value = false
+    return
+  }
+
+  // 判断所属页面是否实际发生变化，避免无意义的请求
+  const originalGroupId = dragData.group_id || null
+  const originalPageName = dragData.page || ''
+  const pageChanged = (originalGroupId !== targetGroupId) || (originalPageName !== targetPageName)
+
+  if (!pageChanged) {
+    // 页面未变化，仅恢复树结构即可（无需 API 调用）
+    await loadElementTree()
+    treeKey.value += 1
+    moving.value = false
+    return
+  }
+
+  try {
+    // 拖动后所属页面有修改，同步更新 group_id 和 page 字段
+    await updateElement(dragData.id, {
+      group_id: targetGroupId,
+      page: targetPageName,
+      project_id: selectedProject.value
+    })
+    ElMessage.success(t('uiAutomation.element.messages.moveSuccess'))
+
+    // 性能优化：本地更新 treeData 中该元素的 group_id 和 page 字段
+    // 避免全量 loadElementTree()（2次API调用）+ treeKey 重建（销毁重建整棵树DOM）
+    updateElementInTreeData(dragData.id, targetGroupId, targetPageName)
+
+    // 若当前选中的是被拖拽的元素，同步更新右侧编辑区的 page 字段
+    if (selectedElement.value && selectedElement.value.id === dragData.id) {
+      selectedElement.value.page = targetPageName
+      selectedElement.value.group_id = targetGroupId
+      formKey.value += 1
+    }
+  } catch (error) {
+    console.error('元素移动失败:', error)
+    ElMessage.error(t('uiAutomation.element.messages.moveFailed'))
+    // 失败时全量重载以恢复正确状态
+    await loadElementTree()
+    treeKey.value += 1
+  } finally {
+    moving.value = false
+  }
+}
+
+// 本地更新 treeData 中指定元素的 group_id 和 page 字段（仅改数据，不重建DOM）
+const updateElementInTreeData = (elementId, newGroupId, newPageName) => {
+  const updateNode = (nodes) => {
+    for (const node of nodes) {
+      if (node.type === 'element' && node.id === elementId) {
+        node.group_id = newGroupId
+        node.page = newPageName
+        return true
+      }
+      if (node.children && node.children.length) {
+        if (updateNode(node.children)) return true
+      }
+    }
+    return false
+  }
+  updateNode(treeData.value)
+}
+
+// === 一键复制元素 ===
+const copyElementNode = async (data) => {
+  if (!data || data.type !== 'element') return
+  try {
+    // 获取完整的元素详情
+    const response = await getElementDetail(data.id)
+    const src = response.data
+    // 优先使用树节点上的 group_id 和 page（列表接口返回的字段），确保所属页面被复制
+    const groupId = data.group_id || src.group_id || null
+    const pageName = data.page || src.page || ''
+    // 构建新元素数据，名称追加" (副本)"后缀，避免重名
+    const copyData = {
+      name: `${src.name} (副本)`,
+      element_type: src.element_type,
+      page: pageName,
+      component_name: src.component_name || '',
+      locator_strategy_id: src.locator_strategy_id,
+      locator_value: src.locator_value,
+      wait_timeout: src.wait_timeout,
+      force_action: src.force_action,
+      description: src.description || '',
+      project_id: selectedProject.value
+    }
+    // 复制所属页面（分组关联）
+    if (groupId) {
+      copyData.group_id = groupId
+    }
+    const createRes = await createElement(copyData)
+    ElMessage.success(t('uiAutomation.element.messages.copySuccess'))
+    // 重新加载树
+    await loadElementTree()
+    treeKey.value += 1
+    // 选中新复制的元素
+    if (createRes.data?.id) {
+      try {
+        const detailRes = await getElementDetail(createRes.data.id)
+        selectedElement.value = detailRes.data
+        formKey.value += 1
+      } catch (e) {
+        console.error('获取复制元素详情失败:', e)
+      }
+    }
+  } catch (error) {
+    console.error('元素复制失败:', error)
+    ElMessage.error(t('uiAutomation.element.messages.copyFailed') + ': ' + (error.response?.data?.message || error.message || ''))
+  }
+}
+
+// === 一键删除元素 ===
+const deleteElementNode = async (data) => {
+  if (!data || data.type !== 'element') return
+  try {
+    await ElMessageBox.confirm(
+      t('uiAutomation.element.messages.deleteConfirm', { name: data.name }),
+      t('uiAutomation.element.messages.deleteConfirmTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('uiAutomation.common.confirm'),
+        cancelButtonText: t('uiAutomation.common.cancel')
+      }
+    )
+    await deleteElement(data.id)
+    ElMessage.success(t('uiAutomation.element.messages.deleteSuccess'))
+    // 如果当前选中的是被删除的元素，清空选中
+    if (selectedElement.value && selectedElement.value.id === data.id) {
+      selectedElement.value = null
+    }
+    // 重新加载树
+    await loadElementTree()
+    treeKey.value += 1
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除元素失败:', error)
+      ElMessage.error(t('uiAutomation.element.messages.deleteFailed'))
+    }
+  }
+}
+
 // 保存元素
 const saveElement = async () => {
   if (!selectedElement.value) return
@@ -1377,6 +1597,15 @@ const updatePage = async () => {
   align-items: center;
   gap: 5px;
   padding: 5px 0;
+  flex: 1;
+}
+
+.tree-node.is-element {
+  cursor: grab;
+}
+
+.tree-node.is-element:active {
+  cursor: grabbing;
 }
 
 .node-label {
@@ -1392,6 +1621,30 @@ const updatePage = async () => {
   border-radius: 4px;
   background-color: #ecf5ff;
   color: #409eff;
+}
+
+/* 节点操作按钮（始终显示） */
+.node-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-left: auto;
+  padding-right: 4px;
+}
+
+.action-icon {
+  cursor: pointer;
+  font-size: 15px;
+  color: #909399;
+  transition: color 0.2s;
+}
+
+.copy-icon:hover {
+  color: #409eff;
+}
+
+.delete-icon:hover {
+  color: #f56c6c;
 }
 
 .main-content {

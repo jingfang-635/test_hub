@@ -22,6 +22,11 @@
             <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.cron')" value="CRON" />
             <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.interval')" value="INTERVAL" />
             <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.once')" value="ONCE" />
+            <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.hourly')" value="HOURLY" />
+            <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.daily')" value="DAILY" />
+            <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.weekly')" value="WEEKLY" />
+            <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.monthly')" value="MONTHLY" />
+            <el-option :label="$t('uiAutomation.scheduledTask.triggerTypes.yearly')" value="YEARLY" />
           </el-select>
         </el-col>
         <el-col :span="6">
@@ -136,7 +141,7 @@
     <el-dialog
       v-model="showCreateDialog"
       :title="editingTask ? $t('uiAutomation.scheduledTask.editTask') : $t('uiAutomation.scheduledTask.createTask')"
-      width="800px"
+      width="860px"
       :close-on-click-modal="false"
       @close="resetTaskForm"
     >
@@ -196,14 +201,97 @@
         </el-form-item>
 
         <el-form-item :label="$t('uiAutomation.scheduledTask.triggerType')" required>
-          <el-radio-group v-model="taskForm.trigger_type">
+          <el-radio-group v-model="taskForm.trigger_type" class="trigger-type-group">
+            <el-radio value="HOURLY">{{ $t('uiAutomation.scheduledTask.triggerTypes.hourly') }}</el-radio>
+            <el-radio value="DAILY">{{ $t('uiAutomation.scheduledTask.triggerTypes.daily') }}</el-radio>
+            <el-radio value="WEEKLY">{{ $t('uiAutomation.scheduledTask.triggerTypes.weekly') }}</el-radio>
+            <el-radio value="MONTHLY">{{ $t('uiAutomation.scheduledTask.triggerTypes.monthly') }}</el-radio>
+            <el-radio value="YEARLY">{{ $t('uiAutomation.scheduledTask.triggerTypes.yearly') }}</el-radio>
             <el-radio value="CRON">{{ $t('uiAutomation.scheduledTask.triggerTypes.cron') }}</el-radio>
             <el-radio value="INTERVAL">{{ $t('uiAutomation.scheduledTask.triggerTypes.interval') }}</el-radio>
             <el-radio value="ONCE">{{ $t('uiAutomation.scheduledTask.triggerTypes.once') }}</el-radio>
           </el-radio-group>
         </el-form-item>
 
-        <!-- 根据触发器类型显示不同配置 -->
+        <!-- 每小时 -->
+        <el-form-item v-if="taskForm.trigger_type === 'HOURLY'" :label="$t('uiAutomation.scheduledTask.schedule.minute')" required>
+          <el-input-number v-model="scheduleConfig.minute" :min="0" :max="59" />
+          <span class="unit">{{ $t('uiAutomation.scheduledTask.schedule.minuteHint') }}</span>
+        </el-form-item>
+
+        <!-- 每天 -->
+        <template v-if="taskForm.trigger_type === 'DAILY'">
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.executeAt')" required>
+            <el-time-picker
+              v-model="scheduleConfig.time"
+              format="HH:mm"
+              value-format="HH:mm"
+              :placeholder="$t('uiAutomation.scheduledTask.schedule.selectTime')"
+            />
+          </el-form-item>
+        </template>
+
+        <!-- 每周 -->
+        <template v-if="taskForm.trigger_type === 'WEEKLY'">
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.weekday')" required>
+            <el-select v-model="scheduleConfig.weekday" :placeholder="$t('uiAutomation.scheduledTask.schedule.selectWeekday')">
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.sunday')" :value="0" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.monday')" :value="1" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.tuesday')" :value="2" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.wednesday')" :value="3" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.thursday')" :value="4" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.friday')" :value="5" />
+              <el-option :label="$t('uiAutomation.scheduledTask.weekdays.saturday')" :value="6" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.executeAt')" required>
+            <el-time-picker
+              v-model="scheduleConfig.time"
+              format="HH:mm"
+              value-format="HH:mm"
+              :placeholder="$t('uiAutomation.scheduledTask.schedule.selectTime')"
+            />
+          </el-form-item>
+        </template>
+
+        <!-- 每月 -->
+        <template v-if="taskForm.trigger_type === 'MONTHLY'">
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.dayOfMonth')" required>
+            <el-input-number v-model="scheduleConfig.day" :min="1" :max="31" />
+            <span class="unit">{{ $t('uiAutomation.scheduledTask.schedule.dayUnit') }}</span>
+          </el-form-item>
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.executeAt')" required>
+            <el-time-picker
+              v-model="scheduleConfig.time"
+              format="HH:mm"
+              value-format="HH:mm"
+              :placeholder="$t('uiAutomation.scheduledTask.schedule.selectTime')"
+            />
+          </el-form-item>
+        </template>
+
+        <!-- 每年 -->
+        <template v-if="taskForm.trigger_type === 'YEARLY'">
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.month')" required>
+            <el-select v-model="scheduleConfig.month" :placeholder="$t('uiAutomation.scheduledTask.schedule.selectMonth')">
+              <el-option v-for="m in 12" :key="m" :label="$t(`uiAutomation.scheduledTask.months.m${m}`)" :value="m" />
+            </el-select>
+          </el-form-item>
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.dayOfMonth')" required>
+            <el-input-number v-model="scheduleConfig.day" :min="1" :max="31" />
+            <span class="unit">{{ $t('uiAutomation.scheduledTask.schedule.dayUnit') }}</span>
+          </el-form-item>
+          <el-form-item :label="$t('uiAutomation.scheduledTask.schedule.executeAt')" required>
+            <el-time-picker
+              v-model="scheduleConfig.time"
+              format="HH:mm"
+              value-format="HH:mm"
+              :placeholder="$t('uiAutomation.scheduledTask.schedule.selectTime')"
+            />
+          </el-form-item>
+        </template>
+
+        <!-- Cron 表达式 -->
         <el-form-item v-if="taskForm.trigger_type === 'CRON'" :label="$t('uiAutomation.scheduledTask.cronExpression')" required>
           <el-input v-model="taskForm.cron_expression" :placeholder="$t('uiAutomation.scheduledTask.cronPlaceholder')" />
           <div class="cron-help">
@@ -301,7 +389,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted, computed } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, ArrowDown } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
@@ -352,7 +440,7 @@ const taskForm = reactive({
   description: '',
   project: '',
   task_type: 'TEST_SUITE',
-  trigger_type: 'CRON',
+  trigger_type: 'DAILY',
   cron_expression: '0 0 * * *',
   interval_seconds: 3600,
   execute_at: '',
@@ -367,12 +455,128 @@ const taskForm = reactive({
   notify_emails: []
 })
 
+// 预设触发器的可视化配置（会转换成 cron 表达式）
+const scheduleConfig = reactive({
+  minute: 0,
+  time: '00:00',
+  weekday: 1,
+  day: 1,
+  month: 1
+})
+
+const CRON_BASED_TYPES = ['CRON', 'HOURLY', 'DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY']
+
+const parseTimeParts = (timeStr) => {
+  const [hourStr = '0', minuteStr = '0'] = (timeStr || '00:00').split(':')
+  return {
+    hour: Math.min(23, Math.max(0, parseInt(hourStr, 10) || 0)),
+    minute: Math.min(59, Math.max(0, parseInt(minuteStr, 10) || 0))
+  }
+}
+
+const formatTime = (hour, minute) => {
+  return `${String(hour).padStart(2, '0')}:${String(minute).padStart(2, '0')}`
+}
+
+const buildCronExpression = (triggerType, config) => {
+  const minute = Math.min(59, Math.max(0, Number(config.minute) || 0))
+  const { hour, minute: timeMinute } = parseTimeParts(config.time)
+  const day = Math.min(31, Math.max(1, Number(config.day) || 1))
+  const month = Math.min(12, Math.max(1, Number(config.month) || 1))
+  const weekday = Math.min(6, Math.max(0, Number(config.weekday) || 0))
+
+  switch (triggerType) {
+    case 'HOURLY':
+      return `${minute} * * * *`
+    case 'DAILY':
+      return `${timeMinute} ${hour} * * *`
+    case 'WEEKLY':
+      return `${timeMinute} ${hour} * * ${weekday}`
+    case 'MONTHLY':
+      return `${timeMinute} ${hour} ${day} * *`
+    case 'YEARLY':
+      return `${timeMinute} ${hour} ${day} ${month} *`
+    default:
+      return taskForm.cron_expression
+  }
+}
+
+const parseCronToSchedule = (triggerType, cronExpression) => {
+  const defaults = {
+    minute: 0,
+    time: '00:00',
+    weekday: 1,
+    day: 1,
+    month: 1
+  }
+  if (!cronExpression) return defaults
+
+  const parts = cronExpression.trim().split(/\s+/)
+  if (parts.length < 5) return defaults
+
+  const [minPart, hourPart, dayPart, monthPart, weekPart] = parts
+  const minute = parseInt(minPart, 10)
+  const hour = parseInt(hourPart, 10)
+  const day = parseInt(dayPart, 10)
+  const month = parseInt(monthPart, 10)
+  const weekday = parseInt(weekPart, 10)
+
+  switch (triggerType) {
+    case 'HOURLY':
+      return {
+        ...defaults,
+        minute: Number.isNaN(minute) ? 0 : minute
+      }
+    case 'DAILY':
+      return {
+        ...defaults,
+        time: formatTime(Number.isNaN(hour) ? 0 : hour, Number.isNaN(minute) ? 0 : minute)
+      }
+    case 'WEEKLY':
+      return {
+        ...defaults,
+        weekday: Number.isNaN(weekday) ? 1 : weekday,
+        time: formatTime(Number.isNaN(hour) ? 0 : hour, Number.isNaN(minute) ? 0 : minute)
+      }
+    case 'MONTHLY':
+      return {
+        ...defaults,
+        day: Number.isNaN(day) ? 1 : day,
+        time: formatTime(Number.isNaN(hour) ? 0 : hour, Number.isNaN(minute) ? 0 : minute)
+      }
+    case 'YEARLY':
+      return {
+        ...defaults,
+        month: Number.isNaN(month) ? 1 : month,
+        day: Number.isNaN(day) ? 1 : day,
+        time: formatTime(Number.isNaN(hour) ? 0 : hour, Number.isNaN(minute) ? 0 : minute)
+      }
+    default:
+      return defaults
+  }
+}
+
+const resetScheduleConfig = () => {
+  Object.assign(scheduleConfig, {
+    minute: 0,
+    time: '00:00',
+    weekday: 1,
+    day: 1,
+    month: 1
+  })
+}
+
 // 获取触发器类型文本
 const getTriggerTypeText = (type) => {
   const typeMap = {
     'CRON': t('uiAutomation.scheduledTask.triggerTypes.cronShort'),
     'INTERVAL': t('uiAutomation.scheduledTask.triggerTypes.intervalShort'),
-    'ONCE': t('uiAutomation.scheduledTask.triggerTypes.onceShort')
+    'ONCE': t('uiAutomation.scheduledTask.triggerTypes.onceShort'),
+    'HOURLY': t('uiAutomation.scheduledTask.triggerTypes.hourly'),
+    'DAILY': t('uiAutomation.scheduledTask.triggerTypes.daily'),
+    'WEEKLY': t('uiAutomation.scheduledTask.triggerTypes.weekly'),
+    'MONTHLY': t('uiAutomation.scheduledTask.triggerTypes.monthly'),
+    'YEARLY': t('uiAutomation.scheduledTask.triggerTypes.yearly')
   }
   return typeMap[type] || type
 }
@@ -486,7 +690,7 @@ const resetTaskForm = () => {
     description: '',
     project: '',
     task_type: 'TEST_SUITE',
-    trigger_type: 'CRON',
+    trigger_type: 'DAILY',
     cron_expression: '0 0 * * *',
     interval_seconds: 3600,
     execute_at: '',
@@ -500,6 +704,7 @@ const resetTaskForm = () => {
     notification_type: '',
     notify_emails: []
   })
+  resetScheduleConfig()
 }
 
 // 重置筛选
@@ -540,8 +745,20 @@ const submitTaskForm = async () => {
     }
 
     // 根据触发器类型添加对应字段
-    if (taskForm.trigger_type === 'CRON') {
-      submitData.cron_expression = taskForm.cron_expression
+    if (CRON_BASED_TYPES.includes(taskForm.trigger_type)) {
+      if (taskForm.trigger_type === 'CRON') {
+        if (!taskForm.cron_expression) {
+          ElMessage.warning(t('uiAutomation.scheduledTask.rules.cronRequired'))
+          return
+        }
+        submitData.cron_expression = taskForm.cron_expression
+      } else {
+        if (['DAILY', 'WEEKLY', 'MONTHLY', 'YEARLY'].includes(taskForm.trigger_type) && !scheduleConfig.time) {
+          ElMessage.warning(t('uiAutomation.scheduledTask.schedule.selectTime'))
+          return
+        }
+        submitData.cron_expression = buildCronExpression(taskForm.trigger_type, scheduleConfig)
+      }
     } else if (taskForm.trigger_type === 'INTERVAL') {
       submitData.interval_seconds = taskForm.interval_seconds
     } else if (taskForm.trigger_type === 'ONCE') {
@@ -659,6 +876,8 @@ const editTask = async (task) => {
     notify_emails: task.notify_emails || []
   })
 
+  Object.assign(scheduleConfig, parseCronToSchedule(task.trigger_type, task.cron_expression))
+
   // 加载项目相关数据
   if (task.project) {
     await onProjectChange(task.project)
@@ -750,5 +969,11 @@ const deleteTask = async (task) => {
 .unit {
   margin-left: 8px;
   color: #606266;
+}
+
+.trigger-type-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
 }
 </style>

@@ -248,6 +248,14 @@ export default {
       edit: '编辑',
       delete: '删除'
     },
+    // 节点悬浮操作
+    nodeActions: {
+      copy: '复制',
+      copyTooltip: '一键复制此元素',
+      delete: '删除',
+      deleteTooltip: '删除此元素',
+      moveHint: '拖拽元素可移动到其他页面'
+    },
     locatorTip: {
       title: '提示：根据定位策略输入对应的定位值',
       id: 'ID: 输入元素的id属性值',
@@ -294,7 +302,13 @@ export default {
       elementsLoaded: '已加载 {count} 个元素',
       insertCode: '插入元素代码',
       validatePassed: '元素验证通过',
-      validateFailedReason: '元素验证失败'
+      validateFailedReason: '元素验证失败',
+      copySuccess: '元素复制成功',
+      copyFailed: '元素复制失败',
+      moveSuccess: '元素已移动到目标页面',
+      moveFailed: '元素移动失败',
+      invalidDropTarget: '只能将元素拖拽到页面上',
+      pageCannotDrag: '页面节点不可拖拽'
     }
   },
 
@@ -725,9 +739,49 @@ export default {
       cron: 'Cron表达式',
       interval: '固定间隔',
       once: '单次执行',
+      hourly: '每小时',
+      daily: '每天',
+      weekly: '每周',
+      monthly: '每月',
+      yearly: '每年',
       cronShort: 'Cron',
       intervalShort: '间隔',
       onceShort: '单次'
+    },
+    schedule: {
+      minute: '分钟',
+      minuteHint: '分（每小时的第几分钟执行）',
+      executeAt: '执行时间',
+      selectTime: '请选择执行时间',
+      weekday: '星期',
+      selectWeekday: '请选择星期',
+      dayOfMonth: '日期',
+      dayUnit: '日',
+      month: '月份',
+      selectMonth: '请选择月份'
+    },
+    weekdays: {
+      sunday: '周日',
+      monday: '周一',
+      tuesday: '周二',
+      wednesday: '周三',
+      thursday: '周四',
+      friday: '周五',
+      saturday: '周六'
+    },
+    months: {
+      m1: '1月',
+      m2: '2月',
+      m3: '3月',
+      m4: '4月',
+      m5: '5月',
+      m6: '6月',
+      m7: '7月',
+      m8: '8月',
+      m9: '9月',
+      m10: '10月',
+      m11: '11月',
+      m12: '12月'
     },
     notificationTypes: {
       email: '邮箱通知',
@@ -1100,6 +1154,7 @@ export default {
     foldAll: '折叠全部',
     expandAll: '展开全部',
     selectAction: '选择操作',
+    selectPage: '选择页面',
     actionClick: '点击',
     actionFill: '输入文本',
     actionGetText: '获取文本',
@@ -1110,10 +1165,12 @@ export default {
     actionAssert: '断言',
     actionWait: '等待',
     actionSwitchTab: '切换标签页',
+    actionNavigateUrl: '跳转URL',
     selectElement: '选择元素',
     inputValue: '输入值：',
     inputPlaceholder: '请输入内容，支持变量如 \'{random_phone()}\'',
     switchTabPlaceholder: '输入索引(0,1...)或留空切换到最新',
+    navigateUrlPlaceholder: '请输入目标URL，支持变量',
     insertVariable: '插入动态变量',
     referenceDataFactory: '引用数据工厂',
     waitTime: '等待时间（毫秒）：',
@@ -1123,6 +1180,7 @@ export default {
     assertIsVisible: '元素可见',
     assertExists: '元素存在',
     assertHasAttribute: '属性值',
+    assertUrlContains: 'URL包含',
     expectedValue: '期望值',
     stepDescription: '步骤描述：',
     stepDescPlaceholder: '描述这个步骤的作用',
@@ -1228,7 +1286,8 @@ export default {
       scroll: '滚动',
       screenshot: '截图',
       assert: '断言',
-      wait: '等待'
+      wait: '等待',
+      navigateUrl: '跳转URL'
     },
     // 操作文本（用于执行日志中显示操作描述）
     actionText: {
@@ -1240,7 +1299,8 @@ export default {
       scroll: '滚动',
       screenshot: '截图',
       assert: '断言',
-      wait: '等待'
+      wait: '等待',
+      navigateUrl: '跳转URL'
     },
     // 状态文本
     status: {

@@ -221,8 +221,11 @@ const filteredTestcases = computed(() => {
 })
 
 const fetchProjects = async () => {
+  // 与「项目与版本」一致：仅显示关联了 AI用例生成 的项目
   try {
-    const response = await api.get('/projects/')
+    const response = await api.get('/projects/', {
+      params: { project_type: 'ai_generation', page_size: 100 }
+    })
     projects.value = response.data.results || response.data
   } catch (error) {
     ElMessage.error(t('reviewForm.fetchProjectsFailed'))

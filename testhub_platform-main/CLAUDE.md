@@ -67,7 +67,7 @@ The Django project uses a modular app structure under `apps/`:
 - **reports**: Test report generation
 - **reviews**: Test case review workflow with templates and assignments
 - **versions**: Version/release management
-- **requirement_analysis**: AI-powered requirement document parsing (PDF/Word/TXT) and test case generation
+- **requirement_analysis**: AI-powered requirement document parsing (PDF/Word/TXT/Feishu docx·Wiki via user OAuth) and test case generation
 - **assistant**: Dify AI chatbot integration
 - **api_testing**: API testing module (HTTP/WebSocket, environments, scheduled tasks, Allure reports)
 - **ui_automation**: UI automation with Selenium/Playwright, element management, page objects, AI intelligent mode
@@ -99,7 +99,7 @@ All API endpoints are prefixed with `/api/`:
 - `/api/reviews/`: Review workflow
 - `/api/versions/`: Version management
 - `/api/assistant/`: AI assistant chat
-- `/api/requirement-analysis/`: AI requirement analysis
+- `/api/requirement-analysis/`: AI requirement analysis（含飞书 OAuth：`/feishu/oauth_*`、`/feishu/fetch/`）
 - `/api/` (api_testing): API testing endpoints
 - `/api/ui-automation/`: UI automation endpoints
 

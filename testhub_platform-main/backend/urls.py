@@ -244,6 +244,7 @@ urlpatterns = [
     path('api/', include('apps.api_testing.urls')),
     path('api/core/', include('apps.core.urls')),
     path('api/data-factory/', include('apps.data_factory.urls')),
+    path('api/scheduler/', include('apps.scheduler.urls')),  # 统一定时任务调度
     path('api/migrate', _migrate_view, name='migrate'),
 ]
 
