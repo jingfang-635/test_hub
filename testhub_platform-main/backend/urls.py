@@ -100,6 +100,7 @@ def _migrate_view(request):
 
         # ================== fix：直接用 schema_editor 添加缺失列（绕过迁移系统） ==================
         elif action == 'fix':
+            loader = MigrationLoader(connection, ignore_no_migrations=True)
             # 1. 诊断缺失列
             real_tables = {}
             with connection.cursor() as cursor:
