@@ -702,9 +702,14 @@ def _migrate_view(request):
                         except Exception as mod_err:
                             # 如果修改失败（数据不兼容），清空表数据后重试
                             # 适用于 token_blacklist 等可安全清空的缓存表
-                            if '1265' in str(mod_err) or 'Data truncated' in str(mod_err) or '1366' in str(mod_err):
+                            if '1265' in str(mod_err) or 'Data truncated' in str(mod_err) or '1366' in str(mod_err) or '1451' in str(mod_err):
                                 with connection.cursor() as cursor:
-                                    cursor.execute(f"DELETE FROM `{db_table}`")
+                                    cursor.execute("SET FOREIGN_KEY_CHECKS = 0")
+                                    try:
+                                        cursor.execute(f"TRUNCATE TABLE `{db_table}`")
+                                    except Exception:
+                                        cursor.execute(f"DELETE FROM `{db_table}`")
+                                    cursor.execute("SET FOREIGN_KEY_CHECKS = 1")
                                 with connection.cursor() as cursor:
                                     cursor.execute(
                                         f"ALTER TABLE `{db_table}` MODIFY COLUMN `{col_name}` {expected_type} {null_def}{default_def}"
