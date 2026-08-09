@@ -667,14 +667,19 @@ def _migrate_view(request):
 
                     # 修复列类型
                     try:
-                        # 先删除可能存在的 UNIQUE 约束
+                        # 先删除所有可能存在的 UNIQUE/INDEX 约束
                         try:
                             with connection.cursor() as cursor:
-                                cursor.execute(
-                                    f"ALTER TABLE `{db_table}` DROP INDEX `ux_{db_table}_{col_name}`"
-                                )
+                                cursor.execute(f"SHOW INDEX FROM `{db_table}` WHERE Column_name = '{col_name}'")
+                                indexes = cursor.fetchall()
+                                for idx in indexes:
+                                    idx_name = idx[2]  # Key_name
+                                    try:
+                                        cursor.execute(f"ALTER TABLE `{db_table}` DROP INDEX `{idx_name}`")
+                                    except Exception:
+                                        pass
                         except Exception:
-                            pass  # 索引不存在，忽略
+                            pass
 
                         # 修改列类型
                         null_def = 'NULL' if field.null else 'NOT NULL'
@@ -689,10 +694,23 @@ def _migrate_view(request):
                                 elif isinstance(default_val, (int, float)):
                                     default_def = f" DEFAULT {default_val}"
 
-                        with connection.cursor() as cursor:
-                            cursor.execute(
-                                f"ALTER TABLE `{db_table}` MODIFY COLUMN `{col_name}` {expected_type} {null_def}{default_def}"
-                            )
+                        try:
+                            with connection.cursor() as cursor:
+                                cursor.execute(
+                                    f"ALTER TABLE `{db_table}` MODIFY COLUMN `{col_name}` {expected_type} {null_def}{default_def}"
+                                )
+                        except Exception as mod_err:
+                            # 如果修改失败（数据不兼容），清空表数据后重试
+                            # 适用于 token_blacklist 等可安全清空的缓存表
+                            if '1265' in str(mod_err) or 'Data truncated' in str(mod_err) or '1366' in str(mod_err):
+                                with connection.cursor() as cursor:
+                                    cursor.execute(f"DELETE FROM `{db_table}`")
+                                with connection.cursor() as cursor:
+                                    cursor.execute(
+                                        f"ALTER TABLE `{db_table}` MODIFY COLUMN `{col_name}` {expected_type} {null_def}{default_def}"
+                                    )
+                            else:
+                                raise mod_err
 
                         # 如果字段有 unique=True，重新添加 UNIQUE 索引
                         if field.unique:
