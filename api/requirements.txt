@@ -1,23 +1,39 @@
 # Vercel Python Serverless Function 依赖
-# 与项目主 requirements.txt 保持一致
-Django>=4.2
+# 与 backend/requirements.txt 保持同步，仅保留运行时必需的包
+# 注意：Vercel 有包大小限制，请勿添加不必要的依赖
+
+# Core (与 backend/requirements.txt 同步)
+Django>=6.0,<6.1
 djangorestframework>=3.14
 django-cors-headers>=4.3
 django-filter>=23.5
-django-simpleui>=2024.1
+django-simpleui>=2026.1.13
 PyMySQL>=1.1
-python-decouple>=3.8
 python-dotenv>=1.0
+
+# API
 drf-spectacular>=0.27
+
+# HTTP
 requests>=2.32
 httpx>=0.27
+
+# Auth
 djangorestframework-simplejwt>=5.3
 PyJWT>=2.8
-celery>=5.3
-redis>=5.0
+
+# Task queue (Django-Q2 替代 Celery)
+django-q2>=1.9.0
+# redis-py 必须锁定 4.6.x：Redis 5.0 不支持 HELLO 命令
+redis>=4.6,<5
+croniter>=5.0
+
+# WebSocket
 daphne>=4.0
 channels>=4.0
 channels-redis>=4.0
+
+# Utilities
 PyYAML>=6.0
 pydantic>=2.5
 click>=8.1
