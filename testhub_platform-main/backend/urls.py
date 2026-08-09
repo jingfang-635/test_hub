@@ -149,6 +149,61 @@ def _migrate_view(request):
                         msg = str(e).lower()
                         if 'duplicate' in msg or 'already exists' in msg or '1060' in msg:
                             skipped += 1
+                        elif ('8200' in msg or 'unique' in msg or '1072' in msg or 'foreign key' in msg) and \
+                             (field.is_relation or field.unique):
+                            # MySQL 8200: 不支持 ALTER TABLE 同时加 UNIQUE 约束
+                            # MySQL 1072: 外键约束引用列不存在
+                            # 解决：分两步——先添加无约束列，再单独加索引/外键
+                            try:
+                                # 1. 添加列本身（不带约束）
+                                from django.db.models import ForeignKey, OneToOneField
+                                if isinstance(field, (ForeignKey, OneToOneField)):
+                                    # 临时移除 unique 约束，添加普通列
+                                    from copy import deepcopy
+                                    new_field = deepcopy(field)
+                                    new_field.unique = False
+                                    # 用原生 SQL 添加列，避免 schema_editor 的约束处理
+                                    col_def = field.column
+                                    # 判断字段类型
+                                    if isinstance(field, OneToOneField):
+                                        col_type = 'bigint'
+                                    else:
+                                        col_type = 'bigint'
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(
+                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{col_def}` {col_type} NULL"
+                                        )
+                                    added += 1
+                                    # 2. 如果是 OneToOneField，单独添加 UNIQUE 索引
+                                    if isinstance(field, OneToOneField) or field.unique:
+                                        try:
+                                            with connection.cursor() as cursor:
+                                                cursor.execute(
+                                                    f"ALTER TABLE `{db_table}` ADD UNIQUE KEY `ux_{db_table}_{field.column}` (`{field.column}`)"
+                                                )
+                                        except Exception:
+                                            pass  # 索引已存在或失败不影响列添加
+                                else:
+                                    # 非 FK 字段但带 UNIQUE 的，先加列再加索引
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(
+                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{field.column}` bigint NULL"
+                                        )
+                                    added += 1
+                                    try:
+                                        with connection.cursor() as cursor:
+                                            cursor.execute(
+                                                f"ALTER TABLE `{db_table}` ADD UNIQUE KEY `ux_{db_table}_{field.column}` (`{field.column}`)"
+                                            )
+                                    except Exception:
+                                        pass
+                            except Exception as e2:
+                                failed += 1
+                                if len(fail_details) < 10:
+                                    fail_details.append({
+                                        'table': db_table, 'column': field.column,
+                                        'error': f'主:{str(e)[:100]}; 备:{str(e2)[:100]}'
+                                    })
                         else:
                             failed += 1
                             if len(fail_details) < 10:

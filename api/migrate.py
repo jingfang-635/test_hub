@@ -154,6 +154,49 @@ def handler(event, context):
                         msg = str(e).lower()
                         if 'duplicate' in msg or 'already exists' in msg or '1060' in msg:
                             skipped += 1
+                        elif ('8200' in msg or 'unique' in msg or '1072' in msg or 'foreign key' in msg) and \
+                             (field.is_relation or field.unique):
+                            # MySQL 8200: 不支持 ALTER TABLE 同时加 UNIQUE 约束
+                            # MySQL 1072: 外键约束引用列不存在
+                            # 解决：分两步——先添加无约束列，再单独加索引/外键
+                            try:
+                                from django.db.models import ForeignKey, OneToOneField
+                                if isinstance(field, (ForeignKey, OneToOneField)):
+                                    col_def = field.column
+                                    col_type = 'bigint'
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(
+                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{col_def}` {col_type} NULL"
+                                        )
+                                    added += 1
+                                    if isinstance(field, OneToOneField) or field.unique:
+                                        try:
+                                            with connection.cursor() as cursor:
+                                                cursor.execute(
+                                                    f"ALTER TABLE `{db_table}` ADD UNIQUE KEY `ux_{db_table}_{field.column}` (`{field.column}`)"
+                                                )
+                                        except Exception:
+                                            pass
+                                else:
+                                    with connection.cursor() as cursor:
+                                        cursor.execute(
+                                            f"ALTER TABLE `{db_table}` ADD COLUMN `{field.column}` bigint NULL"
+                                        )
+                                    added += 1
+                                    try:
+                                        with connection.cursor() as cursor:
+                                            cursor.execute(
+                                                f"ALTER TABLE `{db_table}` ADD UNIQUE KEY `ux_{db_table}_{field.column}` (`{field.column}`)"
+                                            )
+                                    except Exception:
+                                        pass
+                            except Exception as e2:
+                                failed += 1
+                                if len(fail_details) < 10:
+                                    fail_details.append({
+                                        'table': db_table, 'column': field.column,
+                                        'error': f'主:{str(e)[:100]}; 备:{str(e2)[:100]}'
+                                    })
                         else:
                             failed += 1
                             if len(fail_details) < 10:
