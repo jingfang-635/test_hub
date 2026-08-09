@@ -37,7 +37,7 @@ def _migrate_view(request):
                 cursor.execute('SELECT 1')
             return JsonResponse({'status': 'ok', 'message': '数据库连接正常'})
 
-        elif action == 'migrate':
+        elif action in ('migrate', 'repair'):
             from django.core.management import call_command
             from django.db import connection
             from django.db.migrations.loader import MigrationLoader
@@ -65,13 +65,15 @@ def _migrate_view(request):
                     cursor.execute("SELECT app, name FROM django_migrations")
                     applied = {(row[0], row[1]) for row in cursor.fetchall()}
 
-                # 3. 补齐缺失的迁移记录（表已通过 init 创建, 需标记为已应用）
+                # 3. 预插入 initial 迁移记录（建表类迁移，表已通过 init 创建）
+                #    非 initial 迁移（字段变更等）不预插入，让步骤4的 migrate 真正执行
                 loader = MigrationLoader(connection, ignore_no_migrations=True)
                 inserted = 0
                 with connection.cursor() as cursor:
                     for migration in loader.disk_migrations.values():
                         key = (migration.app_label, migration.name)
-                        if key not in applied:
+                        is_initial = getattr(migration, 'initial', False) or 'initial' in migration.name
+                        if is_initial and key not in applied:
                             try:
                                 cursor.execute(
                                     "INSERT IGNORE INTO django_migrations (app, name, applied) VALUES (%s, %s, %s)",
@@ -82,9 +84,27 @@ def _migrate_view(request):
                                 pass
 
                 if inserted > 0:
-                    out.write(f'[补充插入 {inserted} 条缺失的迁移记录]\n')
+                    out.write(f'[补充插入 {inserted} 条 initial 迁移记录]\n')
 
-                # 4. 执行增量迁移（仅处理真正新增的迁移, 不含 --run-syncdb 避免重复建表）
+                # repair 模式: 清理之前可能错误预插入的非 initial 迁移记录
+                # 这些记录将步骤4的 migrate 误认为已应用，导致字段变更未执行
+                cleaned = 0
+                if action == 'repair':
+                    with connection.cursor() as cursor:
+                        for migration in loader.disk_migrations.values():
+                            is_initial = getattr(migration, 'initial', False) or 'initial' in migration.name
+                            if not is_initial:
+                                key = (migration.app_label, migration.name)
+                                if key in applied:
+                                    cursor.execute(
+                                        "DELETE FROM django_migrations WHERE app=%s AND name=%s",
+                                        [migration.app_label, migration.name]
+                                    )
+                                    cleaned += cursor.rowcount
+                    if cleaned > 0:
+                        out.write(f'[repair: 清理 {cleaned} 条可能错误的非 initial 迁移记录]\n')
+
+                # 4. 执行增量迁移（非 initial 迁移会被真正执行）
                 out.write('[执行增量迁移检查]\n')
                 call_command('migrate', '--skip-checks', '--noinput', verbosity=1, stdout=out)
 
