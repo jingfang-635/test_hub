@@ -430,3 +430,69 @@ class AppDeviceViewSet(viewsets.ModelViewSet):
                 'msg': f'采集失败: {e}',
                 'success': False
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['get'], url_path='logs')
+    def logs(self, request, pk=None):
+        """拉取设备 logcat（设备日志 / App 日志）"""
+        device = self.get_object()
+        if device.status == 'offline':
+            return Response({
+                'code': 400,
+                'msg': '设备离线，无法获取日志',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from ..utils.device_logs import fetch_device_logs
+            adb_path = get_adb_path()
+            data = fetch_device_logs(
+                adb_path,
+                device.device_id,
+                lines=request.query_params.get('lines') or 200,
+                package=(request.query_params.get('package') or '').strip(),
+                level=(request.query_params.get('level') or '').strip(),
+                keyword=(request.query_params.get('keyword') or '').strip(),
+            )
+            data['device_id'] = device.device_id
+            data['timestamp'] = int(timezone.now().timestamp() * 1000)
+            return Response({
+                'code': 0,
+                'msg': 'ok',
+                'success': True,
+                'data': data
+            })
+        except Exception as e:
+            logger.error(f'获取设备日志失败 device={device.device_id}: {e}')
+            return Response({
+                'code': 500,
+                'msg': f'获取失败: {e}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+    @action(detail=True, methods=['post'], url_path='clear-logs')
+    def clear_logs(self, request, pk=None):
+        """清空设备 logcat 缓冲区"""
+        device = self.get_object()
+        if device.status == 'offline':
+            return Response({
+                'code': 400,
+                'msg': '设备离线，无法清空日志',
+                'success': False
+            }, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            from ..utils.device_logs import clear_device_logs
+            adb_path = get_adb_path()
+            ok = clear_device_logs(adb_path, device.device_id)
+            return Response({
+                'code': 0 if ok else 500,
+                'msg': '已清空设备日志' if ok else '清空设备日志失败',
+                'success': ok
+            }, status=status.HTTP_200_OK if ok else status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Exception as e:
+            logger.error(f'清空设备日志失败 device={device.device_id}: {e}')
+            return Response({
+                'code': 500,
+                'msg': f'清空失败: {e}',
+                'success': False
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)

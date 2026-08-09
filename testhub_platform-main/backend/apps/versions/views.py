@@ -13,7 +13,7 @@ class VersionListCreateView(generics.ListCreateAPIView):
     """版本列表和创建视图"""
     permission_classes = [permissions.IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['is_baseline']  # 移除projects，手动处理
+    filterset_fields = ['is_baseline', 'status']  # 移除projects，手动处理
     search_fields = ['name', 'description']
     ordering_fields = ['created_at', 'name']
     ordering = ['-created_at']

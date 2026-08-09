@@ -234,10 +234,13 @@
               />
             </el-tab-pane>
             <el-tab-pane label="调试日志" name="logs">
-              <div class="debug-logs">
-                <div v-for="(line, idx) in debugLogs" :key="idx" class="log-line">{{ line }}</div>
-                <div v-if="!debugLogs.length" class="placeholder-pane">暂无日志</div>
-              </div>
+              <DebugLogsPanel
+                :device-id="devicePk"
+                :active="activeTab === 'logs'"
+                :foreground-package="foregroundApp"
+                :events="workbenchEvents"
+                @clear-events="clearWorkbenchEvents"
+              />
             </el-tab-pane>
           </el-tabs>
         </section>
@@ -274,6 +277,7 @@ import {
 } from '@/api/app-automation'
 import DevicePerformancePanel from './components/DevicePerformancePanel.vue'
 import AppPerformancePanel from './components/AppPerformancePanel.vue'
+import DebugLogsPanel from './components/DebugLogsPanel.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -297,7 +301,7 @@ const mirrorPanelRef = ref(null)
 const screenRef = ref(null)
 const imageWrapper = ref(null)
 const imageRef = ref(null)
-const debugLogs = ref([])
+const workbenchEvents = ref([])
 const projectList = ref([])
 const imageCategories = ref(['common'])
 const templateFileName = ref('')
@@ -462,10 +466,19 @@ function zoomOut() {
   zoom.value = Math.max(75, zoom.value - 25)
 }
 
-function pushLog(msg) {
-  const ts = new Date().toLocaleTimeString()
-  debugLogs.value.unshift(`[${ts}] ${msg}`)
-  if (debugLogs.value.length > 200) debugLogs.value.length = 200
+function pushLog(msg, title = '远程控制') {
+  const now = new Date()
+  const time = now.toLocaleTimeString('zh-CN', { hour12: false })
+  workbenchEvents.value.unshift({
+    title,
+    message: msg,
+    time
+  })
+  if (workbenchEvents.value.length > 200) workbenchEvents.value.length = 200
+}
+
+function clearWorkbenchEvents() {
+  workbenchEvents.value = []
 }
 
 function goBack() {
@@ -528,7 +541,7 @@ function connectWs() {
   disconnectWs()
   connecting.value = true
   status.value = 'connecting'
-  pushLog('正在建立 WebSocket 连接...')
+  pushLog('正在建立远程会话...', '远程绘制')
 
   const socket = new WebSocket(buildWsUrl())
   ws.value = socket
@@ -538,7 +551,7 @@ function connectWs() {
     status.value = 'connected'
     connectedAt = Date.now()
     sessionSeconds.value = 0
-    pushLog('WebSocket 已连接')
+    pushLog('远程会话已连接', '远程绘制')
     sendJson({ type: 'set_quality', quality: quality.value })
   }
 
@@ -594,7 +607,7 @@ function handleMessage(data) {
     return
   }
   if (data.type === 'status') {
-    pushLog(data.message || data.status)
+    pushLog(data.message || data.status, '远程绘制')
     if (data.status === 'error') {
       status.value = 'error'
       ElMessage.error(data.message || '远程连接失败')
@@ -1644,21 +1657,6 @@ onBeforeUnmount(() => {
   justify-content: center;
   color: #9ca3af;
   font-size: 14px;
-}
-
-.debug-logs {
-  height: 100%;
-  overflow: auto;
-  padding: 12px 16px;
-  font-family: Consolas, Monaco, monospace;
-  font-size: 12px;
-  color: #374151;
-  background: #f8fafc;
-}
-
-.log-line {
-  padding: 2px 0;
-  border-bottom: 1px dashed #e5e7eb;
 }
 
 .remote-page.is-fullscreen .mirror-panel {

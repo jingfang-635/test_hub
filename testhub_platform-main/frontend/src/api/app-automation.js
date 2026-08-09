@@ -25,6 +25,15 @@ export function deleteAppProject(id) {
   return request({ url: `/app-automation/projects/${id}/`, method: 'delete' })
 }
 
+/** 按「项目与版本」主项目 get-or-create 对应的 AppProject */
+export function ensureAppProjectForHub(hubProjectId) {
+  return request({
+    url: '/app-automation/projects/ensure/',
+    method: 'post',
+    data: { hub_project_id: hubProjectId }
+  })
+}
+
 // ========== 配置管理 ==========
 
 /**
@@ -115,6 +124,29 @@ export function getAppPerformance(id, params = {}) {
     method: 'get',
     params,
     timeout: 20000
+  })
+}
+
+/**
+ * 获取设备 / App logcat
+ */
+export function getDeviceLogs(id, params = {}) {
+  return request({
+    url: `/app-automation/devices/${id}/logs/`,
+    method: 'get',
+    params,
+    timeout: 25000
+  })
+}
+
+/**
+ * 清空设备 logcat 缓冲区
+ */
+export function clearDeviceLogs(id) {
+  return request({
+    url: `/app-automation/devices/${id}/clear-logs/`,
+    method: 'post',
+    timeout: 15000
   })
 }
 

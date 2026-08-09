@@ -30,7 +30,12 @@
             </el-input>
           </el-col>
           <el-col :span="4">
-            <el-select v-model="statusFilter" :placeholder="$t('version.status')" clearable @change="handleFilter">
+            <el-select
+              v-model="versionStatusFilter"
+              :placeholder="$t('version.statusFilter')"
+              clearable
+              @change="handleFilter"
+            >
               <el-option :label="$t('version.statusDraft')" value="draft" />
               <el-option :label="$t('version.statusInProgress')" value="in_progress" />
               <el-option :label="$t('version.statusReleased')" value="released" />
@@ -109,7 +114,7 @@
         <el-pagination
           v-model:current-page="currentPage"
           :page-size="pageSize"
-          :total="total"
+          :total="paginationTotal"
           layout="total, prev, pager, next"
           @current-change="handlePageChange"
         />
@@ -309,7 +314,7 @@ const currentPage = ref(1)
 const pageSize = ref(20)
 const total = ref(0)
 const searchText = ref('')
-const statusFilter = ref('')
+const versionStatusFilter = ref('')
 
 // 版本数据
 const allVersions = ref([])
@@ -427,7 +432,7 @@ const projectVersionsMap = computed(() => {
   const map = {}
   allVersions.value.forEach(v => {
     // 若选择了版本状态筛选，只包含匹配状态的版本
-    if (statusFilter.value && v.status !== statusFilter.value) return
+    if (versionStatusFilter.value && v.status !== versionStatusFilter.value) return
     ;(v.projects || []).forEach(p => {
       if (!map[p.id]) map[p.id] = []
       map[p.id].push(v)
@@ -436,13 +441,37 @@ const projectVersionsMap = computed(() => {
   return map
 })
 
+// 按版本状态筛选时，基于全量项目做客户端过滤与分页
+const filteredProjectsByVersionStatus = computed(() => {
+  if (!versionStatusFilter.value) return null
+  const keyword = searchText.value.trim().toLowerCase()
+  return allProjectsForVersion.value.filter(p => {
+    if (keyword && !(p.name || '').toLowerCase().includes(keyword)) return false
+    return (projectVersionsMap.value[p.id] || []).length > 0
+  })
+})
+
+const displayProjects = computed(() => {
+  if (!versionStatusFilter.value) return projects.value
+  const list = filteredProjectsByVersionStatus.value || []
+  const start = (currentPage.value - 1) * pageSize.value
+  return list.slice(start, start + pageSize.value)
+})
+
+const paginationTotal = computed(() => {
+  if (versionStatusFilter.value) {
+    return (filteredProjectsByVersionStatus.value || []).length
+  }
+  return total.value
+})
+
 // 扁平化表格数据：项目行 + 版本行
 const tableData = computed(() => {
   const rows = []
-  projects.value.forEach(p => {
+  displayProjects.value.forEach(p => {
     const vers = projectVersionsMap.value[p.id] || []
     // 若选择了版本状态筛选，且该项目没有匹配的版本，则跳过该项目
-    if (statusFilter.value && vers.length === 0) return
+    if (versionStatusFilter.value && vers.length === 0) return
     rows.push({ rowType: 'project', projectId: p.id, project: p, version: null })
     vers.forEach(v => {
       rows.push({ rowType: 'version', projectId: p.id, project: p, version: v })
@@ -527,7 +556,7 @@ const getProjectTypeTagType = (type) => {
 
 // 以项目板块为单位隔行变色：同一项目的项目行+版本行整体同色，相邻项目交替灰白
 const getRowClass = ({ row }) => {
-  const projectIndex = projects.value.findIndex(p => p.id === row.projectId)
+  const projectIndex = displayProjects.value.findIndex(p => p.id === row.projectId)
   if (projectIndex === -1) return ''
   return projectIndex % 2 === 1 ? 'stripe-project-row' : ''
 }
@@ -600,16 +629,25 @@ const fetchAllProjects = async () => {
 
 const handleSearch = () => {
   currentPage.value = 1
-  fetchProjects()
+  // 版本状态筛选时走客户端过滤，无需重新请求项目列表
+  if (!versionStatusFilter.value) {
+    fetchProjects()
+  }
 }
 
 const handleFilter = () => {
   currentPage.value = 1
-  fetchProjects()
+  // 清除版本状态筛选后恢复服务端分页
+  if (!versionStatusFilter.value) {
+    fetchProjects()
+  }
 }
 
 const handlePageChange = () => {
-  fetchProjects()
+  // 版本状态筛选时由 displayProjects 客户端分页
+  if (!versionStatusFilter.value) {
+    fetchProjects()
+  }
 }
 
 const goToProject = (id) => {
@@ -830,7 +868,7 @@ onMounted(() => {
 .pagination-container {
   margin-top: 20px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
 }
 
 .project-name {

@@ -19,6 +19,7 @@ export default {
   creator: '创建者',
   createdAt: '创建时间',
   status: '状态',
+  statusFilter: '版本状态',
   statusDraft: '草稿',
   statusInProgress: '进行中',
   statusReleased: '已发布',

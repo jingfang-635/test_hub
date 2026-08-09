@@ -37,27 +37,29 @@
       </el-table-column>
       <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
-          <el-button link size="small" type="primary" @click="openEditDialog(row)">
-            编辑
-          </el-button>
-          <el-button link size="small" type="danger" @click="handleDelete(row)">
-            删除
-          </el-button>
+          <div class="action-links">
+            <el-button link size="small" type="primary" @click="openEditDialog(row)">
+              编辑
+            </el-button>
+            <el-button link size="small" type="danger" @click="handleDelete(row)">
+              删除
+            </el-button>
+          </div>
         </template>
       </el-table-column>
     </el-table>
 
-    <el-pagination
-      v-show="total > 0"
-      v-model:current-page="currentPage"
-      v-model:page-size="pageSize"
-      :total="total"
-      :page-sizes="[10, 20, 50, 100]"
-      layout="total, sizes, prev, pager, next, jumper"
-      style="margin-top: 16px; text-align: right"
-      @size-change="loadPackages"
-      @current-change="loadPackages"
-    />
+    <div v-show="total > 0" class="pagination-container">
+      <el-pagination
+        v-model:current-page="currentPage"
+        v-model:page-size="pageSize"
+        :total="total"
+        :page-sizes="[10, 20, 50, 100]"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="loadPackages"
+        @current-change="loadPackages"
+      />
+    </div>
 
     <el-dialog
       v-model="dialogVisible"
@@ -232,5 +234,44 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 10px;
+}
+
+.pagination-container {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
+}
+
+.action-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+
+  :deep(.el-button) {
+    margin: 0;
+    padding: 0;
+    height: auto;
+    font-size: 13px;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  :deep(.el-button:hover),
+  :deep(.el-button:focus),
+  :deep(.el-button:active),
+  :deep(.el-button:focus-visible) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  :deep(.el-button::before),
+  :deep(.el-button::after) {
+    display: none !important;
+  }
 }
 </style>

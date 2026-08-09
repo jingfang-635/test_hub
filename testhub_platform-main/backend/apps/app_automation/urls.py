@@ -39,6 +39,12 @@ router.register(r'notification-logs', AppNotificationLogViewSet, basename='app-n
 router.register(r'executions', AppTestExecutionViewSet, basename='app-execution')
 
 urlpatterns = [
+    # 显式注册，避免被 projects/<pk>/ 抢先匹配导致 POST ensure 405
+    path(
+        'projects/ensure/',
+        AppProjectViewSet.as_view({'post': 'ensure_for_hub_project'}),
+        name='app-project-ensure',
+    ),
     path('', include(router.urls)),
     path('executions/<int:execution_id>/report/', serve_report_file, name='app-execution-report'),
     path('executions/<int:execution_id>/report/<path:file_path>', serve_report_file, name='app-execution-report-file'),

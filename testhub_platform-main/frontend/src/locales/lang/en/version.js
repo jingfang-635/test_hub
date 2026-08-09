@@ -19,6 +19,7 @@ export default {
   creator: 'Creator',
   createdAt: 'Created At',
   status: 'Status',
+  statusFilter: 'Version Status',
   statusDraft: 'Draft',
   statusInProgress: 'In Progress',
   statusReleased: 'Released',

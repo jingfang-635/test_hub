@@ -226,9 +226,9 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   getAppElementList,
   createAppElement,
-  deleteAppElement as apiDeleteAppElement,
-  getAppProjects
+  deleteAppElement as apiDeleteAppElement
 } from '@/api/app-automation'
+import api from '@/utils/api'
 import { Search, Plus } from '@element-plus/icons-vue'
 import { formatDateTime } from '@/utils/app-automation-helpers'
 import ManualElementDialog from './components/ManualElementDialog.vue'
@@ -285,7 +285,10 @@ const handleSearch = () => {
 }
 
 // 对话框操作
-const showCreateDialog = () => {
+const showCreateDialog = async () => {
+  if (!projectList.value.length) {
+    await loadProjects()
+  }
   editElement.value = null
   dialogVisible.value = true
 }
@@ -295,7 +298,10 @@ const handleView = (element) => {
   detailDialogVisible.value = true
 }
 
-const handleEdit = (element) => {
+const handleEdit = async (element) => {
+  if (!projectList.value.length) {
+    await loadProjects()
+  }
   editElement.value = element
   dialogVisible.value = true
 }
@@ -447,8 +453,57 @@ const getTypeName = (type) => {
 
 // formatDateTime 已从 app-automation-helpers 导入
 
+/** 与「项目与版本」一致：仅展示本模块已关联的主项目 */
+const loadProjects = async () => {
+  try {
+    const response = await api.get('/projects/', {
+      params: {
+        project_type: 'app_automation',
+        page_size: 100
+      }
+    })
+    const hubs = response.data.results || response.data || []
+    if (!hubs.length) {
+      projectList.value = []
+      ElMessage.warning('暂无关联 APP自动化 的项目，请先在「项目与版本」中创建并勾选 APP自动化')
+      return
+    }
+
+    const mapped = []
+    let lastError = null
+    for (const hub of hubs) {
+      try {
+        // 与 API 测试模块一致，直接 post ensure
+        const res = await api.post('/app-automation/projects/ensure/', {
+          hub_project_id: hub.id
+        })
+        const appProject = res.data
+        if (appProject?.id) {
+          mapped.push({
+            id: appProject.id,
+            name: hub.name || appProject.name,
+            hub_project_id: hub.id
+          })
+        }
+      } catch (error) {
+        lastError = error
+        console.error('关联 APP 项目失败:', hub.id, error)
+      }
+    }
+    projectList.value = mapped
+    if (mapped.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
+  } catch (error) {
+    projectList.value = []
+    console.error('加载项目失败:', error)
+    ElMessage.error('加载项目列表失败')
+  }
+}
+
 onMounted(() => {
-  getAppProjects({ page_size: 100 }).then(res => { projectList.value = res.data.results || res.data || [] }).catch(() => {})
+  loadProjects()
   loadElements()
 })
 </script>

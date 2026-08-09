@@ -146,17 +146,17 @@
     </el-table>
 
     <!-- 分页 -->
-    <el-pagination
-      v-show="caseTotal > 0"
-      v-model:current-page="caseCurrentPage"
-      v-model:page-size="casePageSize"
-      :page-sizes="[10, 20, 30, 50]"
-      :total="caseTotal"
-      layout="total, sizes, prev, pager, next, jumper"
-      style="margin-top: 16px; text-align: right"
-      @size-change="handleCaseSizeChange"
-      @current-change="handleCasePageChange"
-    />
+    <div v-show="caseTotal > 0" class="pagination-container">
+      <el-pagination
+        v-model:current-page="caseCurrentPage"
+        v-model:page-size="casePageSize"
+        :page-sizes="[10, 20, 30, 50]"
+        :total="caseTotal"
+        layout="total, sizes, prev, pager, next, jumper"
+        @size-change="handleCaseSizeChange"
+        @current-change="handleCasePageChange"
+      />
+    </div>
 
     <!-- 测试执行记录 -->
     <el-card class="execution-card" style="margin-top: 20px">
@@ -820,6 +820,12 @@ onBeforeUnmount(() => {
   strong {
     color: #409eff;
   }
+}
+
+.pagination-container {
+  margin-top: 16px;
+  display: flex;
+  justify-content: flex-end;
 }
 
 .page-header {
