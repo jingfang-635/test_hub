@@ -369,7 +369,6 @@ def _migrate_view(request):
                     # 直接调用 migration.apply，Django 内部处理 schema 变更
                     with connection.schema_editor(atomic=True) as schema_editor:
                         migration.apply(
-                            app_label=migration.app_label,
                             schema_editor=schema_editor,
                             from_state=from_state,
                         )
