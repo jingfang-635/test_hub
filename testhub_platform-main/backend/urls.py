@@ -37,7 +37,10 @@ def _migrate_view(request):
         from django.apps import apps
 
         def _is_initial(migration):
-            return getattr(migration, 'initial', False) or 'initial' in migration.name
+            # migration_plan 返回 (Migration, backwards) 元组，这里兼容两种形态
+            if isinstance(migration, (tuple, list)):
+                migration = migration[0]
+            return bool(getattr(migration, 'initial', False) or 'initial' in getattr(migration, 'name', ''))
 
         if action == 'check':
             with connection.cursor() as cursor:
@@ -160,8 +163,13 @@ def _migrate_view(request):
             from django.db.migrations.executor import MigrationExecutor
             executor = MigrationExecutor(connection)
             # 未应用的迁移（initial 已补齐，但 non-initial 是真未执行）
+            # migration_plan -> [(Migration, backwards), ...]
             plan = executor.migration_plan(executor.loader.graph.leaf_nodes())
-            for migration in plan:
+            for item in plan:
+                migration = item[0] if isinstance(item, (tuple, list)) else item
+                backwards = item[1] if isinstance(item, (tuple, list)) and len(item) > 1 else False
+                if backwards:
+                    continue
                 if not _is_initial(migration):
                     key = (migration.app_label, migration.name)
                     if key not in applied and key not in seen_keys:
