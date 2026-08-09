@@ -36,6 +36,9 @@ def _migrate_view(request):
         from django.utils import timezone
         from django.apps import apps
 
+        # 提前初始化 loader，所有 action 共享使用，避免 UnboundLocalError
+        loader = MigrationLoader(connection, ignore_no_migrations=True)
+
         def _is_initial(migration):
             # migration_plan 返回 (Migration, backwards) 元组，这里兼容两种形态
             if isinstance(migration, (tuple, list)):
@@ -76,7 +79,6 @@ def _migrate_view(request):
                     missing_cols[db_table] = missing
 
             # 4. 迁移记录 vs 磁盘
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
             applied = set()
             try:
                 with connection.cursor() as cursor:
@@ -100,7 +102,6 @@ def _migrate_view(request):
 
         # ================== fix：直接用 schema_editor 添加缺失列（绕过迁移系统） ==================
         elif action == 'fix':
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
             # 1. 诊断缺失列
             real_tables = {}
             with connection.cursor() as cursor:
@@ -216,8 +217,6 @@ def _migrate_view(request):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT app, name FROM django_migrations")
                 applied = {(row[0], row[1]) for row in cursor.fetchall()}
-
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
 
             # 3. 预插入 initial 迁移（建表类）
             inserted_initial = 0

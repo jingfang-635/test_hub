@@ -52,6 +52,9 @@ def handler(event, context):
     action = query.get('action', 'check')
 
     try:
+        # 提前初始化 loader，所有 action 共享使用，避免 UnboundLocalError
+        loader = MigrationLoader(connection, ignore_no_migrations=True)
+
         if action == 'check':
             with connection.cursor() as cursor:
                 cursor.execute('SELECT 1')
@@ -82,7 +85,6 @@ def handler(event, context):
                 if missing:
                     missing_cols[db_table] = missing
 
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
             applied = set()
             try:
                 with connection.cursor() as cursor:
@@ -106,7 +108,6 @@ def handler(event, context):
 
         # ========== fix：直接用 schema_editor 添加缺失列（绕过迁移系统） ==========
         if action == 'fix':
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
             # 1. 诊断缺失列
             real_tables = {}
             with connection.cursor() as cursor:
@@ -218,8 +219,6 @@ def handler(event, context):
             with connection.cursor() as cursor:
                 cursor.execute("SELECT app, name FROM django_migrations")
                 applied = {(row[0], row[1]) for row in cursor.fetchall()}
-
-            loader = MigrationLoader(connection, ignore_no_migrations=True)
 
             inserted_initial = 0
             with connection.cursor() as cursor:
