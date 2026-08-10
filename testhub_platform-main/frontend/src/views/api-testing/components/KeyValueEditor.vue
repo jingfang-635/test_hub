@@ -30,18 +30,9 @@
             v-model="row.value"
             :placeholder="placeholderValue"
             size="small"
+            class="value-input"
             @input="updateValue"
-          >
-            <template #append>
-              <el-button
-                size="small"
-                :icon="MagicStick"
-                @click="openDataFactorySelector(index)"
-                :title="$t('apiTesting.component.keyValueEditor.referDataFactory')"
-                class="data-factory-btn"
-              />
-            </template>
-          </el-input>
+          />
           <el-upload
             v-else
             :auto-upload="false"
@@ -50,11 +41,20 @@
           >
             <el-button size="small">{{ $t('apiTesting.component.keyValueEditor.selectFile') }}</el-button>
           </el-upload>
-          <el-tooltip :content="$t('apiTesting.component.keyValueEditor.insertDynamicVariable')" placement="top" v-if="!showFile || row.type !== 'file'">
-            <el-button size="small" style="margin-left: 5px" @click="openVariableHelper(index)" class="variable-helper-btn">
-              <el-icon><MagicStick /></el-icon>
-            </el-button>
-          </el-tooltip>
+          <template v-if="!showFile || row.type !== 'file'">
+            <el-button
+              size="small"
+              :icon="MagicStick"
+              @click="openDataFactorySelector(index)"
+              :title="$t('apiTesting.component.keyValueEditor.referDataFactory')"
+              class="data-factory-btn"
+            />
+            <el-tooltip :content="$t('apiTesting.component.keyValueEditor.insertDynamicVariable')" placement="top">
+              <el-button size="small" @click="openVariableHelper(index)" class="variable-helper-btn">
+                <el-icon><MagicStick /></el-icon>
+              </el-button>
+            </el-tooltip>
+          </template>
           <span v-if="row.file" class="file-name">{{ row.file.name }}</span>
         </div>
 
@@ -525,6 +525,7 @@ defineExpose({
 
 .header {
   display: flex;
+  gap: 2ch;
   background: #f5f7fa;
   border-bottom: 1px solid #e4e7ed;
   padding: 8px;
@@ -540,9 +541,10 @@ defineExpose({
 
 .row {
   display: flex;
+  gap: 2ch;
   border-bottom: 1px solid #f5f7fa;
   padding: 8px;
-  min-height: 40px;
+  min-height: 48px;
   align-items: center;
 }
 
@@ -557,7 +559,7 @@ defineExpose({
 .column {
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 2ch;
 }
 
 .key-column {
@@ -568,11 +570,35 @@ defineExpose({
 .value-column {
   width: 25%;
   min-width: 200px;
+  gap: 2ch;
+}
+
+.value-column .value-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.value-column :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .description-column {
   width: 30%;
   min-width: 120px;
+}
+
+/* 参数名 / 参数值 / 描述输入框高度增加 40%（small 默认 24px → 33.6px） */
+.key-column :deep(.el-input),
+.value-column :deep(.el-input.value-input),
+.description-column :deep(.el-input) {
+  --el-component-size: calc(var(--el-component-size-small, 24px) * 1.4);
+  height: calc(var(--el-component-size-small, 24px) * 1.4);
+}
+
+.key-column :deep(.el-input__wrapper),
+.value-column :deep(.el-input.value-input .el-input__wrapper),
+.description-column :deep(.el-input__wrapper) {
+  min-height: calc(var(--el-component-size-small, 24px) * 1.4);
 }
 
 .action-column {

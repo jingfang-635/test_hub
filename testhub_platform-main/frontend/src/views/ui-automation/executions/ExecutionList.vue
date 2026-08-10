@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">{{ $t('uiAutomation.execution.title') }}</h1>
       <el-select v-model="projectId" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+        <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
         <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
       </el-select>
     </div>
@@ -268,7 +269,7 @@ import { Search, View, WarningFilled, Refresh } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import {
   getTestCaseExecutions,
-  getUiProjects,
+  loadUiAutomationProjects,
   deleteTestCaseExecution,
   batchDeleteTestCaseExecutions,
   runTestCase
@@ -278,7 +279,9 @@ const { t } = useI18n()
 
 // 项目和执行数据
 const projects = ref([])
-const projectId = ref('')
+const projectId = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => projectId.value === ALL_PROJECTS || projectId.value === ''
 const executions = ref([])
 const loading = ref(false)
 const total = ref(0)
@@ -436,9 +439,16 @@ const parseExecutionLogs = (logs) => {
 // 加载项目列表
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     ElMessage.error(t('uiAutomation.project.messages.loadFailed'))
     console.error('获取项目列表失败:', error)
   }
@@ -454,11 +464,9 @@ const loadExecutions = async () => {
       ...queryParams
     }
 
-    // 添加项目筛选
-    if (projectId.value) {
+    // 添加项目筛选（全部项目不传 project）
+    if (projectId.value && !isAllProjectsSelected()) {
       params.project = projectId.value
-    } else {
-      params.project = undefined // Ensure project is undefined if not selected
     }
 
     const response = await getTestCaseExecutions(params)
@@ -613,9 +621,7 @@ const handleRerun = async () => {
 // 组件挂载时加载数据
 onMounted(async () => {
   await loadProjects()
-  if (projects.value.length > 0) {
-    projectId.value = projects.value[0].id
-  }
+  projectId.value = ALL_PROJECTS
   await loadExecutions()
 })
 </script>

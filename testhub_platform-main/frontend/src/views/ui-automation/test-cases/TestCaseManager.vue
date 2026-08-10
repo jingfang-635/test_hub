@@ -3,10 +3,11 @@
     <div class="page-header">
       <h1 class="page-title">{{ t('uiAutomation.testCase.title') }}</h1>
       <div class="header-actions">
-        <el-select v-model="projectId" :placeholder="t('uiAutomation.project.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+        <el-select v-model="projectId" :placeholder="t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+          <el-option :label="t('uiAutomation.common.allProjects')" value="all" />
           <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
         </el-select>
-        <el-button type="primary" @click="showCreateDialog = true">
+        <el-button type="primary" @click="openCreateDialog">
           <el-icon><Plus /></el-icon>
           {{ t('uiAutomation.testCase.newTestCase') }}
         </el-button>
@@ -40,10 +41,7 @@
             @click="selectTestCase(testCase)"
           >
             <div class="case-header">
-              <div class="case-info">
-                <h4 class="case-name">{{ testCase.name }}</h4>
-                <p class="case-description">{{ testCase.description || t('uiAutomation.testCase.noDescription') }}</p>
-              </div>
+              <h4 class="case-name">{{ testCase.name }}</h4>
               <div class="case-actions">
                 <el-button size="small" text @click.stop="runTestCase(testCase)">
                   <el-icon><CaretRight /></el-icon>
@@ -59,10 +57,10 @@
                 </el-button>
               </div>
             </div>
+            <p class="case-description">{{ testCase.description || t('uiAutomation.testCase.noDescription') }}</p>
             <div class="case-meta">
-              <!-- 移除状态显示 -->
               <span class="step-count">{{ testCase.steps?.length || 0 }} {{ t('uiAutomation.testCase.stepsCount') }}</span>
-              <span class="update-time">{{ formatTime(testCase.updated_at) }}</span>
+              <span class="create-time">{{ formatTime(testCase.created_at || testCase.updated_at) }}</span>
             </div>
           </div>
         </div>
@@ -531,7 +529,7 @@ import { useI18n } from 'vue-i18n'
 const { t } = useI18n()
 
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   getElements,
   createTestCase,
   updateTestCase,
@@ -545,7 +543,17 @@ import { getVariableFunctions } from '@/api/data-factory'
 
 // 响应式数据
 const projects = ref([])
-const projectId = ref('')
+const projectId = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => projectId.value === ALL_PROJECTS || projectId.value === ''
+const getProjectQueryParams = () => (isAllProjectsSelected() ? {} : { project: projectId.value })
+const ensureProjectSelected = () => {
+  if (isAllProjectsSelected()) {
+    ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
+    return false
+  }
+  return true
+}
 const testCases = ref([])
 const selectedTestCase = ref(null)
 const currentSteps = ref([])
@@ -637,12 +645,19 @@ const parsedExecutionLogs = computed(() => {
   }
 })
 
-// 方法定义
+/** 与「项目与版本」一致：仅展示本模块已关联的主项目 */
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     ElMessage.error('获取项目列表失败')
     console.error('获取项目列表失败:', error)
   }
@@ -655,7 +670,7 @@ const loadTestCases = async () => {
   }
 
   try {
-    const response = await getTestCases({ project: projectId.value })
+    const response = await getTestCases(getProjectQueryParams())
     testCases.value = response.data.results || response.data
   } catch (error) {
     console.error('获取测试用例失败:', error)
@@ -669,7 +684,7 @@ const loadElements = async () => {
   }
 
   try {
-    const response = await getElements({ project: projectId.value })
+    const response = await getElements(getProjectQueryParams())
     availableElements.value = response.data.results || response.data
   } catch (error) {
     console.error('获取元素列表失败:', error)
@@ -807,7 +822,7 @@ const runTestCase = async (testCase) => {
     ElMessage.info(t('uiAutomation.testCase.run.start', { engine: selectedEngine.value.toUpperCase(), browser: selectedBrowser.value.toUpperCase(), mode: modeText }))
 
     const response = await runTestCaseApi(testCase.id, {
-      project_id: projectId.value,
+      project_id: testCase.project_id || testCase.project?.id || (isAllProjectsSelected() ? null : projectId.value),
       engine: selectedEngine.value,
       browser: selectedBrowser.value,
       headless: headlessMode.value
@@ -1123,12 +1138,18 @@ const saveTestCaseForm = async () => {
     return
   }
 
+  if (!editingTestCase.value && !ensureProjectSelected()) {
+    return
+  }
+
   try {
     const data = {
       name: testCaseForm.name,
       description: testCaseForm.description,
       priority: testCaseForm.priority,
-      project: projectId.value,
+      project: editingTestCase.value
+        ? (editingTestCase.value.project_id || editingTestCase.value.project?.id || projectId.value)
+        : projectId.value,
       steps: []
     }
 
@@ -1258,11 +1279,14 @@ onMounted(async () => {
   await loadVariableFunctions()
   console.log('loadVariableFunctions 完成')
 
-  if (projects.value.length > 0) {
-    projectId.value = projects.value[0].id
-    await onProjectChange()
-  }
+  projectId.value = ALL_PROJECTS
+  await onProjectChange()
 })
+
+const openCreateDialog = () => {
+  if (!ensureProjectSelected()) return
+  showCreateDialog.value = true
+}
 </script>
 
 <style scoped>
@@ -1345,35 +1369,52 @@ onMounted(async () => {
 .case-header {
   display: flex;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 10px;
-}
-
-.case-info {
-  flex: 1;
+  align-items: center;
+  margin-bottom: 8px;
+  gap: 8px;
 }
 
 .case-name {
-  margin: 0 0 5px 0;
+  margin: 0;
   font-size: 16px;
   font-weight: 600;
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .case-description {
-  margin: 0;
+  margin: 0 0 10px 0;
   color: #666;
   font-size: 14px;
   line-height: 1.4;
+  width: 100%;
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-clamp: 2;
+  overflow: hidden;
+  word-break: break-word;
 }
 
 .case-actions {
   display: flex;
-  gap: 5px;
+  flex-shrink: 0;
+  margin-left: auto;
+  justify-content: flex-end;
+  gap: 0.2ch;
+}
+
+.case-actions :deep(.el-button + .el-button) {
+  margin-left: 0;
 }
 
 .case-meta {
   display: flex;
   align-items: center;
+  justify-content: space-between;
   gap: 10px;
   font-size: 12px;
   color: #888;
@@ -1382,6 +1423,12 @@ onMounted(async () => {
 .step-count {
   color: #409eff;
   font-weight: 500;
+}
+
+.create-time {
+  margin-left: auto;
+  text-align: right;
+  white-space: nowrap;
 }
 
 .right-panel {
@@ -1560,6 +1607,9 @@ onMounted(async () => {
 }
 
 .execution-result .result-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   padding: 15px;
   border-bottom: 1px solid #e6e6e6;
   background: #fafafa;

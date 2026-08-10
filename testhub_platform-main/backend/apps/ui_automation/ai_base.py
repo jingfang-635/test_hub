@@ -917,9 +917,9 @@ try:
             return _original_find_free_port()
 
     LocalBrowserWatchdog._find_free_port = _patched_find_free_port
-    logger.info("✅ Successfully patched LocalBrowserWatchdog._find_free_port")
+    logger.info("Successfully patched LocalBrowserWatchdog._find_free_port")
 except Exception as e:
-    logger.error(f"❌ Failed to patch LocalBrowserWatchdog._find_free_port: {e}")
+    logger.error("Failed to patch LocalBrowserWatchdog._find_free_port: %s", e)
 
 # ============================================================================
 # PART 2: Helper Classes

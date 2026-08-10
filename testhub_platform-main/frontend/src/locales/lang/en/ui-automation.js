@@ -86,6 +86,8 @@ export default {
     name: 'Name',
     project: 'Project',
     selectProject: 'Select Project',
+    allProjects: 'All Projects',
+    selectSpecificProject: 'Please select a specific project first',
     yes: 'Yes',
     no: 'No',
     all: 'All',
@@ -308,7 +310,8 @@ export default {
       moveSuccess: 'Element moved to target page',
       moveFailed: 'Failed to move element',
       invalidDropTarget: 'Elements can only be dropped onto pages',
-      pageCannotDrag: 'Page nodes cannot be dragged'
+      pageCannotDrag: 'Page nodes cannot be dragged',
+      selectProject: 'Please select a specific project before creating'
     }
   },
 
@@ -449,6 +452,8 @@ export default {
     step: 'Step',
     screenshot: 'Screenshot',
     viewDetail: 'View Details',
+    onlineReport: 'Online Report',
+    downloadOfflineReport: 'Download Offline Report',
     seconds: 's',
     minutes: 'm',
     // Execution status
@@ -467,7 +472,10 @@ export default {
       deleteConfirm: 'Are you sure to delete report "{name}"? This action cannot be undone.',
       confirmDelete: 'Confirm Delete',
       deleteSuccess: 'Deleted successfully',
-      deleteFailed: 'Failed to delete report'
+      deleteFailed: 'Failed to delete report',
+      onlineReportFailed: 'Failed to open online report',
+      reportDownloaded: 'Offline report downloaded successfully',
+      reportDownloadFailed: 'Failed to download offline report'
     }
   },
 

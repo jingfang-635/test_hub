@@ -1,19 +1,27 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, views
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
 from django.contrib.auth import get_user_model
 from django.shortcuts import get_object_or_404
-from django.http import HttpResponse
+from django.http import HttpResponse, FileResponse
+from django.conf import settings
 from django_filters.rest_framework import DjangoFilterBackend
 from rest_framework import filters
 from django.db import models
 from django.utils import timezone
+from pathlib import Path
+from urllib.parse import quote
 import logging
 import json
+import os
 import re
 import random
 import time
+import shutil
+import subprocess
+import glob
+import uuid
 
 from .models import (
     UiProject, LocatorStrategy, Element, TestScript, TestSuite,
@@ -121,6 +129,89 @@ class StandardPagination(PageNumberPagination):
     max_page_size = 1000
 
 
+def ensure_ui_project_for_hub(user, hub_project_id):
+    """按「项目与版本」主项目 get-or-create 对应的 UiProject。"""
+    from apps.projects.models import Project
+
+    if not hub_project_id:
+        return None, Response({'error': '请提供 hub_project_id'}, status=status.HTTP_400_BAD_REQUEST)
+
+    try:
+        hub_project = Project.objects.get(id=hub_project_id)
+    except Project.DoesNotExist:
+        return None, Response({'error': '主项目不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+    if hub_project.owner_id != user.id and not hub_project.members.filter(id=user.id).exists():
+        return None, Response({'error': '无权限访问该项目'}, status=status.HTTP_403_FORBIDDEN)
+
+    if 'ui_automation' not in (hub_project.project_types or []):
+        return None, Response(
+            {'error': '该项目未关联 UI自动化 模块'},
+            status=status.HTTP_400_BAD_REQUEST
+        )
+
+    ui_project = UiProject.objects.filter(hub_project=hub_project).first()
+    created = False
+    if not ui_project:
+        # 兼容历史数据：同名未关联的 UiProject 优先绑定
+        ui_project = UiProject.objects.filter(
+            hub_project__isnull=True,
+            name=hub_project.name,
+        ).filter(
+            models.Q(owner=user) | models.Q(members=user)
+        ).first()
+        if ui_project:
+            ui_project.hub_project = hub_project
+            ui_project.description = ui_project.description or (hub_project.description or '')
+            ui_project.save(update_fields=['hub_project', 'description', 'updated_at'])
+        else:
+            status_map = {
+                'active': 'IN_PROGRESS',
+                'paused': 'NOT_STARTED',
+                'completed': 'COMPLETED',
+                'archived': 'COMPLETED',
+            }
+            ui_project = UiProject.objects.create(
+                name=hub_project.name,
+                description=hub_project.description or '',
+                status=status_map.get(hub_project.status, 'IN_PROGRESS'),
+                base_url='http://localhost',
+                owner=hub_project.owner,
+                hub_project=hub_project,
+            )
+            member_ids = list(hub_project.members.values_list('id', flat=True))
+            if member_ids:
+                ui_project.members.set(member_ids)
+            created = True
+    else:
+        # 主项目改名后同步到 UiProject，避免脚本列表等仍显示旧名称
+        sync_fields = []
+        if ui_project.name != hub_project.name:
+            ui_project.name = hub_project.name
+            sync_fields.append('name')
+        if sync_fields:
+            sync_fields.append('updated_at')
+            ui_project.save(update_fields=sync_fields)
+
+    return (ui_project, created), None
+
+
+class UiProjectEnsureView(views.APIView):
+    """独立 ensure 接口，避免被 ViewSet detail 路由抢占导致 POST 405。"""
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        hub_project_id = request.data.get('hub_project_id')
+        result, error_response = ensure_ui_project_for_hub(request.user, hub_project_id)
+        if error_response:
+            return error_response
+        ui_project, created = result
+        return Response(
+            UiProjectSerializer(ui_project).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
+
+
 class UiProjectViewSet(viewsets.ModelViewSet):
     queryset = UiProject.objects.all()
     permission_classes = [IsAuthenticated]
@@ -142,7 +233,7 @@ class UiProjectViewSet(viewsets.ModelViewSet):
         user = self.request.user
         return UiProject.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
-        ).distinct()
+        ).select_related('hub_project').distinct()
 
     def perform_create(self, serializer):
         # 创建项目时，当前用户自动成为负责人
@@ -159,6 +250,19 @@ class UiProjectViewSet(viewsets.ModelViewSet):
         # 记录操作（在删除前记录）
         log_operation('delete', 'project', instance.id, instance.name, self.request.user)
         instance.delete()
+
+    @action(detail=False, methods=['post'], url_path='ensure')
+    def ensure_for_hub_project(self, request):
+        """按「项目与版本」主项目 get-or-create 对应的 UiProject。"""
+        hub_project_id = request.data.get('hub_project_id')
+        result, error_response = ensure_ui_project_for_hub(request.user, hub_project_id)
+        if error_response:
+            return error_response
+        ui_project, created = result
+        return Response(
+            UiProjectSerializer(ui_project).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK
+        )
 
 
 class LocatorStrategyViewSet(viewsets.ModelViewSet):
@@ -244,12 +348,11 @@ class ElementViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def tree(self, request):
-        """获取元素树形结构"""
+        """获取元素树形结构；未传 project 或 project=all 时返回全部可访问项目。"""
         project_id = request.query_params.get('project')
-        if not project_id:
-            return Response({'error': '需要指定项目ID'}, status=status.HTTP_400_BAD_REQUEST)
-
-        elements = self.get_queryset().filter(project_id=project_id)
+        elements = self.get_queryset()
+        if project_id and str(project_id) not in ('', 'all', 'null', 'undefined'):
+            elements = elements.filter(project_id=project_id)
         tree_data = self._build_element_tree(elements)
         return Response(tree_data)
 
@@ -323,6 +426,7 @@ class ElementViewSet(viewsets.ModelViewSet):
                 'usage_count': element.usage_count,
                 'group_id': element.group_id,  # 用于前端关联到页面
                 'page': element.page,  # 保留向后兼容
+                'project_id': element.project_id,
                 'children': []
             }
             element_data_list.append(element_data)
@@ -374,12 +478,11 @@ class ElementGroupViewSet(viewsets.ModelViewSet):
 
     @action(detail=False, methods=['get'])
     def tree(self, request):
-        """获取分组树形结构"""
+        """获取分组树形结构；未传 project 或 project=all 时返回全部可访问项目。"""
         project_id = request.query_params.get('project')
-        if not project_id:
-            return Response({'error': '需要指定项目ID'}, status=status.HTTP_400_BAD_REQUEST)
-
-        groups = self.get_queryset().filter(project_id=project_id, parent_group__isnull=True)
+        groups = self.get_queryset().filter(parent_group__isnull=True)
+        if project_id and str(project_id) not in ('', 'all', 'null', 'undefined'):
+            groups = groups.filter(project_id=project_id)
         serializer = ElementGroupSerializer(groups, many=True)
         return Response(serializer.data)
 
@@ -626,7 +729,9 @@ class TestScriptViewSet(viewsets.ModelViewSet):
         accessible_projects = UiProject.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
-        return TestScript.objects.filter(project__in=accessible_projects)
+        return TestScript.objects.filter(project__in=accessible_projects).select_related(
+            'project', 'project__hub_project'
+        )
 
 
 class TestSuiteViewSet(viewsets.ModelViewSet):
@@ -851,7 +956,7 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
         ).distinct()
         return TestExecution.objects.filter(
             project__in=accessible_projects
-        ).select_related('project', 'test_suite', 'test_script', 'executed_by')
+        ).select_related('project', 'project__hub_project', 'test_suite', 'test_script', 'executed_by')
 
     def get_serializer_class(self):
         if self.action == 'create':
@@ -862,7 +967,374 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
         # 记录操作（删除测试报告）
         suite_name = instance.test_suite.name if instance.test_suite else f"执行记录#{instance.id}"
         log_operation('delete', 'report', instance.id, suite_name, self.request.user)
+        execution_id = instance.id
         instance.delete()
+        for subdir in ('allure-reports', 'allure-results', 'allure-offline', 'reports'):
+            target = os.path.join(
+                settings.MEDIA_ROOT, 'ui-automation', subdir, f'execution_{execution_id}'
+            )
+            if os.path.isdir(target):
+                shutil.rmtree(target, ignore_errors=True)
+
+    def _find_allure_command(self):
+        """定位项目内置 / 系统 Allure 可执行文件。"""
+        exe = 'allure.bat' if os.name == 'nt' else 'allure'
+        candidates = [
+            Path(settings.BASE_DIR) / 'allure' / 'bin' / exe,
+            Path(settings.BASE_DIR).parent / 'allure' / 'bin' / exe,
+            Path(__file__).resolve().parent.parent.parent.parent / 'allure' / 'bin' / exe,
+            Path('/usr/local/bin/allure'),
+            Path('/usr/bin/allure'),
+        ]
+        for path in candidates:
+            if path.exists():
+                logger.info(f'使用 Allure: {path}')
+                return path
+        logger.warning('未找到 Allure 可执行文件')
+        return None
+
+    def _check_java_environment(self):
+        """检查 Java 运行环境是否可用。"""
+        try:
+            result = subprocess.run(
+                ['java', '-version'],
+                capture_output=True,
+                text=True,
+                timeout=5,
+            )
+            return result.returncode == 0
+        except Exception as e:
+            logger.warning(f'Java 环境检查失败: {e}')
+            return False
+
+    def _get_allure_results_dir(self, execution):
+        return os.path.join(
+            settings.MEDIA_ROOT, 'ui-automation', 'allure-results', f'execution_{execution.id}'
+        )
+
+    def _get_allure_report_dir(self, execution):
+        return os.path.join(
+            settings.MEDIA_ROOT, 'ui-automation', 'allure-reports', f'execution_{execution.id}'
+        )
+
+    def _get_allure_offline_dir(self, execution):
+        return os.path.join(
+            settings.MEDIA_ROOT, 'ui-automation', 'allure-offline', f'execution_{execution.id}'
+        )
+
+    def _suite_display_name(self, execution):
+        if execution.test_suite:
+            return execution.test_suite.name
+        if execution.test_script:
+            return execution.test_script.name
+        return f'Execution #{execution.id}'
+
+    def _project_display_name(self, execution):
+        if not execution.project:
+            return '-'
+        if getattr(execution.project, 'hub_project', None):
+            return execution.project.hub_project.name
+        return execution.project.name
+
+    def _map_allure_status(self, status_value):
+        status_map = {
+            'passed': 'passed',
+            'failed': 'failed',
+            'skipped': 'skipped',
+            'broken': 'broken',
+            'SUCCESS': 'passed',
+            'FAILED': 'failed',
+            'ABORTED': 'skipped',
+            'PENDING': 'skipped',
+            'RUNNING': 'broken',
+        }
+        return status_map.get(status_value, 'broken')
+
+    def _generate_allure_result_files(self, execution, results_dir):
+        """将 UI 执行结果转换为 Allure result JSON。"""
+        os.makedirs(results_dir, exist_ok=True)
+        for old in glob.glob(os.path.join(results_dir, '*')):
+            try:
+                if os.path.isfile(old):
+                    os.remove(old)
+            except Exception:
+                pass
+
+        cases = []
+        if isinstance(execution.result_data, dict):
+            cases = execution.result_data.get('test_cases') or []
+
+        suite_name = self._suite_display_name(execution)
+        project_name = self._project_display_name(execution)
+        start_ms = int((execution.started_at or execution.created_at or timezone.now()).timestamp() * 1000)
+        stop_ms = int((execution.finished_at or timezone.now()).timestamp() * 1000)
+        if stop_ms <= start_ms:
+            stop_ms = start_ms + max(int((execution.duration or 1) * 1000), 1)
+
+        children = []
+        if not cases:
+            # 无明细时仍生成一条汇总结果，保证 Allure 可出报告
+            uid = str(uuid.uuid4())
+            children.append(uid)
+            result = {
+                'uuid': uid,
+                'name': suite_name,
+                'status': self._map_allure_status(execution.status),
+                'stage': 'finished',
+                'start': start_ms,
+                'stop': stop_ms,
+                'description': execution.error_message or '无用例明细',
+                'historyId': f'ui-execution-{execution.id}',
+                'fullName': f'{suite_name}',
+                'labels': [
+                    {'name': 'suite', 'value': suite_name},
+                    {'name': 'package', 'value': 'ui_automation'},
+                    {'name': 'framework', 'value': execution.engine or 'playwright'},
+                    {'name': 'project', 'value': project_name},
+                ],
+                'steps': [],
+            }
+            if execution.error_message:
+                result['statusDetails'] = {
+                    'message': execution.error_message[:2000],
+                    'trace': execution.error_message,
+                }
+            with open(os.path.join(results_dir, f'{uid}-result.json'), 'w', encoding='utf-8') as f:
+                json.dump(result, f, ensure_ascii=False, indent=2)
+        else:
+            case_span = max((stop_ms - start_ms) // max(len(cases), 1), 1)
+            for i, case in enumerate(cases):
+                uid = str(uuid.uuid4())
+                children.append(uid)
+                case_name = case.get('test_case_name') or case.get('name') or f'Case {i + 1}'
+                case_status = self._map_allure_status(case.get('status'))
+                case_start = start_ms + i * case_span
+                case_stop = case_start + case_span
+                steps = []
+                raw_steps = case.get('steps') or []
+                step_span = max(case_span // max(len(raw_steps), 1), 1) if raw_steps else 1
+                for j, step in enumerate(raw_steps):
+                    step_name = (
+                        step.get('description')
+                        or step.get('action')
+                        or step.get('name')
+                        or f'Step {j + 1}'
+                    )
+                    step_status = self._map_allure_status(step.get('status') or case.get('status'))
+                    step_start = case_start + j * step_span
+                    steps.append({
+                        'name': str(step_name),
+                        'status': step_status,
+                        'stage': 'finished',
+                        'start': step_start,
+                        'stop': step_start + step_span,
+                        'steps': [],
+                    })
+
+                result = {
+                    'uuid': uid,
+                    'name': case_name,
+                    'status': case_status,
+                    'stage': 'finished',
+                    'start': case_start,
+                    'stop': case_stop,
+                    'description': case.get('error') or case.get('error_message') or '',
+                    'historyId': f'ui-case-{case.get("test_case_id") or i}-execution-{execution.id}',
+                    'fullName': f'{suite_name} / {case_name}',
+                    'labels': [
+                        {'name': 'suite', 'value': suite_name},
+                        {'name': 'testClass', 'value': suite_name},
+                        {'name': 'package', 'value': 'ui_automation'},
+                        {'name': 'framework', 'value': execution.engine or 'playwright'},
+                        {'name': 'browser', 'value': execution.browser or 'chrome'},
+                        {'name': 'project', 'value': project_name},
+                    ],
+                    'parameters': [
+                        {'name': 'engine', 'value': str(execution.engine or '-')},
+                        {'name': 'browser', 'value': str(execution.browser or '-')},
+                    ],
+                    'steps': steps,
+                }
+                err = case.get('error') or case.get('error_message')
+                if err:
+                    result['statusDetails'] = {'message': str(err)[:2000], 'trace': str(err)}
+
+                with open(os.path.join(results_dir, f'{uid}-result.json'), 'w', encoding='utf-8') as f:
+                    json.dump(result, f, ensure_ascii=False, indent=2)
+
+        container = {
+            'uuid': str(uuid.uuid4()),
+            'name': suite_name,
+            'children': children,
+            'befores': [],
+            'afters': [],
+            'start': start_ms,
+            'stop': stop_ms,
+        }
+        with open(os.path.join(results_dir, f'{execution.id}-container.json'), 'w', encoding='utf-8') as f:
+            json.dump(container, f, ensure_ascii=False, indent=2)
+
+        env_lines = [
+            f'Project={project_name}',
+            f'Suite={suite_name}',
+            f'Engine={execution.engine or "-"}',
+            f'Browser={execution.browser or "-"}',
+            f'Executor={(execution.executed_by.username if execution.executed_by else "-")}',
+        ]
+        with open(os.path.join(results_dir, 'environment.properties'), 'w', encoding='utf-8') as f:
+            f.write('\n'.join(env_lines))
+
+    def _run_allure_generate(self, results_dir, output_dir, single_file=False):
+        """调用 allure generate，成功返回 True。"""
+        allure_cmd = self._find_allure_command()
+        if not allure_cmd or not self._check_java_environment():
+            return False
+
+        os.makedirs(output_dir, exist_ok=True)
+        if os.name == 'nt':
+            cmd_list = [
+                'cmd', '/c', str(allure_cmd),
+                'generate', str(Path(results_dir)),
+                '--clean',
+            ]
+        else:
+            cmd_list = [
+                str(allure_cmd),
+                'generate', str(Path(results_dir)),
+                '--clean',
+            ]
+        if single_file:
+            cmd_list.append('--single-file')
+        cmd_list.extend(['--output', str(Path(output_dir))])
+
+        result = subprocess.run(
+            cmd_list,
+            capture_output=True,
+            text=True,
+            timeout=180,
+        )
+        if result.returncode != 0:
+            logger.error(
+                f'Allure generate 失败 code={result.returncode}: '
+                f'{result.stderr or result.stdout}'
+            )
+            return False
+        return True
+
+    def _is_single_file_allure_html(self, html_path):
+        try:
+            size = os.path.getsize(html_path)
+            if size < 50_000:
+                return False
+            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+                head = f.read(4000)
+            if 'src="app.js"' in head or "src='app.js'" in head:
+                return False
+            if 'single_file' in head or 'single-file' in head or size > 200_000:
+                return True
+            return '<script' in head and 'styles.css' not in head
+        except Exception:
+            return False
+
+    def _ensure_allure_results(self, execution):
+        results_dir = self._get_allure_results_dir(execution)
+        os.makedirs(results_dir, exist_ok=True)
+        existing = glob.glob(os.path.join(results_dir, '*-result.json'))
+        if not existing:
+            self._generate_allure_result_files(execution, results_dir)
+        return results_dir
+
+    def _ensure_online_allure_report(self, execution):
+        """生成在线 Allure 报告，返回可访问 URL。"""
+        results_dir = self._ensure_allure_results(execution)
+        report_dir = self._get_allure_report_dir(execution)
+        index_path = os.path.join(report_dir, 'index.html')
+
+        if not os.path.exists(index_path):
+            ok = self._run_allure_generate(results_dir, report_dir, single_file=False)
+            if not ok or not os.path.exists(index_path):
+                raise RuntimeError('Allure 在线报告生成失败，请确认 Java 与 Allure 已配置')
+
+        report_url = f'/media/ui-automation/allure-reports/execution_{execution.id}/index.html'
+        if execution.report_url != report_url:
+            execution.report_url = report_url
+            execution.save(update_fields=['report_url'])
+        return report_url
+
+    def _ensure_offline_allure_html(self, execution):
+        """生成可离线打开的 Allure 单文件 HTML，返回本地路径。"""
+        offline_dir = self._get_allure_offline_dir(execution)
+        offline_html = os.path.join(offline_dir, 'index.html')
+        if os.path.exists(offline_html) and self._is_single_file_allure_html(offline_html):
+            return offline_html
+
+        results_dir = self._ensure_allure_results(execution)
+        if os.path.exists(offline_dir):
+            shutil.rmtree(offline_dir, ignore_errors=True)
+        os.makedirs(offline_dir, exist_ok=True)
+
+        ok = self._run_allure_generate(results_dir, offline_dir, single_file=True)
+        if ok:
+            for name in ('index.html', 'report.html', 'allure-report.html'):
+                candidate = os.path.join(offline_dir, name)
+                if os.path.exists(candidate) and self._is_single_file_allure_html(candidate):
+                    return candidate
+
+        raise RuntimeError('Allure 离线 HTML 生成失败，请确认 Java 与 Allure 已配置且支持 --single-file')
+
+    @action(detail=True, methods=['post'], url_path='generate-allure-report')
+    def generate_allure_report(self, request, pk=None):
+        """生成 Allure 在线报告并返回 URL。"""
+        execution = self.get_object()
+        try:
+            # 重新生成 results，保证报告与最新执行数据一致
+            results_dir = self._get_allure_results_dir(execution)
+            self._generate_allure_result_files(execution, results_dir)
+            report_dir = self._get_allure_report_dir(execution)
+            if os.path.exists(report_dir):
+                shutil.rmtree(report_dir, ignore_errors=True)
+            report_url = self._ensure_online_allure_report(execution)
+            return Response({
+                'report_url': report_url,
+                'allure_report_url': report_url,
+                'message': 'Allure 报告生成成功',
+            })
+        except Exception as e:
+            logger.exception('生成 UI Allure 报告失败')
+            return Response(
+                {
+                    'error': f'生成 Allure 报告失败: {e}',
+                    'suggestion': '请检查 Java 与项目根目录 allure/bin 是否可用',
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=True, methods=['get'], url_path='download-allure-report')
+    def download_allure_report(self, request, pk=None):
+        """下载 Allure 离线报告（单文件 HTML）。"""
+        execution = self.get_object()
+        try:
+            results_dir = self._get_allure_results_dir(execution)
+            self._generate_allure_result_files(execution, results_dir)
+            offline_dir = self._get_allure_offline_dir(execution)
+            if os.path.exists(offline_dir):
+                shutil.rmtree(offline_dir, ignore_errors=True)
+            html_path = self._ensure_offline_allure_html(execution)
+            suite_name = self._suite_display_name(execution)
+            safe_name = re.sub(r'[\\/:*?"<>|]+', '_', suite_name).strip() or f'execution_{execution.id}'
+            filename = f'allure_report_{safe_name}_{execution.id}.html'
+            response = FileResponse(open(html_path, 'rb'), content_type='text/html; charset=utf-8')
+            response['Content-Disposition'] = (
+                f'attachment; filename="allure_report_{execution.id}.html"; '
+                f"filename*=UTF-8''{quote(filename)}"
+            )
+            return response
+        except Exception as e:
+            logger.exception('下载 UI Allure 报告失败')
+            return Response(
+                {'error': f'下载 Allure 报告失败: {e}'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
 
 
 class ScreenshotViewSet(viewsets.ModelViewSet):

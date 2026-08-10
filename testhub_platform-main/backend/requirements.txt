@@ -20,6 +20,13 @@ drf-spectacular>=0.27
 requests>=2.32
 httpx>=0.27
 
+# JSONPath (API extractors / assertions)
+jsonpath-ng>=1.6
+
+# API suite driver (Allure-Pytest)
+pytest>=8.0
+allure-pytest>=2.13
+
 # Auth
 djangorestframework-simplejwt>=5.3
 PyJWT>=2.8

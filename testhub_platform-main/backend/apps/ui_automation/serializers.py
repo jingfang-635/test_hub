@@ -28,6 +28,14 @@ class UiProjectSerializer(serializers.ModelSerializer):
         fields = '__all__'
         read_only_fields = ('created_at', 'updated_at')
 
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        # 已关联主项目时，展示名以「项目与版本」为准
+        hub = getattr(instance, 'hub_project', None)
+        if hub is not None:
+            data['name'] = hub.name
+        return data
+
 
 class UiProjectCreateSerializer(serializers.ModelSerializer):
     class Meta:

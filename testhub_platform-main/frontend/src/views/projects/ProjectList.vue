@@ -14,6 +14,18 @@
       </div>
     </div>
 
+    <div v-if="showProjectStats" class="project-stats-row">
+      <div v-for="stat in projectStats" :key="stat.key" class="project-stat-card">
+        <div class="stat-icon" :style="{ background: stat.gradient }">
+          <el-icon :size="22"><component :is="stat.icon" /></el-icon>
+        </div>
+        <div class="stat-info">
+          <div class="stat-value">{{ stat.count }}</div>
+          <div class="stat-label">{{ stat.label }}</div>
+        </div>
+      </div>
+    </div>
+
     <div class="card-container">
       <div class="filter-bar">
         <el-row :gutter="20">
@@ -296,7 +308,7 @@ import { ref, reactive, onMounted, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Document, Connection, Setting, ArrowRight, Folder, MagicStick, DocumentCopy, Monitor, Iphone } from '@element-plus/icons-vue'
+import { Plus, Search, Document, Connection, Setting, ArrowRight, Folder, MagicStick, DocumentCopy, Monitor, Iphone, Link } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 
@@ -348,6 +360,58 @@ const projectsBasePath = computed(() => {
   if (route.path.startsWith('/configuration')) return '/configuration/projects'
   return '/configuration/projects'
 })
+
+/** 配置中心展示全量项目类型统计 */
+const showProjectStats = computed(() => !currentModuleType.value)
+
+const countProjectsByType = (type) => {
+  return allProjectsForVersion.value.filter(p => (p.project_types || []).includes(type)).length
+}
+
+const projectStats = computed(() => [
+  {
+    key: 'total',
+    count: allProjectsForVersion.value.length,
+    label: t('project.statTotal'),
+    icon: Folder,
+    gradient: 'linear-gradient(135deg, #5B4CDB 0%, #7C6BF0 100%)'
+  },
+  {
+    key: 'ai_generation',
+    count: countProjectsByType('ai_generation'),
+    label: t('project.statAiGeneration'),
+    icon: Document,
+    gradient: 'linear-gradient(135deg, #A78BFA 0%, #C4B5FD 100%)'
+  },
+  {
+    key: 'ai_intelligent',
+    count: countProjectsByType('ai_intelligent'),
+    label: t('project.statAiIntelligent'),
+    icon: MagicStick,
+    gradient: 'linear-gradient(135deg, #2DD4BF 0%, #5EEAD4 100%)'
+  },
+  {
+    key: 'api_testing',
+    count: countProjectsByType('api_testing'),
+    label: t('project.statApi'),
+    icon: Link,
+    gradient: 'linear-gradient(135deg, #34D399 0%, #6EE7B7 100%)'
+  },
+  {
+    key: 'ui_automation',
+    count: countProjectsByType('ui_automation'),
+    label: t('project.statUi'),
+    icon: Monitor,
+    gradient: 'linear-gradient(135deg, #F472B6 0%, #FB7185 100%)'
+  },
+  {
+    key: 'app_automation',
+    count: countProjectsByType('app_automation'),
+    label: t('project.statApp'),
+    icon: Iphone,
+    gradient: 'linear-gradient(135deg, #38BDF8 0%, #60A5FA 100%)'
+  }
+])
 
 const form = reactive({
   id: null,
@@ -854,6 +918,55 @@ onMounted(() => {
 .header-actions {
   display: flex;
   gap: 10px;
+}
+
+.project-stats-row {
+  display: flex;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.project-stat-card {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 16px 18px;
+  background: #fff;
+  border-radius: 10px;
+  box-shadow: 0 1px 4px rgba(15, 23, 42, 0.06);
+}
+
+.stat-icon {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: #fff;
+}
+
+.stat-info {
+  min-width: 0;
+}
+
+.stat-value {
+  font-size: 24px;
+  font-weight: 700;
+  line-height: 1.2;
+  color: #1f2937;
+}
+
+.stat-label {
+  margin-top: 4px;
+  font-size: 13px;
+  color: #909399;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 // 以项目板块为整体隔行变色

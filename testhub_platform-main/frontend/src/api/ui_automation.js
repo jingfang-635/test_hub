@@ -53,6 +53,54 @@ export function deleteUiProject(id) {
   })
 }
 
+/** 按「项目与版本」主项目 get-or-create 对应的 UiProject */
+export function ensureUiProjectForHub(hubProjectId) {
+  return request({
+    url: '/ui-automation/projects/ensure/',
+    method: 'post',
+    data: { hub_project_id: hubProjectId }
+  })
+}
+
+/**
+ * 与「项目与版本」一致：仅加载已勾选 UI自动化 的主项目，并映射为 UiProject。
+ * @returns {{ projects: Array<{id:number,name:string,hub_project_id:number}>, empty: boolean, lastError: any }}
+ */
+export async function loadUiAutomationProjects() {
+  const response = await request({
+    url: '/projects/',
+    method: 'get',
+    params: {
+      project_type: 'ui_automation',
+      page_size: 100
+    }
+  })
+  const hubs = response.data.results || response.data || []
+  if (!hubs.length) {
+    return { projects: [], empty: true, lastError: null }
+  }
+
+  const mapped = []
+  let lastError = null
+  for (const hub of hubs) {
+    try {
+      const res = await ensureUiProjectForHub(hub.id)
+      const uiProject = res.data
+      if (uiProject?.id) {
+        mapped.push({
+          id: uiProject.id,
+          name: hub.name || uiProject.name,
+          hub_project_id: hub.id
+        })
+      }
+    } catch (error) {
+      lastError = error
+      console.error('关联 UI 项目失败:', hub.id, error)
+    }
+  }
+  return { projects: mapped, empty: false, lastError }
+}
+
 // 定位策略相关API
 
 // 获取定位策略列表
@@ -286,6 +334,23 @@ export function deleteTestExecution(id) {
   return request({
     url: `/ui-automation/test-executions/${id}/`,
     method: 'delete'
+  })
+}
+
+/** 生成 Allure 在线报告并返回 URL */
+export function generateUiHtmlReport(id) {
+  return request({
+    url: `/ui-automation/test-executions/${id}/generate-allure-report/`,
+    method: 'post'
+  })
+}
+
+/** 下载 Allure 离线 HTML 报告 */
+export function downloadUiHtmlReport(id) {
+  return request({
+    url: `/ui-automation/test-executions/${id}/download-allure-report/`,
+    method: 'get',
+    responseType: 'blob'
   })
 }
 

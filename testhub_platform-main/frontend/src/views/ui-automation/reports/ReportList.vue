@@ -4,6 +4,7 @@
       <h3>{{ $t('uiAutomation.report.title') }}</h3>
       <div class="actions">
         <el-select v-model="selectedProject" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
           <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
         </el-select>
         <el-button type="primary" @click="refreshReports">
@@ -65,14 +66,30 @@
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('uiAutomation.common.operation')" width="200" fixed="right">
+        <el-table-column :label="$t('uiAutomation.common.operation')" width="360" fixed="right">
           <template #default="{ row }">
-            <el-button link type="primary" size="small" @click="viewReportDetail(row)">
-              <el-icon><Document /></el-icon>
+            <el-button link class="op-btn op-simple" size="small" @click="viewReportDetail(row)">
               {{ $t('uiAutomation.report.viewDetail') }}
             </el-button>
-            <el-button link type="danger" size="small" @click="deleteReport(row)">
-              <el-icon><Delete /></el-icon>
+            <el-button
+              link
+              class="op-btn op-online"
+              size="small"
+              :loading="onlineLoadingId === row.id"
+              @click="openOnlineReport(row)"
+            >
+              {{ $t('uiAutomation.report.onlineReport') }}
+            </el-button>
+            <el-button
+              link
+              class="op-btn op-download"
+              size="small"
+              :loading="downloadLoadingId === row.id"
+              @click="downloadOfflineReport(row)"
+            >
+              {{ $t('uiAutomation.report.downloadOfflineReport') }}
+            </el-button>
+            <el-button link class="op-btn op-delete" size="small" @click="deleteReport(row)">
               {{ $t('uiAutomation.common.delete') }}
             </el-button>
           </template>
@@ -294,20 +311,26 @@
 import { ref, reactive, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, Document, Delete, WarningFilled } from '@element-plus/icons-vue'
+import { Refresh, WarningFilled } from '@element-plus/icons-vue'
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   getTestExecutions,
-  deleteTestExecution
+  deleteTestExecution,
+  generateUiHtmlReport,
+  downloadUiHtmlReport
 } from '@/api/ui_automation'
 
 const { t } = useI18n()
 
 const reports = ref([])
 const projects = ref([])
-const selectedProject = ref('')
+const selectedProject = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => selectedProject.value === ALL_PROJECTS || selectedProject.value === ''
 const loading = ref(false)
 const total = ref(0)
+const onlineLoadingId = ref(null)
+const downloadLoadingId = ref(null)
 const pagination = reactive({
   currentPage: 1,
   pageSize: 20
@@ -322,12 +345,19 @@ const showCaseDetailDialog = ref(false)
 const currentCase = ref(null)
 const activeTab = ref('logs')
 
-// 加载项目列表
+// 加载项目列表（与「项目与版本」一致：仅已勾选 UI自动化 的主项目）
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     console.error('Failed to load projects:', error)
     ElMessage.error(t('uiAutomation.report.messages.loadProjectsFailed'))
   }
@@ -342,7 +372,7 @@ const loadReports = async () => {
       page_size: pagination.pageSize
     }
 
-    if (selectedProject.value) {
+    if (selectedProject.value && !isAllProjectsSelected()) {
       params.project = selectedProject.value
     }
 
@@ -389,6 +419,71 @@ const handleCurrentChange = async () => {
 const viewReportDetail = (report) => {
   currentReport.value = report
   showDetailDialog.value = true
+}
+
+const openOnlineReport = async (report) => {
+  onlineLoadingId.value = report.id
+  try {
+    const response = await generateUiHtmlReport(report.id)
+    const reportUrl = response.data.allure_report_url || response.data.report_url
+    if (!reportUrl) {
+      throw new Error('report url missing')
+    }
+    report.report_url = reportUrl
+    const fullUrl = reportUrl.startsWith('http')
+      ? reportUrl
+      : `${window.location.origin}${reportUrl}`
+    window.open(fullUrl, '_blank')
+  } catch (error) {
+    console.error('打开在线报告失败:', error)
+    const detail = error?.response?.data?.error || error?.response?.data?.detail
+    ElMessage.error(detail || t('uiAutomation.report.messages.onlineReportFailed'))
+  } finally {
+    onlineLoadingId.value = null
+  }
+}
+
+const downloadOfflineReport = async (report) => {
+  downloadLoadingId.value = report.id
+  try {
+    const response = await downloadUiHtmlReport(report.id)
+    const disposition = response.headers?.['content-disposition'] || ''
+    let filename = `allure_report_${report.id}.html`
+    const match = disposition.match(/filename\*?=(?:UTF-8'')?["']?([^"';]+)/i)
+    if (match?.[1]) {
+      filename = decodeURIComponent(match[1])
+    }
+    if (!filename.toLowerCase().endsWith('.html')) {
+      filename = `${filename}.html`
+    }
+
+    const blob = new Blob([response.data], { type: 'text/html;charset=utf-8' })
+    const url = window.URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    link.download = filename
+    document.body.appendChild(link)
+    link.click()
+    document.body.removeChild(link)
+    window.URL.revokeObjectURL(url)
+    ElMessage.success(t('uiAutomation.report.messages.reportDownloaded'))
+  } catch (error) {
+    console.error('下载离线报告失败:', error)
+    let message = t('uiAutomation.report.messages.reportDownloadFailed')
+    const data = error?.response?.data
+    if (data instanceof Blob) {
+      try {
+        const text = await data.text()
+        const json = JSON.parse(text)
+        if (json.error) message = json.error
+      } catch (_) { /* ignore */ }
+    } else if (data?.error) {
+      message = data.error
+    }
+    ElMessage.error(message)
+  } finally {
+    downloadLoadingId.value = null
+  }
 }
 
 // 获取用例执行列表
@@ -508,9 +603,7 @@ const formatDuration = (seconds) => {
 
 onMounted(async () => {
   await loadProjects()
-  if (projects.value.length > 0) {
-    selectedProject.value = projects.value[0].id
-  }
+  selectedProject.value = ALL_PROJECTS
   await loadReports()
 })
 </script>
@@ -783,5 +876,47 @@ onMounted(async () => {
       }
     }
   }
+}
+
+.op-btn {
+  font-size: 12px !important;
+  height: auto !important;
+  padding: 0 4px !important;
+  text-shadow: none !important;
+  box-shadow: none !important;
+  filter: none !important;
+  background: transparent !important;
+}
+
+.op-btn:hover,
+.op-btn:focus,
+.op-btn:active {
+  text-shadow: none !important;
+  box-shadow: none !important;
+  background: transparent !important;
+}
+
+.op-simple,
+.op-simple:hover,
+.op-simple:focus {
+  color: #67c23a !important;
+}
+
+.op-online,
+.op-online:hover,
+.op-online:focus {
+  color: #9b59b6 !important;
+}
+
+.op-download,
+.op-download:hover,
+.op-download:focus {
+  color: #e6a23c !important;
+}
+
+.op-delete,
+.op-delete:hover,
+.op-delete:focus {
+  color: #f56c6c !important;
 }
 </style>

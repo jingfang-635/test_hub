@@ -96,33 +96,35 @@
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button
-              v-if="row.status === 'running'"
-              type="warning"
-              size="small"
-              text
-              @click="stopExecution(row)"
-            >
-              停止
-            </el-button>
-            <el-button
-              v-if="row.report_path"
-              type="primary"
-              size="small"
-              text
-              @click="viewReport(row)"
-            >
-              查看报告
-            </el-button>
-            <el-button
-              v-if="row.error_message"
-              type="danger"
-              size="small"
-              text
-              @click="viewError(row)"
-            >
-              查看错误
-            </el-button>
+            <div class="action-links">
+              <el-button
+                v-if="row.status === 'running'"
+                type="warning"
+                size="small"
+                link
+                @click="stopExecution(row)"
+              >
+                停止
+              </el-button>
+              <el-button
+                v-if="row.report_path"
+                type="primary"
+                size="small"
+                link
+                @click="viewReport(row)"
+              >
+                查看报告
+              </el-button>
+              <el-button
+                v-if="row.error_message"
+                type="danger"
+                size="small"
+                link
+                @click="viewError(row)"
+              >
+                查看错误
+              </el-button>
+            </div>
           </template>
         </el-table-column>
       </el-table>
@@ -303,6 +305,39 @@ onUnmounted(() => {
     margin-top: 20px;
     display: flex;
     justify-content: flex-end;
+  }
+}
+
+.action-links {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 8px;
+
+  :deep(.el-button) {
+    margin: 0;
+    padding: 0;
+    height: auto;
+    font-size: 13px;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  :deep(.el-button:hover),
+  :deep(.el-button:focus),
+  :deep(.el-button:active),
+  :deep(.el-button:focus-visible) {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+  }
+
+  :deep(.el-button::before),
+  :deep(.el-button::after) {
+    display: none !important;
   }
 }
 

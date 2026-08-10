@@ -4,6 +4,7 @@ from django.conf.urls.static import static
 from rest_framework.routers import DefaultRouter
 from .views import (
     UiProjectViewSet,
+    UiProjectEnsureView,
     LocatorStrategyViewSet,
     ElementGroupViewSet,
     ElementViewSet,
@@ -57,6 +58,8 @@ router.register(r'config/ai-mode', AIIntelligentModeConfigViewSet, basename='con
 router.register(r'ai-models', AIIntelligentModeConfigViewSet, basename='ai-models')
 
 urlpatterns = [
+    # 独立 APIView，避免被 projects/<pk>/ 抢先匹配导致 POST ensure 405
+    path('projects/ensure/', UiProjectEnsureView.as_view(), name='ui-project-ensure'),
     path('', include(router.urls)),
 ]
 

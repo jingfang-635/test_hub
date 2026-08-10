@@ -86,6 +86,8 @@ export default {
     name: '名称',
     project: '项目',
     selectProject: '选择项目',
+    allProjects: '全部项目',
+    selectSpecificProject: '请先选择具体项目',
     yes: '是',
     no: '否',
     all: '全部',
@@ -308,7 +310,8 @@ export default {
       moveSuccess: '元素已移动到目标页面',
       moveFailed: '元素移动失败',
       invalidDropTarget: '只能将元素拖拽到页面上',
-      pageCannotDrag: '页面节点不可拖拽'
+      pageCannotDrag: '页面节点不可拖拽',
+      selectProject: '请先选择具体项目后再新建'
     }
   },
 
@@ -449,6 +452,8 @@ export default {
     step: '步骤',
     screenshot: '截图',
     viewDetail: '查看详情',
+    onlineReport: '在线报告',
+    downloadOfflineReport: '下载离线报告',
     seconds: '秒',
     minutes: '分',
     // 执行状态
@@ -467,7 +472,10 @@ export default {
       deleteConfirm: '确定要删除报告"{name}"吗？此操作不可恢复。',
       confirmDelete: '确认删除',
       deleteSuccess: '删除成功',
-      deleteFailed: '删除报告失败'
+      deleteFailed: '删除报告失败',
+      onlineReportFailed: '打开在线报告失败',
+      reportDownloaded: '离线报告下载成功',
+      reportDownloadFailed: '下载离线报告失败'
     }
   },
 

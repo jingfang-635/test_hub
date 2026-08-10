@@ -5,6 +5,7 @@
       <div class="sidebar">
         <div class="sidebar-header">
           <el-select v-model="selectedHubProject" :placeholder="$t('apiTesting.common.selectProject')" @change="onProjectChange" style="width: 100%;">
+            <el-option :label="$t('apiTesting.common.allProjects')" value="all" />
             <el-option
               v-for="project in projects"
               :key="project.id"
@@ -43,20 +44,24 @@
             ref="treeRef"
             :data="collections"
             :props="treeProps"
-            node-key="id"
+            node-key="nodeKey"
             :expand-on-click-node="false"
             :default-expanded-keys="expandedKeys"
+            draggable
+            :allow-drag="allowDrag"
+            :allow-drop="allowDrop"
             @node-click="onNodeClick"
             @node-contextmenu="onNodeRightClick"
             @node-expand="onNodeExpand"
             @node-collapse="onNodeCollapse"
+            @node-drop="onNodeDrop"
           >
             <template #default="{ node, data }">
-              <div class="tree-node">
-                <el-icon v-if="data.type === 'collection'">
+              <div class="tree-node" :class="{ 'is-draggable': !!data.id }">
+                <el-icon class="node-type-icon" v-if="data.type === 'collection'">
                   <Folder />
                 </el-icon>
-                <el-icon v-else>
+                <el-icon class="node-type-icon" v-else>
                   <Document />
                 </el-icon>
 
@@ -72,11 +77,38 @@
                   />
                 </div>
 
-                <!-- 普通显示模式 -->
-                <span v-else class="node-label">{{ node.label }}</span>
+                <!-- 普通显示模式：名称可截断，优先保证右侧操作按钮完整显示 -->
+                <span v-else class="node-label" :title="node.label">{{ node.label }}</span>
 
-                <span v-if="data.type === 'request' && data.request_type !== 'WEBSOCKET'" class="method-tag" :class="(data.method || 'GET').toLowerCase()">
-                  {{ data.method || 'GET' }}
+                <span class="node-trailing" v-if="data.type === 'request'">
+                  <span
+                    v-if="data.request_type !== 'WEBSOCKET'"
+                    class="method-tag"
+                    :class="(data.method || 'GET').toLowerCase()"
+                  >
+                    {{ data.method || 'GET' }}
+                  </span>
+                  <span
+                    v-if="data.id"
+                    class="node-actions"
+                    @click.stop
+                    @mousedown.stop
+                  >
+                    <el-icon
+                      class="node-action-icon"
+                      :title="$t('apiTesting.interface.copy')"
+                      @click="copyRequest(data)"
+                    >
+                      <DocumentCopy />
+                    </el-icon>
+                    <el-icon
+                      class="node-action-icon"
+                      :title="$t('apiTesting.interface.contextMenu.delete')"
+                      @click="deleteRequestNode(data)"
+                    >
+                      <Delete />
+                    </el-icon>
+                  </span>
                 </span>
               </div>
             </template>
@@ -571,6 +603,129 @@
                   </div>
                 </div>
               </el-tab-pane>
+
+              <el-tab-pane :label="$t('apiTesting.interface.extractors')" name="extractors">
+                <div class="extractors-editor">
+                  <div class="extractors-header">
+                    <span class="extractors-title">{{ $t('apiTesting.interface.extractors') }}</span>
+                    <el-button size="small" type="primary" @click="addExtractor">
+                      <el-icon><Plus /></el-icon>
+                      {{ $t('apiTesting.interface.addExtractor') }}
+                    </el-button>
+                  </div>
+
+                  <div class="extractors-list">
+                    <div
+                      v-for="(extractor, index) in (selectedRequest.extractors || [])"
+                      :key="index"
+                      class="extractor-item"
+                    >
+                      <div class="extractor-row">
+                        <el-input
+                          v-model="extractor.variable"
+                          :placeholder="$t('apiTesting.interface.extractorVariablePlaceholder')"
+                          size="small"
+                          class="extractor-variable"
+                        />
+                        <el-select v-model="extractor.source" size="small" class="extractor-source">
+                          <el-option :label="$t('apiTesting.interface.extractorSources.body')" value="body" />
+                          <el-option :label="$t('apiTesting.interface.extractorSources.headers')" value="headers" />
+                        </el-select>
+                        <el-select
+                          v-model="extractor.type"
+                          size="small"
+                          class="extractor-type"
+                          @change="onExtractorTypeChange(extractor)"
+                        >
+                          <el-option :label="$t('apiTesting.interface.extractorTypes.jsonpath')" value="jsonpath" />
+                          <el-option :label="$t('apiTesting.interface.extractorTypes.regex')" value="regex" />
+                        </el-select>
+                        <el-button
+                          size="small"
+                          type="danger"
+                          circle
+                          @click="removeExtractor(index)"
+                        >
+                          <el-icon><Delete /></el-icon>
+                        </el-button>
+                      </div>
+                      <div class="extractor-row">
+                        <el-input
+                          v-model="extractor.expression"
+                          :placeholder="extractor.type === 'regex'
+                            ? $t('apiTesting.interface.extractorRegexPlaceholder')
+                            : $t('apiTesting.interface.extractorJsonPathPlaceholder')"
+                          size="small"
+                          class="extractor-expression"
+                        />
+                        <el-input
+                          v-model="extractor.default_value"
+                          :placeholder="$t('apiTesting.interface.extractorDefaultValue')"
+                          size="small"
+                          class="extractor-default"
+                        />
+                      </div>
+                    </div>
+
+                    <div v-if="!selectedRequest.extractors || selectedRequest.extractors.length === 0" class="no-extractors">
+                      <p>{{ $t('apiTesting.interface.noExtractors') }}</p>
+                      <el-button size="small" type="primary" @click="addExtractor">
+                        <el-icon><Plus /></el-icon>
+                        {{ $t('apiTesting.interface.addExtractor') }}
+                      </el-button>
+                    </div>
+                  </div>
+
+                  <div class="extractor-help">
+                    <div class="extractor-help-header" @click="extractorHelpExpanded = !extractorHelpExpanded">
+                      <span>{{ $t('apiTesting.interface.extractorHelpTitle') }}</span>
+                      <el-icon class="extractor-help-arrow" :class="{ expanded: extractorHelpExpanded }">
+                        <ArrowRight />
+                      </el-icon>
+                    </div>
+                    <div v-show="extractorHelpExpanded" class="extractor-help-body">
+                      <div class="help-section">
+                        <h4>{{ $t('apiTesting.interface.extractorHelpJsonPathTitle') }}</h4>
+                        <p>{{ $t('apiTesting.interface.extractorHelpJsonPathDesc') }}</p>
+                        <ul>
+                          <li><code>$.data.token</code> - {{ $t('apiTesting.interface.extractorHelpJsonPathEx1') }}</li>
+                          <li><code>$.items[0].id</code> - {{ $t('apiTesting.interface.extractorHelpJsonPathEx2') }}</li>
+                          <li><code>$.users[*].name</code> - {{ $t('apiTesting.interface.extractorHelpJsonPathEx3') }}</li>
+                        </ul>
+                      </div>
+                      <div class="help-section">
+                        <h4>{{ $t('apiTesting.interface.extractorHelpRegexTitle') }}</h4>
+                        <p>{{ $t('apiTesting.interface.extractorHelpRegexDesc') }}</p>
+                        <ul>
+                          <li><code>"token":"([^"]+)"</code> - {{ $t('apiTesting.interface.extractorHelpRegexEx1') }}</li>
+                          <li><code>userId=(\d+)</code> - {{ $t('apiTesting.interface.extractorHelpRegexEx2') }}</li>
+                        </ul>
+                      </div>
+                      <div class="help-section">
+                        <h4>{{ $t('apiTesting.interface.extractorHelpUsageTitle') }}</h4>
+                        <p>{{ $t('apiTesting.interface.extractorHelpUsageDesc') }}</p>
+                        <ul class="usage-list">
+                          <li><strong>URL:</strong> <code>http://api.example.com/users/&#123;&#123;userId&#125;&#125;</code></li>
+                          <li><strong>Header:</strong> <code>Authorization: Bearer &#123;&#123;token&#125;&#125;</code></li>
+                          <li><strong>Body:</strong> <code>{ "userId": "&#123;&#123;userId&#125;&#125;" }</code></li>
+                        </ul>
+                      </div>
+                      <div class="help-workflow">
+                        <div class="help-workflow-title">{{ $t('apiTesting.interface.extractorHelpWorkflowTitle') }}</div>
+                        <ol>
+                          <li>{{ $t('apiTesting.interface.extractorHelpWorkflow1') }}</li>
+                          <li>{{ $t('apiTesting.interface.extractorHelpWorkflow2') }}</li>
+                          <li>{{ $t('apiTesting.interface.extractorHelpWorkflow3') }}</li>
+                          <li>{{ $t('apiTesting.interface.extractorHelpWorkflow4') }}</li>
+                        </ol>
+                      </div>
+                      <div class="help-note">
+                        {{ $t('apiTesting.interface.extractorHelpNote') }}
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </el-tab-pane>
             </template>
 
             <!-- WebSocket接口专用标签页 -->
@@ -668,53 +823,20 @@
                 <el-tag :type="getStatusType(response.status_code)">
                   {{ response.status_code }}
                 </el-tag>
-                <span class="response-time">{{ response.response_time ? response.response_time.toFixed(0) : 0 }}ms</span>
+                <span class="response-time">
+                  {{ response.response_time != null ? Number(response.response_time).toFixed(3) : '0.000' }}ms
+                </span>
+                <span class="response-size">{{ responseSizeText }}</span>
               </div>
             </div>
 
-            <el-tabs v-model="responseActiveTab">
-              <el-tab-pane label="Body" name="body">
-                <div class="response-body">
-                  <div class="response-actions">
-                    <el-button-group>
-                      <el-button size="small" @click="formatResponse">{{ $t('apiTesting.interface.format') }}</el-button>
-                      <el-button size="small" @click="copyResponse">{{ $t('apiTesting.interface.copy') }}</el-button>
-                      <el-button size="small" @click="toggleJsonPathExtractor">
-                        {{ $t('apiTesting.interface.jsonPathExtract') }}
-                      </el-button>
-                    </el-button-group>
-                  </div>
-                  <div v-if="showJsonPathExtractor" class="jsonpath-extractor">
-                    <div class="jsonpath-input">
-                      <el-input
-                        v-model="jsonPathExpression"
-                        :placeholder="$t('apiTesting.interface.jsonPathExample')"
-                        size="small"
-                        @input="evaluateJsonPath"
-                      >
-                        <template #append>
-                          <el-button size="small" @click="copyJsonPathResult">{{ $t('apiTesting.interface.copyResult') }}</el-button>
-                        </template>
-                      </el-input>
-                    </div>
-                    <div v-if="jsonPathResult !== null" class="jsonpath-result">
-                      <strong>{{ $t('apiTesting.interface.extractResult') }}</strong>
-                      <pre>{{ jsonPathResult }}</pre>
-                    </div>
-                  </div>
-                  <div class="response-content" v-html="highlightedResponseBody"></div>
-                </div>
-              </el-tab-pane>
-
-              <el-tab-pane label="Headers" name="headers">
-                <div class="response-headers">
-                  <div v-for="(value, key) in (response.response_data?.headers || {})" :key="key" class="header-row">
-                    <strong>{{ key }}:</strong> {{ value }}
-                  </div>
-                </div>
-              </el-tab-pane>
-
-              <el-tab-pane :label="$t('apiTesting.interface.assertionResults')" name="assertions" v-if="response.assertions_results && response.assertions_results.length > 0">
+            <ResponseViewer
+              v-model="responseActiveTab"
+              :response-data="response.response_data"
+              :assertions-results="response.assertions_results || []"
+              :extractors-results="response.extractors_results || []"
+            >
+              <template #assertions>
                 <div class="assertions-results">
                   <div
                     v-for="(result, index) in response.assertions_results"
@@ -744,8 +866,42 @@
                     </div>
                   </div>
                 </div>
-              </el-tab-pane>
-            </el-tabs>
+              </template>
+              <template #extractors>
+                <div class="extractors-results">
+                  <div
+                    v-for="(result, index) in response.extractors_results"
+                    :key="index"
+                    class="extractor-result-item"
+                    :class="{ 'passed': result.success, 'failed': !result.success }"
+                  >
+                    <div class="assertion-result-header">
+                      <el-tag :type="result.success ? 'success' : 'danger'" size="small">
+                        {{ result.success ? $t('apiTesting.interface.extractSuccess') : $t('apiTesting.interface.extractFailed') }}
+                      </el-tag>
+                      <span class="assertion-name">{{ result.variable }}</span>
+                      <el-tag v-if="result.used_default" size="small" type="warning">
+                        {{ $t('apiTesting.interface.usedDefaultValue') }}
+                      </el-tag>
+                    </div>
+                    <div class="assertion-result-details">
+                      <div class="result-row">
+                        <span class="label">{{ $t('apiTesting.interface.extractorExpressionLabel') }}</span>
+                        <span class="value">{{ result.expression || '-' }}</span>
+                      </div>
+                      <div class="result-row">
+                        <span class="label">{{ $t('apiTesting.interface.extractResult') }}</span>
+                        <span class="value">{{ formatAssertionValue(result.value) }}</span>
+                      </div>
+                      <div class="result-row" v-if="result.error">
+                        <span class="label">{{ $t('apiTesting.interface.error') }}</span>
+                        <span class="value error">{{ result.error }}</span>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </template>
+            </ResponseViewer>
           </div>
         </div>
       </div>
@@ -943,10 +1099,11 @@
 <script setup>
 import { ref, reactive, computed, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Folder, Document, MagicStick, Search, Close, Upload } from '@element-plus/icons-vue'
+import { Plus, Folder, Document, MagicStick, Search, Close, Upload, DocumentCopy, Delete, ArrowRight } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import KeyValueEditor from './components/KeyValueEditor.vue'
 import ImportInterfaceDialog from './components/ImportInterfaceDialog.vue'
+import ResponseViewer from './components/ResponseViewer.vue'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
 import { RequestModelParser } from '@/utils/requestModel'
 import { getVariableFunctions } from '@/api/data-factory'
@@ -959,10 +1116,16 @@ const { t } = useI18n()
 const treeRef = ref(null)
 const expandedKeys = ref([])
 const projects = ref([])
-/** 「项目与版本」主项目 ID（下拉绑定） */
-const selectedHubProject = ref(null)
-/** 对应的 ApiProject ID（集合/环境等接口使用） */
+/** 「项目与版本」主项目 ID（下拉绑定），'all' 表示全部项目 */
+const ALL_PROJECTS = 'all'
+const selectedHubProject = ref(ALL_PROJECTS)
+/** 对应的 ApiProject ID（集合/环境等接口使用）；全部项目模式下为 null */
 const selectedProject = ref(null)
+const isAllProjectsSelected = () => selectedHubProject.value === ALL_PROJECTS || selectedHubProject.value === ''
+/** 列表查询参数：全部项目不传 project */
+const getProjectQueryParams = () => (
+  isAllProjectsSelected() || !selectedProject.value ? {} : { project: selectedProject.value }
+)
 const collections = ref([])
 const flatCollections = ref([])
 const environments = ref([])
@@ -985,6 +1148,8 @@ const editingNodeName = ref('')
 const editInputRef = ref(null)
 const rawBodyInputRef = ref(null)
 const currentHeaders = ref({})
+const moving = ref(false)
+const extractorHelpExpanded = ref(false)
 
 const searchKeyword = ref('')
 const filteredCollections = ref([])
@@ -993,6 +1158,8 @@ const treeProps = {
   children: 'children',
   label: 'name'
 }
+
+const makeNodeKey = (type, id) => `${type}-${id}`
 
 // 数据工厂选择器相关
 const showDataFactorySelector = ref(false)
@@ -1026,11 +1193,6 @@ const websocketMessageType = ref('text')
 const websocketMessageContent = ref('')
 const websocketBinaryFile = ref(null)
 
-// JSONPath提取相关
-const showJsonPathExtractor = ref(false)
-const jsonPathExpression = ref('')
-const jsonPathResult = ref(null)
-
 // Body相关
 const bodyType = ref('none')
 const rawType = ref('text')
@@ -1053,7 +1215,7 @@ const onSearch = async (value) => {
   try {
     const response = await api.get('/api-testing/collections/search', {
       params: {
-        project: selectedProject.value,
+        ...getProjectQueryParams(),
         keyword: value
       }
     })
@@ -1085,6 +1247,17 @@ const onProjectChange = async (hubProjectId) => {
     collections.value = []
     flatCollections.value = []
     environments.value = []
+    selectedRequest.value = null
+    return
+  }
+
+  // 全部项目：不绑定具体 ApiProject，加载全部可访问数据
+  if (hubProjectId === ALL_PROJECTS) {
+    selectedHubProject.value = ALL_PROJECTS
+    selectedProject.value = null
+    selectedRequest.value = null
+    await loadCollections(null)
+    await loadEnvironments(null)
     return
   }
 
@@ -1092,6 +1265,7 @@ const onProjectChange = async (hubProjectId) => {
     selectedHubProject.value = hubProjectId
     const apiProject = await resolveApiProject(hubProjectId)
     selectedProject.value = apiProject.id
+    selectedRequest.value = null
     await loadCollections(selectedProject.value)
     await loadEnvironments(selectedProject.value)
   } catch (error) {
@@ -1112,7 +1286,8 @@ const loadProjects = async () => {
     })
     projects.value = response.data.results || response.data || []
     if (projects.value.length > 0) {
-      await onProjectChange(projects.value[0].id)
+      // 默认选中「全部项目」
+      await onProjectChange(ALL_PROJECTS)
     } else {
       selectedHubProject.value = null
       selectedProject.value = null
@@ -1128,7 +1303,8 @@ const loadProjects = async () => {
 }
 
 const loadCollections = async (projectId) => {
-  if (projectId == null || projectId === '' || projectId === 'undefined' || projectId === 'null') {
+  const hasSpecificProject = projectId != null && projectId !== '' && projectId !== 'undefined' && projectId !== 'null' && projectId !== ALL_PROJECTS
+  if (!hasSpecificProject && !isAllProjectsSelected()) {
     collections.value = []
     flatCollections.value = []
     return
@@ -1136,9 +1312,7 @@ const loadCollections = async (projectId) => {
 
   try {
     const response = await api.get('/api-testing/collections/', {
-      params: {
-        project: projectId
-      }
+      params: hasSpecificProject ? { project: projectId } : {}
     })
     // 后端可能返回分页格式 { results: [...] } 或直接返回数组
     const collectionsData = response.data.results || response.data || []
@@ -1148,7 +1322,7 @@ const loadCollections = async (projectId) => {
     flatCollections.value = collectionsData
 
     // 加载请求
-    await loadRequests()
+    await loadRequests(hasSpecificProject ? projectId : null)
   } catch (error) {
     ElMessage.error('加载集合失败')
     console.error('加载集合失败:', error)
@@ -1156,23 +1330,36 @@ const loadCollections = async (projectId) => {
 }
 
 const loadEnvironments = async (projectId) => {
-  if (projectId == null || projectId === '' || projectId === 'undefined' || projectId === 'null') {
+  const hasSpecificProject = projectId != null && projectId !== '' && projectId !== 'undefined' && projectId !== 'null' && projectId !== ALL_PROJECTS
+  if (!hasSpecificProject && !isAllProjectsSelected()) {
     environments.value = []
     return
   }
 
   try {
     const response = await api.get('/api-testing/environments/', {
-      params: {
-        project: projectId
-      }
+      params: hasSpecificProject ? { project: projectId } : {}
     })
     // 后端可能返回分页格式 { results: [...] } 或直接返回数组
-    environments.value = response.data.results || response.data || []
+    const allEnvironments = response.data.results || response.data || []
+    if (hasSpecificProject) {
+      environments.value = allEnvironments
+    } else {
+      // 全部项目：展示全局环境 + 所有本地环境
+      environments.value = allEnvironments
+    }
   } catch (error) {
     ElMessage.error('加载环境失败')
     console.error('加载环境失败:', error)
   }
+}
+
+const sortTreeNodes = (nodes = []) => {
+  nodes.sort((a, b) => (a.order ?? 0) - (b.order ?? 0) || String(a.name || '').localeCompare(String(b.name || '')))
+  nodes.forEach((node) => {
+    if (node.children?.length) sortTreeNodes(node.children)
+  })
+  return nodes
 }
 
 const buildTree = (items) => {
@@ -1183,6 +1370,7 @@ const buildTree = (items) => {
     map[item.id] = {
       ...item,
       type: 'collection',
+      nodeKey: makeNodeKey('collection', item.id),
       children: []
     }
   })
@@ -1197,7 +1385,7 @@ const buildTree = (items) => {
     }
   })
 
-  return roots
+  return sortTreeNodes(roots)
 }
 
 const findCollectionById = (collections, id) => {
@@ -1218,11 +1406,14 @@ const clearCollectionChildren = (collection) => {
   }
 }
 
-const loadRequests = async () => {
-  if (!selectedProject.value) return
+const loadRequests = async (projectId = selectedProject.value) => {
+  const hasSpecificProject = projectId != null && projectId !== '' && projectId !== 'undefined' && projectId !== 'null' && projectId !== ALL_PROJECTS
+  if (!hasSpecificProject && !isAllProjectsSelected()) return
 
   try {
-    const response = await api.get('/api-testing/requests/')
+    const response = await api.get('/api-testing/requests/', {
+      params: hasSpecificProject ? { project: projectId } : {}
+    })
     const requests = response.data.results || response.data || []
 
     // 清空所有集合的子节点（请求）
@@ -1235,26 +1426,27 @@ const loadRequests = async () => {
 
     // 将请求添加到对应集合中或直接添加到根级别
     requests.forEach(request => {
+      const requestNode = {
+        ...request,
+        type: 'request',
+        nodeKey: makeNodeKey('request', request.id),
+        name: request.name,
+        children: undefined
+      }
       if (request.collection) {
         // 有关联集合的请求，添加到对应集合下
         const collection = findCollectionById(collections.value, request.collection)
         if (collection) {
           if (!collection.children) collection.children = []
-          collection.children.push({
-            ...request,
-            type: 'request',
-            name: request.name
-          })
+          collection.children.push(requestNode)
         }
       } else {
         // 未关联集合的请求，直接添加到集合列表的根级别
-        collections.value.push({
-          ...request,
-          type: 'request',
-          name: request.name
-        })
+        collections.value.push(requestNode)
       }
     })
+
+    sortTreeNodes(collections.value)
   } catch (error) {
     ElMessage.error('加载请求失败')
     console.error('加载请求失败:', error)
@@ -1274,7 +1466,16 @@ const flattenCollections = (items, parent = null) => {
   return result
 }
 
-const onNodeClick = async (data) => {
+const onNodeClick = async (data, node) => {
+  if (data.type === 'collection') {
+    if (node.expanded) {
+      node.collapse()
+    } else {
+      node.expand()
+    }
+    return
+  }
+
   if (data.type === 'request') {
     try {
       const apiResponse = await api.get(`/api-testing/requests/${data.id}/`)
@@ -1344,6 +1545,13 @@ const onNodeClick = async (data) => {
         rawBody.value = ''
       }
 
+      if (!Array.isArray(requestData.assertions)) {
+        requestData.assertions = []
+      }
+      if (!Array.isArray(requestData.extractors)) {
+        requestData.extractors = []
+      }
+
       response.value = null
       selectedRequest.value = requestData
     } catch (error) {
@@ -1361,17 +1569,110 @@ const onNodeRightClick = (event, node, treeNode) => {
   rightClickedNode.value = node
 }
 
-const onNodeExpand = (node) => {
-  expandedKeys.value.push(node.id)
+const onNodeExpand = (data) => {
+  const key = data.nodeKey || makeNodeKey(data.type, data.id)
+  if (!expandedKeys.value.includes(key)) {
+    expandedKeys.value.push(key)
+  }
 }
 
-const onNodeCollapse = (node) => {
-  expandedKeys.value = expandedKeys.value.filter(key => key !== node.id)
+const onNodeCollapse = (data) => {
+  const key = data.nodeKey || makeNodeKey(data.type, data.id)
+  expandedKeys.value = expandedKeys.value.filter(item => item !== key)
+}
+
+const isNodeInside = (node, containerNode) => {
+  let current = node
+  while (current) {
+    if (current === containerNode) return true
+    current = current.parent
+  }
+  return false
+}
+
+const allowDrag = (node) => {
+  const data = node?.data
+  return !moving.value && !!data?.id && (data.type === 'collection' || data.type === 'request')
+}
+
+const allowDrop = (draggingNode, dropNode, type) => {
+  const dragData = draggingNode?.data
+  const dropData = dropNode?.data
+  if (!dragData?.id || !dropData) return false
+  if (draggingNode === dropNode) return false
+  // 禁止拖到自身子孙节点下，避免集合循环嵌套
+  if (dragData.type === 'collection' && isNodeInside(dropNode, draggingNode)) return false
+  // 接口节点不能作为容器
+  if (type === 'inner' && dropData.type === 'request') return false
+  return true
+}
+
+const getDropParentInfo = (draggingNode) => {
+  const parent = draggingNode?.parent
+  // level 0 为树根
+  if (!parent || parent.level === 0) {
+    return { parentId: null, siblings: parent?.childNodes || [] }
+  }
+  return {
+    parentId: parent.data?.type === 'collection' ? parent.data.id : null,
+    siblings: parent.childNodes || []
+  }
+}
+
+const persistSiblingOrders = async (siblings, parentId) => {
+  const tasks = siblings.map((childNode, index) => {
+    const data = childNode.data
+    if (!data?.id) return null
+    if (data.type === 'collection') {
+      data.order = index
+      data.parent = parentId
+      return api.patch(`/api-testing/collections/${data.id}/`, {
+        order: index,
+        parent: parentId
+      })
+    }
+    if (data.type === 'request') {
+      data.order = index
+      data.collection = parentId
+      return api.patch(`/api-testing/requests/${data.id}/`, {
+        order: index,
+        collection: parentId
+      })
+    }
+    return null
+  }).filter(Boolean)
+
+  if (tasks.length) {
+    await Promise.all(tasks)
+  }
+}
+
+const onNodeDrop = async (draggingNode) => {
+  const dragData = draggingNode?.data
+  if (!dragData?.id || moving.value) return
+
+  moving.value = true
+  try {
+    const { parentId, siblings } = getDropParentInfo(draggingNode)
+    await persistSiblingOrders(siblings, parentId)
+
+    if (dragData.type === 'request' && selectedRequest.value?.id === dragData.id) {
+      selectedRequest.value.collection = parentId
+    }
+
+    ElMessage.success(t('apiTesting.interface.moveSuccess'))
+  } catch (error) {
+    console.error('节点拖拽失败:', error)
+    ElMessage.error(t('apiTesting.interface.moveFailed'))
+    await loadCollections(selectedProject.value)
+  } finally {
+    moving.value = false
+  }
 }
 
 const createEmptyRequest = () => {
-  if (!selectedProject.value) {
-    ElMessage.warning('请先选择项目')
+  if (!selectedProject.value || isAllProjectsSelected()) {
+    ElMessage.warning(t('apiTesting.common.selectProject'))
     return
   }
 
@@ -1386,6 +1687,7 @@ const createEmptyRequest = () => {
     pre_request_script: '',
     post_request_script: '',
     assertions: [],
+    extractors: [],
     request_type: 'HTTP'
   }
 
@@ -1393,6 +1695,10 @@ const createEmptyRequest = () => {
 }
 
 const openCreateCollectionDialog = () => {
+  if (!selectedProject.value || isAllProjectsSelected()) {
+    ElMessage.warning(t('apiTesting.common.selectProject'))
+    return
+  }
   showCreateCollectionDialog.value = true
 }
 
@@ -1417,10 +1723,6 @@ const closeCodeGenerateDialog = () => {
   showCodeGenerateDialog.value = false
 }
 
-const toggleJsonPathExtractor = () => {
-  showJsonPathExtractor.value = !showJsonPathExtractor.value
-}
-
 const addRequest = () => {
   if (!rightClickedNode.value) return
 
@@ -1441,6 +1743,7 @@ const addRequest = () => {
     pre_request_script: '',
     post_request_script: '',
     assertions: [],
+    extractors: [],
     request_type: 'HTTP'
   }
 
@@ -1493,34 +1796,87 @@ const deleteNode = () => {
     return
   }
 
+  showContextMenu.value = false
+  confirmDeleteNode(node)
+}
+
+const copyRequest = async (data) => {
+  if (!data?.id || data.type !== 'request') return
+
+  try {
+    const { data: original } = await api.get(`/api-testing/requests/${data.id}/`)
+    const payload = {
+      name: `${original.name}${t('apiTesting.interface.copySuffix')}`,
+      description: original.description || '',
+      request_type: original.request_type,
+      method: original.method,
+      url: original.url,
+      headers: original.headers || {},
+      params: original.params || {},
+      body: original.body || {},
+      auth: original.auth || {},
+      pre_request_script: original.pre_request_script || '',
+      post_request_script: original.post_request_script || '',
+      assertions: original.assertions || [],
+      extractors: original.extractors || [],
+      collection: original.collection ?? null,
+      order: original.order ?? 0
+    }
+
+    const response = await api.post('/api-testing/requests/', payload)
+    ElMessage.success(t('apiTesting.interface.copySuccess'))
+    await loadCollections(selectedProject.value)
+
+    if (response.data?.id) {
+      await onNodeClick({ ...response.data, type: 'request' })
+    }
+  } catch (error) {
+    ElMessage.error(t('apiTesting.interface.copyFailed'))
+    console.error('复制接口失败:', error)
+  }
+}
+
+const deleteRequestNode = (data) => {
+  if (!data?.id || data.type !== 'request') return
+  confirmDeleteNode(data)
+}
+
+const confirmDeleteNode = (node) => {
+  if (!node) return
+
   const nodeName = node.name
+  const isCollection = node.type === 'collection'
 
   ElMessageBox.confirm(
-    `确定要删除${node.type === 'collection' ? '集合' : '接口'}「${nodeName}」吗？`,
-    '确认删除',
+    t('apiTesting.interface.confirmDeleteNode', {
+      type: isCollection ? t('apiTesting.interface.collection') : t('apiTesting.interface.request'),
+      name: nodeName,
+      extra: isCollection ? t('apiTesting.interface.deleteCollectionExtra') : ''
+    }),
+    t('apiTesting.interface.deleteTitle'),
     {
-      confirmButtonText: '确定',
-      cancelButtonText: '取消',
+      confirmButtonText: t('apiTesting.interface.confirmDeleteBtn'),
+      cancelButtonText: t('apiTesting.interface.cancel'),
       type: 'warning'
     }
   ).then(async () => {
     try {
-      if (node.type === 'collection') {
+      if (isCollection) {
         await api.delete(`/api-testing/collections/${node.id}/`)
       } else {
         await api.delete(`/api-testing/requests/${node.id}/`)
+        if (selectedRequest.value?.id === node.id) {
+          selectedRequest.value = null
+          response.value = null
+        }
       }
-      ElMessage.success('删除成功')
+      ElMessage.success(t('apiTesting.interface.deleteSuccess'))
       await loadCollections(selectedProject.value)
-      showContextMenu.value = false
     } catch (error) {
-      ElMessage.error('删除失败')
+      ElMessage.error(t('apiTesting.interface.deleteFailed'))
       console.error('删除失败:', error)
     }
-  }).catch(() => {
-    // 取消删除
-    showContextMenu.value = false
-  })
+  }).catch(() => {})
 }
 
 const saveCollectionName = async () => {
@@ -1530,7 +1886,7 @@ const saveCollectionName = async () => {
   }
 
   try {
-    await api.put(`/api-testing/collections/${editingNodeId.value}/`, {
+    await api.patch(`/api-testing/collections/${editingNodeId.value}/`, {
       name: editingNodeName.value.trim()
     })
     ElMessage.success('保存成功')
@@ -1656,19 +2012,12 @@ const convertKeyValueArrayToObject = (input) => {
   return obj
 }
 
-const highlightedResponseBody = computed(() => {
-  if (!responseBody.value) return ''
-
-  try {
-    // 简单的 JSON 语法高亮
-    return responseBody.value
-      .replace(/"([^"]+)"\s*:/g, '<span style="color: #268bd2;">"$1"</span>:')
-      .replace(/:\s*"([^"]+)"/g, ': <span style="color: #2aa198;">"$1"</span>')
-      .replace(/:\s*(true|false|null)/g, ': <span style="color: #cb4b16;">$1</span>')
-      .replace(/:\s*([0-9]+(\.[0-9]+)?)/g, ': <span style="color: #d33682;">$1</span>')
-  } catch (e) {
-    return responseBody.value
-  }
+const responseSizeText = computed(() => {
+  const text = responseBody.value || ''
+  const bytes = new TextEncoder().encode(text).length
+  if (bytes < 1024) return `${bytes} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 })
 
 const getStatusType = (status) => {
@@ -1737,6 +2086,8 @@ const sendRequest = async () => {
       method: selectedRequest.value.method,
       params: convertKeyValueArrayToObject(selectedRequest.value.params || []),
       headers: selectedRequest.value.headers,
+      assertions: selectedRequest.value.assertions || [],
+      extractors: selectedRequest.value.extractors || [],
       environment_id: selectedEnvironment.value
     }
     
@@ -1747,6 +2098,10 @@ const sendRequest = async () => {
 
     const apiResponse = await api.post(`/api-testing/requests/${selectedRequest.value.id}/execute/`, requestData)
     response.value = apiResponse.data
+
+    if (apiResponse.data?.extractors_results?.length) {
+      responseActiveTab.value = 'extractors-results'
+    }
 
     ElMessage.success('请求成功')
   } catch (error) {
@@ -1929,6 +2284,30 @@ const removeAssertion = (index) => {
   selectedRequest.value.assertions.splice(index, 1)
 }
 
+const addExtractor = () => {
+  if (!selectedRequest.value) return
+  if (!selectedRequest.value.extractors) {
+    selectedRequest.value.extractors = []
+  }
+  selectedRequest.value.extractors.push({
+    variable: '',
+    source: 'body',
+    type: 'jsonpath',
+    expression: '',
+    default_value: ''
+  })
+}
+
+const removeExtractor = (index) => {
+  if (!selectedRequest.value?.extractors) return
+  selectedRequest.value.extractors.splice(index, 1)
+}
+
+const onExtractorTypeChange = (extractor) => {
+  if (!extractor) return
+  extractor.expression = ''
+}
+
 const onAssertionTypeChange = (assertion) => {
   // 根据断言类型重置相关字段
   if (assertion.type === 'status_code') {
@@ -1948,66 +2327,6 @@ const onAssertionTypeChange = (assertion) => {
   }
 }
 
-const formatResponse = () => {
-  if (!response.value || !response.value.response_data) return
-
-  try {
-    if (response.value.response_data.json) {
-      response.value.response_data.json = JSON.parse(JSON.stringify(response.value.response_data.json))
-    }
-    ElMessage.success('格式化成功')
-  } catch (e) {
-    ElMessage.error('格式化失败')
-  }
-}
-
-const copyResponse = () => {
-  if (responseBody.value) {
-    navigator.clipboard.writeText(responseBody.value)
-    ElMessage.success('已复制到剪贴板')
-  }
-}
-
-const evaluateJsonPath = () => {
-  if (!response.value || !response.value.response_data || !response.value.response_data.json || !jsonPathExpression.value) {
-    jsonPathResult.value = null
-    return
-  }
-
-  try {
-    // 简单的JSONPath实现
-    const json = response.value.response_data.json
-    let result = json
-
-    // 解析JSONPath表达式
-    const parts = jsonPathExpression.value.split('.').filter(p => p)
-
-    for (const part of parts) {
-      if (part === '$') {
-        result = json
-      } else if (part.includes('[')) {
-        // 处理数组索引
-        const [arrayName, indexStr] = part.split('[')
-        const index = parseInt(indexStr.replace(']', ''))
-        result = result[arrayName][index]
-      } else {
-        result = result[part]
-      }
-    }
-
-    jsonPathResult.value = JSON.stringify(result, null, 2)
-  } catch (e) {
-    jsonPathResult.value = 'JSONPath表达式错误'
-  }
-}
-
-const copyJsonPathResult = () => {
-  if (jsonPathResult.value) {
-    navigator.clipboard.writeText(jsonPathResult.value)
-    ElMessage.success('已复制到剪贴板')
-  }
-}
-
 const formatAssertionValue = (value) => {
   if (typeof value === 'object' && value !== null) {
     return JSON.stringify(value, null, 2)
@@ -2021,10 +2340,21 @@ const createCollection = async () => {
     return
   }
 
+  let projectId = selectedProject.value
+  if (!projectId && collectionForm.parent) {
+    const parent = flatCollections.value.find(c => c.id === collectionForm.parent)
+      || findCollectionById(collections.value, collectionForm.parent)
+    projectId = parent?.project ?? null
+  }
+  if (!projectId) {
+    ElMessage.warning(t('apiTesting.common.selectProject'))
+    return
+  }
+
   try {
-    const response = await api.post('/api-testing/collections/', {
+    await api.post('/api-testing/collections/', {
       ...collectionForm,
-      project: selectedProject.value
+      project: projectId
     })
     ElMessage.success('创建成功')
     await loadCollections(selectedProject.value)
@@ -2045,7 +2375,15 @@ const updateCollection = async () => {
   }
 
   try {
-    await api.put(`/api-testing/collections/${editCollectionForm.id}/`, editCollectionForm)
+    const { id, name, description, parent } = editCollectionForm
+    const payload = { name, description, parent }
+    const projectId = selectedProject.value
+      || flatCollections.value.find(c => c.id === id)?.project
+      || findCollectionById(collections.value, id)?.project
+    if (projectId) {
+      payload.project = projectId
+    }
+    await api.patch(`/api-testing/collections/${id}/`, payload)
     ElMessage.success('更新成功')
     await loadCollections(selectedProject.value)
     showEditCollectionDialog.value = false
@@ -2056,7 +2394,7 @@ const updateCollection = async () => {
 }
 
 const openImportDialog = () => {
-  if (!selectedHubProject.value) {
+  if (!selectedHubProject.value || isAllProjectsSelected()) {
     ElMessage.warning(t('apiTesting.common.selectProject'))
     return
   }
@@ -2067,6 +2405,8 @@ const onInterfacesImported = async (payload = {}) => {
   try {
     if (payload.hubProjectId && payload.hubProjectId !== selectedHubProject.value) {
       await onProjectChange(payload.hubProjectId)
+    } else if (isAllProjectsSelected()) {
+      await loadCollections(null)
     } else if (selectedProject.value) {
       await loadCollections(selectedProject.value)
     }
@@ -2748,10 +3088,11 @@ const useLocalVariableCategories = () => {
 
 /* 左侧边栏 */
 .sidebar {
-  width: 300px;
+  width: 340px;
+  min-width: 340px;
   border-right: 1px solid #e4e7ed;
   background: #ffffff;
-  overflow: visible;
+  overflow: hidden;
   display: flex;
   flex-direction: column;
   box-shadow: 2px 0 6px rgba(0, 0, 0, 0.05);
@@ -2796,33 +3137,94 @@ const useLocalVariableCategories = () => {
   padding: 10px;
 }
 
-/* 树节点样式 */
+.collection-tree :deep(.el-tree-node__content) {
+  height: auto;
+  min-height: 34px;
+  padding-right: 8px;
+  overflow: visible;
+  align-items: center;
+}
+
+.collection-tree :deep(.el-tree-node__expand-icon) {
+  flex-shrink: 0;
+}
+
+/* 树节点样式：名称可截断，右侧 method/操作按钮不收缩 */
 .tree-node {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
   flex: 1;
+  width: 0;
+  min-width: 0;
   padding: 4px 0;
+  overflow: hidden;
 }
 
-.tree-node .el-icon {
+.tree-node.is-draggable {
+  cursor: grab;
+}
+
+.tree-node.is-draggable:active {
+  cursor: grabbing;
+}
+
+.tree-node .node-type-icon {
   font-size: 16px;
   color: #606266;
+  flex-shrink: 0;
 }
 
 .node-label {
-  flex: 1;
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 14px;
   color: #303133;
   transition: color 0.2s;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .tree-node:hover .node-label {
   color: #409eff;
 }
 
+.node-trailing {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+  margin-left: auto;
+  max-width: none;
+}
+
+.node-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex: 0 0 auto;
+}
+
+.node-action-icon {
+  font-size: 14px;
+  color: #909399;
+  cursor: pointer;
+  transition: color 0.2s;
+  flex-shrink: 0;
+}
+
+.node-action-icon:hover {
+  color: #409eff;
+}
+
+.node-action-icon:last-child:hover {
+  color: #f56c6c;
+}
+
 .node-edit {
   flex: 1;
+  min-width: 0;
 }
 
 .node-edit .el-input {
@@ -2832,15 +3234,16 @@ const useLocalVariableCategories = () => {
 /* 方法标签样式 */
 .method-tag {
   font-size: 10px;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 10px;
   color: white;
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: inline-block;
-  min-width: 40px;
+  min-width: 36px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .method-tag.get {
@@ -3285,84 +3688,14 @@ const useLocalVariableCategories = () => {
   gap: 12px;
 }
 
-.response-time {
+.response-time,
+.response-size {
   font-size: 14px;
   color: #606266;
   font-weight: 500;
   background: #e9ecef;
   padding: 4px 12px;
   border-radius: 16px;
-}
-
-/* 响应体 */
-.response-body {
-  padding: 24px;
-  min-height: 400px;
-  max-height: 600px;
-  overflow: auto;
-  background: #f8f9fa;
-  border-radius: 10px;
-  margin: 20px;
-  border: 1px solid #e9ecef;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
-}
-
-.response-actions {
-  margin-bottom: 16px;
-}
-
-.response-actions .el-button-group {
-  border-radius: 8px;
-  overflow: hidden;
-  background: white;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
-}
-
-.response-actions .el-button {
-  border-radius: 0;
-  transition: all 0.2s ease;
-  background: transparent;
-  border: none;
-  color: #666;
-}
-
-.response-actions .el-button:hover {
-  background: #f5f7fa;
-  color: #5046e5;
-}
-
-.response-content {
-  font-family: 'SFMono-Regular', Consolas, 'Liberation Mono', Menlo, monospace;
-  font-size: 14px;
-  line-height: 1.6;
-  color: #303133;
-  background: white;
-  padding: 20px 20px 20px 20px;
-  border-radius: 8px;
-  border: 1px solid #e9ecef;
-  box-shadow: inset 0 1px 3px rgba(0, 0, 0, 0.05);
-  white-space: pre-wrap;
-  word-wrap: break-word;
-}
-
-/* 响应头 */
-.response-headers {
-  padding: 24px;
-  background: #f8f9fa;
-  border-radius: 10px;
-  margin: 20px;
-  border: 1px solid #e9ecef;
-  max-height: 80vh;
-  overflow: auto;
-}
-
-.header-row {
-  padding: 8px 0;
-  border-bottom: 1px solid #e9ecef;
-}
-
-.header-row:last-child {
-  border-bottom: none;
 }
 
 /* 代码编辑器 */
@@ -3546,6 +3879,208 @@ const useLocalVariableCategories = () => {
   font-family: 'Courier New', Courier, monospace;
   font-size: 14px;
   line-height: 1.6;
+}
+
+/* 变量提取编辑器 */
+.extractors-editor {
+  padding: 16px 20px 20px;
+  background: #fff;
+  border-radius: 8px;
+}
+
+.extractors-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.extractors-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.extractors-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.extractor-item {
+  padding: 14px;
+  background: #fafafa;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+}
+
+.extractor-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+
+.extractor-row:last-child {
+  margin-bottom: 0;
+}
+
+.extractor-variable {
+  width: 180px;
+  flex-shrink: 0;
+}
+
+.extractor-source {
+  width: 120px;
+  flex-shrink: 0;
+}
+
+.extractor-type {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.extractor-expression {
+  flex: 1;
+  min-width: 0;
+}
+
+.extractor-default {
+  width: 140px;
+  flex-shrink: 0;
+}
+
+.no-extractors {
+  text-align: center;
+  padding: 28px 16px;
+  color: #909399;
+}
+
+.extractor-help {
+  margin-top: 16px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  overflow: hidden;
+}
+
+.extractor-help-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 14px;
+  cursor: pointer;
+  color: #606266;
+  font-size: 14px;
+  user-select: none;
+}
+
+.extractor-help-header:hover {
+  background: #f5f7fa;
+}
+
+.extractor-help-arrow {
+  width: 22px;
+  height: 22px;
+  border: 1px solid #dcdfe6;
+  border-radius: 50%;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: transform 0.2s ease;
+  color: #909399;
+}
+
+.extractor-help-arrow.expanded {
+  transform: rotate(90deg);
+}
+
+.extractor-help-body {
+  padding: 0 16px 16px;
+  border-top: 1px solid #ebeef5;
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.7;
+}
+
+.extractor-help-body .help-section {
+  margin-top: 14px;
+}
+
+.extractor-help-body h4 {
+  margin: 0 0 6px;
+  font-size: 14px;
+  color: #303133;
+}
+
+.extractor-help-body p {
+  margin: 0 0 6px;
+}
+
+.extractor-help-body ul {
+  margin: 0;
+  padding-left: 18px;
+}
+
+.extractor-help-body code {
+  background: #f4f4f5;
+  padding: 1px 6px;
+  border-radius: 4px;
+  color: #c45656;
+  font-family: Consolas, Monaco, monospace;
+}
+
+.help-workflow {
+  margin-top: 14px;
+  padding: 12px 14px;
+  background: #f0f9eb;
+  border: 1px solid #e1f3d8;
+  border-radius: 8px;
+  color: #67c23a;
+}
+
+.help-workflow-title {
+  font-weight: 600;
+  margin-bottom: 6px;
+  color: #529b2e;
+}
+
+.help-workflow ol {
+  margin: 0;
+  padding-left: 18px;
+  color: #606266;
+}
+
+.help-note {
+  margin-top: 12px;
+  padding: 10px 12px;
+  background: #fdf6ec;
+  border: 1px solid #faecd8;
+  border-radius: 8px;
+  color: #e6a23c;
+}
+
+.extractors-results {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.extractor-result-item {
+  padding: 12px 14px;
+  border-radius: 8px;
+  border: 1px solid #ebeef5;
+  background: #fff;
+}
+
+.extractor-result-item.passed {
+  border-color: #b3e19d;
+  background: #f0f9eb;
+}
+
+.extractor-result-item.failed {
+  border-color: #fab6b6;
+  background: #fef0f0;
 }
 
 /* 断言编辑器 */
@@ -4229,15 +4764,16 @@ const useLocalVariableCategories = () => {
 /* 覆盖方法标签样式 */
 .method-tag {
   font-size: 10px;
-  padding: 2px 8px;
+  padding: 2px 6px;
   border-radius: 10px;
   color: white;
   font-weight: bold;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: inline-block;
-  min-width: 40px;
+  min-width: 36px;
   text-align: center;
+  flex-shrink: 0;
 }
 
 .method-tag.get {

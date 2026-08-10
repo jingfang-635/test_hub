@@ -84,6 +84,15 @@ class ApiCollectionSerializer(serializers.ModelSerializer):
             'order', 'children', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
+        extra_kwargs = {
+            # 创建必填；更新/部分更新可不传，沿用原 project
+            'project': {'required': True},
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        if self.instance is not None:
+            self.fields['project'].required = False
 
     def get_children(self, obj):
         children = obj.children.all()
@@ -103,8 +112,8 @@ class ApiRequestSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'name', 'description', 'request_type', 'method', 'url',
             'headers', 'params', 'body', 'auth', 'pre_request_script',
-            'post_request_script', 'assertions', 'collection', 'order', 'created_by',
-            'created_at', 'updated_at'
+            'post_request_script', 'assertions', 'extractors', 'collection', 'order',
+            'created_by', 'created_at', 'updated_at'
         ]
         read_only_fields = ['created_at', 'updated_at']
 
@@ -174,7 +183,10 @@ class TestSuiteRequestSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = TestSuiteRequest
-        fields = ['id', 'request', 'order', 'assertions', 'enabled']
+        fields = [
+            'id', 'request', 'order', 'assertions', 'extractors',
+            'skip_condition', 'enabled'
+        ]
 
 
 class TestSuiteSerializer(serializers.ModelSerializer):
@@ -197,21 +209,55 @@ class TestSuiteSerializer(serializers.ModelSerializer):
 class TestExecutionSerializer(serializers.ModelSerializer):
     test_suite = TestSuiteSerializer(read_only=True)
     executed_by = UserSerializer(read_only=True)
+    report_url = serializers.SerializerMethodField()
 
     class Meta:
         model = TestExecution
         fields = [
             'id', 'test_suite', 'status', 'start_time', 'end_time',
             'total_requests', 'passed_requests', 'failed_requests',
-            'results', 'executed_by', 'created_at'
+            'results', 'executed_by', 'created_at', 'report_url',
         ]
+
+    def get_report_url(self, instance):
+        import os
+        from django.conf import settings
+
+        report_index = os.path.join(
+            settings.MEDIA_ROOT,
+            'api-testing',
+            'allure-reports',
+            f'execution_{instance.id}',
+            'index.html',
+        )
+        if os.path.exists(report_index):
+            return f'/media/api-testing/allure-reports/execution_{instance.id}/index.html'
+        return None
 
     def to_representation(self, instance):
         data = super().to_representation(instance)
-        # 添加项目名称信息
-        if instance.test_suite and instance.test_suite.project:
-            data['project_name'] = instance.test_suite.project.name
-            data['test_suite_name'] = instance.test_suite.name
+        suite = instance.test_suite
+        if suite:
+            data['test_suite_name'] = suite.name
+            # 与「项目与版本」/自动化测试下拉一致：始终取主项目名称
+            project = suite.project
+            hub = None
+            if project is not None:
+                hub = getattr(project, 'hub_project', None)
+                if hub is None and getattr(project, 'hub_project_id', None):
+                    from apps.projects.models import Project
+                    hub = Project.objects.filter(id=project.hub_project_id).first()
+            if hub is not None:
+                data['project_name'] = hub.name
+            elif project is not None:
+                data['project_name'] = project.name
+            else:
+                data['project_name'] = None
+            data['environment_name'] = suite.environment.name if suite.environment else None
+        else:
+            data['test_suite_name'] = None
+            data['project_name'] = None
+            data['environment_name'] = None
         return data
 
 

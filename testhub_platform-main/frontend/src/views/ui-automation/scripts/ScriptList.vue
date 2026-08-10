@@ -4,6 +4,7 @@
       <h1 class="page-title">{{ $t('uiAutomation.script.title') }}</h1>
       <div class="header-actions">
         <el-select v-model="selectedProject" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
           <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
         </el-select>
         <el-button type="primary" @click="goToScriptEditor">
@@ -18,7 +19,7 @@
         <el-table-column type="index" :label="$t('uiAutomation.script.index')" width="60" />
         <el-table-column :label="$t('uiAutomation.script.projectColumn')" width="150">
           <template #default="{ row }">
-            {{ row.project?.name || $t('uiAutomation.script.unknownProject') }}
+            {{ getProjectDisplayName(row) }}
           </template>
         </el-table-column>
         <el-table-column prop="name" :label="$t('uiAutomation.script.nameColumn')" min-width="300" show-overflow-tooltip />
@@ -81,7 +82,7 @@
       <div v-if="currentScript" class="script-detail">
         <el-descriptions :column="2" border>
           <el-descriptions-item :label="$t('uiAutomation.script.scriptName')" :span="2">{{ currentScript.name }}</el-descriptions-item>
-          <el-descriptions-item :label="$t('uiAutomation.script.project')">{{ currentScript.project?.name || $t('uiAutomation.script.unknownProject') }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('uiAutomation.script.project')">{{ getProjectDisplayName(currentScript) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.script.language')">{{ getLanguageText(currentScript.language) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.script.framework')">{{ getFrameworkText(currentScript.framework) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.script.scriptType')">{{ getScriptTypeText(currentScript.script_type) }}</el-descriptions-item>
@@ -151,7 +152,7 @@ import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   getTestScripts,
   updateTestScript,
   deleteTestScript
@@ -162,7 +163,10 @@ const { t } = useI18n()
 
 // 响应式数据
 const projects = ref([])
-const selectedProject = ref('')
+const selectedProject = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => selectedProject.value === ALL_PROJECTS || selectedProject.value === ''
+const getProjectQueryParams = () => (isAllProjectsSelected() ? {} : { project: selectedProject.value })
 const scripts = ref([])
 const currentPage = ref(1)
 const pageSize = ref(20)
@@ -184,12 +188,19 @@ const renameForm = reactive({
   newName: ''
 })
 
-// 加载项目列表
+// 加载项目列表（与「项目与版本」一致：仅已勾选 UI自动化 的主项目）
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     ElMessage.error(t('uiAutomation.script.messages.loadProjectsFailed'))
     console.error('获取项目列表失败:', error)
   }
@@ -205,7 +216,7 @@ const loadScripts = async () => {
 
   try {
     const response = await getTestScripts({
-      project: selectedProject.value,
+      ...getProjectQueryParams(),
       page: currentPage.value,
       page_size: pageSize.value
     })
@@ -339,6 +350,15 @@ const deleteScript = async (script) => {
   }
 }
 
+// 优先用下拉中的主项目名称（与「项目与版本」一致）
+const getProjectDisplayName = (script) => {
+  if (!script) return t('uiAutomation.script.unknownProject')
+  const fromList = projects.value.find(
+    p => p.id === script.project?.id || p.id === script.project_id || p.id === script.project
+  )
+  return fromList?.name || script.project?.name || t('uiAutomation.script.unknownProject')
+}
+
 // 辅助方法
 const getScriptTypeText = (type) => {
   const typeMap = {
@@ -374,10 +394,8 @@ const formatTime = (timestamp) => {
 onMounted(async () => {
   await loadProjects()
 
-  if (projects.value.length > 0) {
-    selectedProject.value = projects.value[0].id
-    await loadScripts()
-  }
+  selectedProject.value = ALL_PROJECTS
+  await loadScripts()
 })
 </script>
 

@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status
+from rest_framework import viewsets, status, mixins
 from rest_framework.decorators import action, api_view
 from rest_framework.response import Response
 from rest_framework.permissions import IsAuthenticated
@@ -20,7 +20,9 @@ import json
 import logging
 import uuid
 import subprocess
+import shutil
 from datetime import datetime, timedelta
+from pathlib import Path
 
 from .models import (
     ApiProject, ApiCollection, ApiRequest, Environment,
@@ -41,7 +43,7 @@ from .serializers import (
 
 logger = logging.getLogger(__name__)
 
-from .utils import execute_assertions
+from .utils import execute_assertions, execute_extractors, apply_extracted_variables_to_env
 from .operation_logger import log_operation
 from .variable_resolver import VariableResolver
 from .importers import parse_import
@@ -212,6 +214,10 @@ class ApiProjectViewSet(viewsets.ModelViewSet):
                 if member_ids:
                     api_project.members.set(member_ids)
                 created = True
+        elif api_project.name != hub_project.name:
+            # 主项目改名后同步 ApiProject 显示名
+            api_project.name = hub_project.name
+            api_project.save(update_fields=['name', 'updated_at'])
 
         serializer = self.get_serializer(api_project)
         return Response(
@@ -704,6 +710,16 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
                 if assertion.get('type') == 'response_time':
                     assertion['actual_time'] = response_time
             assertions_results = execute_assertions(response, assertions)
+
+            # 执行变量提取，并写回环境变量 currentValue
+            extractors = request.data.get('extractors', api_request.extractors) or []
+            extractors_results, extracted_variables = execute_extractors(response, extractors)
+            if environment_id and extracted_variables:
+                try:
+                    env = Environment.objects.get(id=environment_id)
+                    apply_extracted_variables_to_env(env, extracted_variables)
+                except Environment.DoesNotExist:
+                    pass
             
             # 保存请求历史
             history = RequestHistory.objects.create(
@@ -738,6 +754,8 @@ class ApiRequestViewSet(viewsets.ModelViewSet):
             # 返回包含断言结果的数据
             history_data = RequestHistorySerializer(history).data
             history_data['assertions_results'] = assertions_results
+            history_data['extractors_results'] = extractors_results
+            history_data['extracted_variables'] = extracted_variables
             
             return Response(history_data)
             
@@ -925,180 +943,22 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def execute(self, request, pk=None):
-        """执行测试套件"""
+        """执行测试套件（Allure-Pytest 驱动，支持跳过条件/变量提取）"""
         test_suite = self.get_object()
-        
         try:
-            # 创建执行记录
-            execution = TestExecution.objects.create(
+            from .utils import execute_test_suite
+            result = execute_test_suite(
                 test_suite=test_suite,
-                status='RUNNING',
-                start_time=timezone.now(),
+                environment=test_suite.environment,
                 executed_by=request.user
             )
-            
-            # 获取套件中的请求
-            suite_requests = TestSuiteRequest.objects.filter(
-                test_suite=test_suite,
-                enabled=True
-            ).order_by('order')
-            
-            execution.total_requests = suite_requests.count()
-            execution.save()
-            
-            results = []
-            passed_count = 0
-            failed_count = 0
-            
-            # 创建变量解析器
-            resolver = VariableResolver()
+            if not result.get('success'):
+                return Response(
+                    {'error': result.get('error', '执行失败')},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
 
-            # 执行每个请求
-            for suite_request in suite_requests:
-                api_request = suite_request.request
-                
-                try:
-                    # 解析环境变量
-                    variables = {}
-                    if test_suite.environment:
-                        variables.update(test_suite.environment.variables)
-                    
-                    # 替换URL中的变量（先解析动态函数，再替换环境变量）
-                    url = self._replace_variables(api_request.url, variables)
-                    url = resolver.resolve(url)
-
-                    # 准备请求头
-                    headers = {}
-                    # 支持新的数组格式和旧的对象格式
-                    if isinstance(api_request.headers, list):
-                        # 新的数组格式 [{"key": "Authorization", "value": "Bearer {{token}}", "enabled": true, "description": "..."}]
-                        for header_item in api_request.headers:
-                            if header_item.get('enabled', True) and header_item.get('key'):
-                                key = header_item['key']
-                                value = self._replace_variables(str(header_item.get('value', '')), variables)
-                                value = resolver.resolve(value)
-                                headers[key] = value
-                    else:
-                        # 旧的对象格式 {"Authorization": "Bearer {{token}}"}
-                        headers = api_request.headers.copy()
-                        for key, value in headers.items():
-                            headers[key] = self._replace_variables(str(value), variables)
-                            headers[key] = resolver.resolve(headers[key])
-
-                    params = api_request.params.copy()
-                    for key, value in params.items():
-                        params[key] = self._replace_variables(str(value), variables)
-                        params[key] = resolver.resolve(params[key])
-
-                    body_data = None
-                    if api_request.body and api_request.method in ['POST', 'PUT', 'PATCH']:
-                        if api_request.body.get('type') == 'json':
-                            body_data = api_request.body.get('data', {})
-                            body_data = self._replace_variables_in_dict(body_data, variables)
-                            body_data = self._resolve_variables_in_dict(body_data, resolver)
-
-                    # 执行请求
-                    start_time = time.time()
-                    response = requests.request(
-                        method=api_request.method,
-                        url=url,
-                        headers=headers,
-                        params=params,
-                        json=body_data,
-                        timeout=30
-                    )
-                    end_time = time.time()
-                    response_time = (end_time - start_time) * 1000
-                    
-                    # 执行断言验证
-                    assertions = api_request.assertions or []
-                    # 添加响应时间到断言中
-                    for assertion in assertions:
-                        if assertion.get('type') == 'response_time':
-                            assertion['actual_time'] = response_time
-                    
-                    # 使用共享的断言执行方法
-                    assertions_results = execute_assertions(response, assertions)
-                    
-                    # 检查所有断言是否通过
-                    passed = True
-                    error_message = ''
-                    
-                    # 检查套件请求的断言
-                    for assertion in suite_request.assertions:
-                        # 简单的状态码断言
-                        if assertion.get('type') == 'status_code':
-                            expected = assertion.get('value')
-                            if response.status_code != expected:
-                                passed = False
-                                error_message = f'状态码断言失败: 期望 {expected}, 实际 {response.status_code}'
-                                break
-                    
-                    # 检查接口自身的断言
-                    if passed and assertions_results:
-                        for assertion_result in assertions_results:
-                            if not assertion_result.get('passed', True):
-                                passed = False
-                                error_message = f"断言失败: {assertion_result.get('name', '未命名断言')} - {assertion_result.get('error', '断言不通过')}"
-                                break
-                    
-                    if passed:
-                        passed_count += 1
-                    else:
-                        failed_count += 1
-                    
-                    results.append({
-                        'name': api_request.name,
-                        'method': api_request.method,
-                        'url': url,
-                        'status_code': response.status_code,
-                        'response_time': response_time,
-                        'passed': passed,
-                        'error': error_message,
-                        'assertions_results': assertions_results
-                    })
-                    
-                    # 保存请求历史
-                    RequestHistory.objects.create(
-                        request=api_request,
-                        environment=test_suite.environment,
-                        request_data={
-                            'url': url,
-                            'method': api_request.method,
-                            'headers': headers,
-                            'params': params,
-                            'body': body_data
-                        },
-                        response_data={
-                            'headers': dict(response.headers),
-                            'body': response.text,
-                            'json': response.json() if response.headers.get('content-type', '').startswith('application/json') else None
-                        },
-                        status_code=response.status_code,
-                        response_time=response_time,
-                        assertions_results=assertions_results,
-                        executed_by=request.user
-                    )
-                    
-                except Exception as e:
-                    failed_count += 1
-                    results.append({
-                        'name': api_request.name,
-                        'method': api_request.method,
-                        'url': api_request.url,
-                        'passed': False,
-                        'error': str(e)
-                    })
-            
-            # 更新执行结果
-            execution.end_time = timezone.now()
-            execution.passed_requests = passed_count
-            execution.failed_requests = failed_count
-            execution.status = 'COMPLETED' if failed_count == 0 else 'FAILED'
-            execution.results = results
-            execution.save()
-            
-            # 记录执行操作
+            execution = TestExecution.objects.get(id=result['execution_id'])
             log_operation(
                 operation_type='execute',
                 resource_type='suite',
@@ -1106,13 +966,8 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
                 resource_name=test_suite.name,
                 user=request.user
             )
-            
             return Response(TestExecutionSerializer(execution).data)
-            
         except Exception as e:
-            execution.status = 'FAILED'
-            execution.end_time = timezone.now()
-            execution.save()
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
 
     def perform_create(self, serializer):
@@ -1225,7 +1080,7 @@ class TestSuiteRequestViewSet(viewsets.ModelViewSet):
         ).distinct()
 
 
-class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
+class TestExecutionViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewSet):
     queryset = TestExecution.objects.all()
     serializer_class = TestExecutionSerializer
     permission_classes = [IsAuthenticated]
@@ -1240,7 +1095,279 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
             test_suite__project__in=ApiProject.objects.filter(
                 models.Q(owner=user) | models.Q(members=user)
             )
+        ).select_related(
+            'test_suite__project__hub_project',
+            'test_suite__environment',
+            'executed_by',
         ).distinct()
+
+    def _get_allure_report_dir(self, execution):
+        return os.path.join(
+            settings.MEDIA_ROOT,
+            'api-testing',
+            'allure-reports',
+            f'execution_{execution.id}',
+        )
+
+    def _ensure_allure_report(self, execution):
+        """确保在线 Allure 报告存在，返回入口文件路径或 None。"""
+        report_dir = self._get_allure_report_dir(execution)
+        index_path = os.path.join(report_dir, 'index.html')
+        summary_path = os.path.join(report_dir, 'summary.html')
+        if os.path.exists(index_path):
+            return index_path
+        if os.path.exists(summary_path):
+            return summary_path
+
+        response = self.generate_allure_report(self.request, pk=execution.id)
+        if getattr(response, 'status_code', 200) >= 400:
+            return None
+        if os.path.exists(index_path):
+            return index_path
+        if os.path.exists(summary_path):
+            return summary_path
+        return None
+
+    def _find_allure_command(self):
+        """定位项目内置 / 系统 Allure 可执行文件。"""
+        exe = 'allure.bat' if os.name == 'nt' else 'allure'
+        candidates = [
+            Path(settings.BASE_DIR) / 'allure' / 'bin' / exe,
+            Path(settings.BASE_DIR).parent / 'allure' / 'bin' / exe,
+            Path(__file__).resolve().parent.parent.parent.parent / 'allure' / 'bin' / exe,
+            Path('/usr/local/bin/allure'),
+            Path('/usr/bin/allure'),
+        ]
+        for path in candidates:
+            if path.exists():
+                logger.info(f'使用 Allure: {path}')
+                return path
+        logger.warning('未找到 Allure 可执行文件')
+        return None
+
+    def _build_standalone_html_report(self, execution):
+        """基于执行结果生成可本地打开的独立 HTML（无外部依赖）。"""
+        suite_name = execution.test_suite.name if execution.test_suite else f'Execution {execution.id}'
+        project_name = ''
+        env_name = ''
+        if execution.test_suite and execution.test_suite.project:
+            project = execution.test_suite.project
+            if getattr(project, 'hub_project', None):
+                project_name = project.hub_project.name
+            else:
+                project_name = project.name
+            if execution.test_suite.environment:
+                env_name = execution.test_suite.environment.name
+
+        results = execution.results if isinstance(execution.results, list) else []
+        skipped = sum(1 for r in results if r.get('skipped'))
+        total = execution.total_requests or len(results)
+        passed = execution.passed_requests or 0
+        failed = execution.failed_requests or 0
+        pass_rate = f'{(passed / total * 100):.0f}%' if total else '0%'
+        executor = execution.executed_by.username if execution.executed_by else '-'
+        created_at = execution.created_at.strftime('%Y-%m-%d %H:%M:%S') if execution.created_at else '-'
+
+        rows = []
+        for r in results:
+            if r.get('skipped'):
+                result_badge = '<span class="badge skip">跳过</span>'
+            elif r.get('passed'):
+                result_badge = '<span class="badge pass">通过</span>'
+            else:
+                result_badge = '<span class="badge fail">失败</span>'
+            rt = r.get('response_time')
+            rt_text = f'{int(rt)}ms' if rt is not None else '-'
+            error = (r.get('error') or '-').replace('<', '&lt;').replace('>', '&gt;')
+            name = (r.get('name') or '-').replace('<', '&lt;').replace('>', '&gt;')
+            method = r.get('method') or '-'
+            code = r.get('status_code') if r.get('status_code') is not None else '-'
+            rows.append(
+                f'<tr><td>{name}</td><td>{method}</td><td>{code}</td>'
+                f'<td>{rt_text}</td><td>{result_badge}</td><td>{error}</td></tr>'
+            )
+        rows_html = '\n'.join(rows) if rows else '<tr><td colspan="6">暂无请求结果</td></tr>'
+
+        html = f"""<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>{suite_name} - Allure离线报告</title>
+  <style>
+    body {{ margin: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; background: #f5f7fb; color: #303133; }}
+    .hero {{ background: linear-gradient(135deg, #4f7cff, #6a5af9 55%, #8b5cf6); color: #fff; padding: 24px; }}
+    .hero h1 {{ margin: 0 0 16px; font-size: 22px; }}
+    .meta {{ display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; }}
+    .meta div {{ font-size: 13px; opacity: .95; }}
+    .meta span {{ display: block; opacity: .8; margin-bottom: 4px; }}
+    .wrap {{ padding: 20px; }}
+    .cards {{ display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-bottom: 20px; }}
+    .card {{ background: #fff; border-radius: 10px; padding: 14px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.06); }}
+    .card .label {{ color: #909399; font-size: 13px; margin-bottom: 8px; }}
+    .card .value {{ font-size: 26px; font-weight: 700; }}
+    .total {{ color: #409eff; }} .pass {{ color: #67c23a; }} .fail {{ color: #f56c6c; }} .skip {{ color: #e6a23c; }}
+    table {{ width: 100%; border-collapse: collapse; background: #fff; border-radius: 10px; overflow: hidden; }}
+    th, td {{ padding: 10px 12px; border-bottom: 1px solid #ebeef5; text-align: left; font-size: 13px; }}
+    th {{ background: #fafafa; color: #606266; }}
+    .badge {{ display: inline-block; padding: 2px 8px; border-radius: 999px; color: #fff; font-size: 12px; }}
+    .badge.pass {{ background: #67c23a; }} .badge.fail {{ background: #f56c6c; }} .badge.skip {{ background: #e6a23c; }}
+    h2 {{ margin: 0 0 12px; font-size: 16px; }}
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>{suite_name}</h1>
+    <div class="meta">
+      <div><span>所属项目</span>{project_name or '-'}</div>
+      <div><span>执行环境</span>{env_name or '暂无环境'}</div>
+      <div><span>执行者</span>{executor}</div>
+      <div><span>执行时间</span>{created_at}</div>
+    </div>
+  </div>
+  <div class="wrap">
+    <div class="cards">
+      <div class="card"><div class="label">总请求数</div><div class="value total">{total}</div></div>
+      <div class="card"><div class="label">通过数</div><div class="value pass">{passed}</div></div>
+      <div class="card"><div class="label">失败数</div><div class="value fail">{failed}</div></div>
+      <div class="card"><div class="label">跳过数</div><div class="value skip">{skipped}</div></div>
+      <div class="card"><div class="label">通过率</div><div class="value pass">{pass_rate}</div></div>
+    </div>
+    <h2>请求结果</h2>
+    <table>
+      <thead><tr><th>名称</th><th>方法</th><th>状态码</th><th>响应时间</th><th>结果</th><th>错误</th></tr></thead>
+      <tbody>
+        {rows_html}
+      </tbody>
+    </table>
+  </div>
+</body>
+</html>
+"""
+        offline_dir = os.path.join(
+            settings.MEDIA_ROOT, 'api-testing', 'allure-offline', f'execution_{execution.id}'
+        )
+        os.makedirs(offline_dir, exist_ok=True)
+        html_path = os.path.join(offline_dir, 'index.html')
+        with open(html_path, 'w', encoding='utf-8') as f:
+            f.write(html)
+        return html_path
+
+    def _is_single_file_allure_html(self, html_path):
+        """判断是否为可独立打开的 Allure 单文件报告（而非依赖外部资源的壳页面）。"""
+        try:
+            size = os.path.getsize(html_path)
+            if size < 50_000:
+                return False
+            with open(html_path, 'r', encoding='utf-8', errors='ignore') as f:
+                head = f.read(4000)
+            if 'src="app.js"' in head or "src='app.js'" in head:
+                return False
+            if 'single_file' in head or 'single-file' in head or size > 200_000:
+                return True
+            return '<script' in head and 'styles.css' not in head
+        except Exception:
+            return False
+
+    def _ensure_offline_html_report(self, execution):
+        """生成可离线打开的单文件 HTML 报告。"""
+        offline_dir = os.path.join(
+            settings.MEDIA_ROOT,
+            'api-testing',
+            'allure-offline',
+            f'execution_{execution.id}',
+        )
+        offline_html = os.path.join(offline_dir, 'index.html')
+        if os.path.exists(offline_html) and self._is_single_file_allure_html(offline_html):
+            return offline_html
+
+        results_dir = os.path.join(
+            settings.MEDIA_ROOT, 'api-testing', 'allure-results', f'execution_{execution.id}'
+        )
+        os.makedirs(results_dir, exist_ok=True)
+        import glob as _glob
+        if not _glob.glob(os.path.join(results_dir, '*-result.json')):
+            self._generate_test_result_files(execution, results_dir)
+
+        allure_cmd = self._find_allure_command()
+        java_available = self._check_java_environment()
+
+        if allure_cmd and java_available:
+            try:
+                if os.path.exists(offline_dir):
+                    shutil.rmtree(offline_dir, ignore_errors=True)
+                os.makedirs(offline_dir, exist_ok=True)
+
+                if os.name == 'nt':
+                    cmd_list = [
+                        'cmd', '/c', str(allure_cmd),
+                        'generate', str(Path(results_dir)),
+                        '--clean', '--single-file',
+                        '--output', str(Path(offline_dir)),
+                    ]
+                else:
+                    cmd_list = [
+                        str(allure_cmd),
+                        'generate', str(Path(results_dir)),
+                        '--clean', '--single-file',
+                        '--output', str(Path(offline_dir)),
+                    ]
+
+                result = subprocess.run(
+                    cmd_list,
+                    capture_output=True,
+                    text=True,
+                    timeout=180,
+                )
+                if result.returncode == 0:
+                    for name in ('index.html', 'report.html', 'allure-report.html'):
+                        candidate = os.path.join(offline_dir, name)
+                        if os.path.exists(candidate) and self._is_single_file_allure_html(candidate):
+                            return candidate
+                else:
+                    logger.error(
+                        f'单文件 Allure 生成失败 code={result.returncode}: '
+                        f'{result.stderr or result.stdout}'
+                    )
+            except Exception as e:
+                logger.error(f'生成离线 HTML 报告失败: {e}')
+
+        # 回退：生成独立 HTML，避免下载多文件壳页面导致空白
+        return self._build_standalone_html_report(execution)
+
+    @action(detail=True, methods=['get'], url_path='download-allure-report')
+    def download_allure_report(self, request, pk=None):
+        """下载 Allure 离线报告（单文件 HTML）"""
+        execution = self.get_object()
+        html_path = self._ensure_offline_html_report(execution)
+
+        if not html_path or not os.path.exists(html_path):
+            return Response(
+                {'error': 'Allure报告不存在或生成失败'},
+                status=status.HTTP_404_NOT_FOUND,
+            )
+
+        suite_name = execution.test_suite.name if execution.test_suite else 'suite'
+        safe_name = ''.join(c if c.isalnum() or c in ('-', '_', '.') else '_' for c in suite_name)
+        html_filename = f'allure_report_{safe_name}_{execution.id}.html'
+
+        response = FileResponse(
+            open(html_path, 'rb'),
+            as_attachment=True,
+            filename=html_filename,
+            content_type='text/html; charset=utf-8',
+        )
+        return response
+
+    def perform_destroy(self, instance):
+        execution_id = instance.id
+        instance.delete()
+        for subdir in ('allure-reports', 'allure-results', 'allure-offline'):
+            target = os.path.join(
+                settings.MEDIA_ROOT, 'api-testing', subdir, f'execution_{execution_id}'
+            )
+            if os.path.isdir(target):
+                shutil.rmtree(target, ignore_errors=True)
     
     @action(detail=True, methods=['post'], url_path='generate-allure-report')
     def generate_allure_report(self, request, pk=None):
@@ -1251,9 +1378,12 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
             # 创建报告目录
             results_dir = os.path.join(settings.MEDIA_ROOT, 'api-testing', 'allure-results', f'execution_{execution.id}')
             os.makedirs(results_dir, exist_ok=True)
-            
-            # 生成测试结果文件
-            self._generate_test_result_files(execution, results_dir)
+
+            # Allure-Pytest 已产出结果时不再手写覆盖；否则兼容旧执行记录
+            import glob as _glob
+            existing_results = _glob.glob(os.path.join(results_dir, '*-result.json'))
+            if not existing_results:
+                self._generate_test_result_files(execution, results_dir)
             
             # 生成Allure报告
             report_output_dir = os.path.join(settings.MEDIA_ROOT, 'api-testing', 'allure-reports', f'execution_{execution.id}')
@@ -1666,10 +1796,19 @@ class TestExecutionViewSet(viewsets.ReadOnlyModelViewSet):
             summary_file = os.path.join(report_output_dir, 'summary.html')
             with open(summary_file, 'w', encoding='utf-8') as f:
                 f.write(index_content)
+
+            index_file = os.path.join(report_output_dir, 'index.html')
+            allure_url = (
+                f'/media/api-testing/allure-reports/execution_{execution.id}/index.html'
+                if os.path.exists(index_file)
+                else f'/media/api-testing/allure-reports/execution_{execution.id}/summary.html'
+            )
             
             return Response({
                 'message': 'Allure报告生成成功',
-                'report_url': f'/media/api-testing/allure-reports/execution_{execution.id}/summary.html'
+                'report_url': allure_url,
+                'summary_url': f'/media/api-testing/allure-reports/execution_{execution.id}/summary.html',
+                'allure_report_url': allure_url,
             })
         except Exception as e:
             import traceback

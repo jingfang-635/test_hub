@@ -3,6 +3,7 @@
     <div class="page-header">
       <h1 class="page-title">{{ $t('uiAutomation.suite.title') }}</h1>
       <el-select v-model="projectId" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+        <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
         <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
       </el-select>
       <el-button type="primary" @click="handleNewSuite">
@@ -175,32 +176,34 @@
                       </el-tag>
                     </template>
                   </el-table-column>
-                  <el-table-column :label="$t('uiAutomation.common.operation')" width="120">
-                    <template #default="{ row, $index }">
-                      <el-button
-                        size="small"
-                        text
-                        @click="moveUp($index)"
-                        :disabled="$index === 0"
-                      >
-                        <el-icon><Top /></el-icon>
-                      </el-button>
-                      <el-button
-                        size="small"
-                        text
-                        @click="moveDown($index)"
-                        :disabled="$index === selectedTestCases.length - 1"
-                      >
-                        <el-icon><Bottom /></el-icon>
-                      </el-button>
-                      <el-button
-                        size="small"
-                        text
-                        type="danger"
-                        @click="removeTestCase($index)"
-                      >
-                        <el-icon><Delete /></el-icon>
-                      </el-button>
+                  <el-table-column :label="$t('uiAutomation.common.operation')" width="130" align="center">
+                    <template #default="{ $index }">
+                      <div class="case-action-btns">
+                        <el-button
+                          size="small"
+                          text
+                          @click="moveUp($index)"
+                          :disabled="$index === 0"
+                        >
+                          <el-icon><Top /></el-icon>
+                        </el-button>
+                        <el-button
+                          size="small"
+                          text
+                          @click="moveDown($index)"
+                          :disabled="$index === selectedTestCases.length - 1"
+                        >
+                          <el-icon><Bottom /></el-icon>
+                        </el-button>
+                        <el-button
+                          size="small"
+                          text
+                          type="danger"
+                          @click="removeTestCase($index)"
+                        >
+                          <el-icon><Delete /></el-icon>
+                        </el-button>
+                      </div>
                     </template>
                   </el-table-column>
                 </el-table>
@@ -265,7 +268,7 @@ import {
   ArrowRight, Top, Bottom
 } from '@element-plus/icons-vue'
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   getTestSuites,
   createTestSuite,
   updateTestSuite,
@@ -283,7 +286,10 @@ const { t } = useI18n()
 
 // 响应式数据
 const projects = ref([])
-const projectId = ref('')
+const projectId = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => projectId.value === ALL_PROJECTS || projectId.value === ''
+const getProjectQueryParams = () => (isAllProjectsSelected() ? {} : { project: projectId.value })
 const suites = ref([])
 const loading = ref(false)
 const searchText = ref('')
@@ -339,9 +345,16 @@ const filteredAvailableTestCases = computed(() => {
 // 加载项目列表
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     console.error('获取项目列表失败:', error)
     ElMessage.error(t('uiAutomation.project.messages.loadFailed'))
   }
@@ -358,7 +371,7 @@ const loadSuites = async () => {
   loading.value = true
   try {
     const response = await getTestSuites({
-      project: projectId.value,
+      ...getProjectQueryParams(),
       page: pagination.currentPage,
       page_size: pagination.pageSize,
       search: searchText.value
@@ -381,7 +394,10 @@ const loadSuites = async () => {
 
 // 加载可用测试用例
 const loadAvailableTestCases = async () => {
-  if (!projectId.value) return
+  if (!projectId.value || isAllProjectsSelected()) {
+    availableTestCases.value = []
+    return
+  }
 
   try {
     const response = await getTestCases({
@@ -424,15 +440,28 @@ const handleCreate = async () => {
     return
   }
 
-  if (!projectId.value) {
-    ElMessage.warning(t('uiAutomation.suite.messages.selectProject'))
+  if (!isEditing.value && (!projectId.value || isAllProjectsSelected())) {
+    ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
     return
   }
 
   saving.value = true
   try {
+    const editingSuite = isEditing.value
+      ? suites.value.find(s => s.id === currentSuiteId.value)
+      : null
+    const writeProjectId = isEditing.value
+      ? (editingSuite?.project_id || editingSuite?.project?.id || projectId.value)
+      : projectId.value
+
+    if (!writeProjectId || writeProjectId === ALL_PROJECTS) {
+      ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
+      saving.value = false
+      return
+    }
+
     const suiteData = {
-      project: projectId.value,
+      project: writeProjectId,
       name: createForm.name,
       description: createForm.description
     }
@@ -496,8 +525,19 @@ const editSuite = async (id) => {
     const response = await getTestSuiteTestCases(id)
     selectedTestCases.value = response.data.map(item => item.test_case).sort((a, b) => a.order - b.order)
 
-    // 加载可用测试用例
-    await loadAvailableTestCases()
+    // 加载可用测试用例（编辑时按套件所属项目）
+    const suiteProjectId = suites_data.project_id || suites_data.project?.id
+    if (suiteProjectId) {
+      try {
+        const casesRes = await getTestCases({ project: suiteProjectId, page_size: 1000 })
+        availableTestCases.value = casesRes.data.results || casesRes.data
+      } catch (e) {
+        console.error('获取测试用例列表失败:', e)
+        availableTestCases.value = []
+      }
+    } else {
+      await loadAvailableTestCases()
+    }
 
     showCreateDialog.value = true
   } catch (error) {
@@ -742,10 +782,8 @@ const getCaseStatusText = (status) => {
 const originalShowCreateDialog = showCreateDialog
 onMounted(async () => {
   await loadProjects()
-  if (projects.value.length > 0) {
-    projectId.value = projects.value[0].id
-    await loadSuites()
-  }
+  projectId.value = ALL_PROJECTS
+  await loadSuites()
 })
 
 // 监听对话框打开事件
@@ -757,6 +795,10 @@ const openCreateDialog = async () => {
 
 // 修改新增套件按钮点击事件
 const handleNewSuite = async () => {
+  if (isAllProjectsSelected()) {
+    ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
+    return
+  }
   resetForm()
   await loadAvailableTestCases()
   showCreateDialog.value = true
@@ -834,6 +876,19 @@ const handleNewSuite = async () => {
   padding: 10px;
 }
 
+.case-action-btns {
+  display: inline-flex;
+  flex-wrap: nowrap;
+  align-items: center;
+  justify-content: center;
+  white-space: nowrap;
+  gap: 0;
+
+  .el-button {
+    margin: 0;
+    padding: 4px;
+  }
+}
 
 :deep(.selected-row) {
   background-color: #f0f9ff !important;

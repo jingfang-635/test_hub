@@ -4,6 +4,7 @@
       <h1 class="page-title">{{ $t('uiAutomation.scriptEditor.title') }}</h1>
       <div class="header-actions">
         <el-select v-model="projectId" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
           <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
         </el-select>
       </div>
@@ -180,7 +181,7 @@ import {
 } from '@element-plus/icons-vue'
 
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   createTestScript,
   getElementTree,
   getElementGroupTree,
@@ -192,7 +193,10 @@ const { t } = useI18n()
 
 // 响应式数据
 const projects = ref([])
-const projectId = ref('')
+const projectId = ref('all')
+const ALL_PROJECTS = 'all'
+const isAllProjectsSelected = () => projectId.value === ALL_PROJECTS || projectId.value === ''
+const getProjectQueryParams = () => (isAllProjectsSelected() ? {} : { project: projectId.value })
 const scriptContent = ref('')
 const scriptLanguage = ref('python')
 const scriptFramework = ref('playwright')
@@ -211,12 +215,19 @@ const rightActiveTab = ref('logs')
 // Monaco编辑器实例
 const codeEditor = ref(null)
 
-// 方法定义
+// 方法定义（与「项目与版本」一致：仅已勾选 UI自动化 的主项目）
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects({ page_size: 100 })
-    projects.value = response.data.results || response.data
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     ElMessage.error(t('uiAutomation.scriptEditor.messages.loadProjectsFailed'))
     console.error('Failed to load projects:', error)
   }
@@ -229,10 +240,11 @@ const loadElementTree = async () => {
   }
 
   try {
+    const query = getProjectQueryParams()
     // 并行加载页面树和元素
     const [pageGroupResponse, elementsResponse] = await Promise.all([
-      getElementGroupTree({ project: projectId.value }),
-      getElementTree({ project: projectId.value })
+      getElementGroupTree(query),
+      getElementTree(query)
     ])
 
     // 构建页面节点
@@ -423,8 +435,8 @@ const generateScriptName = () => {
 }
 
 const saveScript = async () => {
-  if (!projectId.value) {
-    ElMessage.warning(t('uiAutomation.scriptEditor.messages.selectProject'))
+  if (!projectId.value || isAllProjectsSelected()) {
+    ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
     return
   }
 
@@ -559,10 +571,8 @@ watch(scriptLanguage, (newLang) => {
 onMounted(async () => {
   await loadProjects()
 
-  if (projects.value.length > 0) {
-    projectId.value = projects.value[0].id
-    await onProjectChange()
-  }
+  projectId.value = ALL_PROJECTS
+  await onProjectChange()
 
   // 为textarea添加事件监听
   if (codeEditor.value) {

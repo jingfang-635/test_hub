@@ -401,7 +401,7 @@ import {
   runScheduledTask,
   pauseScheduledTask,
   resumeScheduledTask,
-  getUiProjects,
+  loadUiAutomationProjects,
   getTestSuites,
   getTestCases,
   getUiUsers
@@ -628,12 +628,19 @@ const loadTasks = async () => {
   }
 }
 
-// 加载项目列表
+// 加载项目列表（与「项目与版本」一致：仅已勾选 UI自动化 的主项目）
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects()
-    projects.value = response.data.results
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     console.error('Load projects failed:', error)
   }
 }

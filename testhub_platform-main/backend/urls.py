@@ -14,6 +14,8 @@ from drf_spectacular.views import (
 import os
 import json
 
+from apps.ui_automation.views import UiProjectEnsureView
+
 # 前端 index.html 路径
 _FRONTEND_INDEX = os.path.join(getattr(settings, 'FRONTEND_DIST', ''), 'index.html')
 
@@ -781,6 +783,8 @@ urlpatterns = [
     path('api/assistant/', include('apps.assistant.urls')),
     path('api/users/', include('apps.users.urls')),
     path('api/requirement-analysis/', include('apps.requirement_analysis.urls')),
+    # 必须在 ui_automation include 之前，避免 projects/<pk> 抢占 ensure 导致 POST 405
+    path('api/ui-automation/projects/ensure/', UiProjectEnsureView.as_view(), name='ui-project-ensure-root'),
     path('api/ui-automation/', include('apps.ui_automation.urls')),
     path('api/app-automation/', include('apps.app_automation.urls')),  # APP自动化测试
     path('api/', include('apps.api_testing.urls')),

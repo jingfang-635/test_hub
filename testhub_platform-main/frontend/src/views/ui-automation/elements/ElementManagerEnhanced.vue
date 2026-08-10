@@ -4,7 +4,8 @@
       <!-- 左侧页面树 -->
       <div class="sidebar">
         <div class="sidebar-header">
-          <el-select v-model="selectedProject" :placeholder="$t('common.selectProject')" @change="onProjectChange">
+          <el-select v-model="selectedProject" :placeholder="$t('uiAutomation.common.selectProject')" @change="onProjectChange">
+            <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
             <el-option
               v-for="project in projects"
               :key="project.id"
@@ -13,7 +14,7 @@
             />
           </el-select>
           <div class="header-actions">
-            <el-button type="primary" size="small" @click="showCreatePageDialog = true" :title="$t('uiAutomation.element.createPage')">
+            <el-button type="primary" size="small" @click="openCreatePageDialog" :title="$t('uiAutomation.element.createPage')">
               <el-icon><Folder /></el-icon>
             </el-button>
             <el-button type="success" size="small" @click="createEmptyElement" :title="$t('uiAutomation.element.addElement')">
@@ -184,13 +185,11 @@
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item :label="$t('uiAutomation.element.forceAction')">
-                    <el-switch
-                      v-model="selectedElement.force_action"
-                      :active-text="$t('uiAutomation.element.forceActionEnabled')"
-                      :inactive-text="$t('uiAutomation.element.forceActionDisabled')"
-                    />
-                    <div class="form-help-text" style="margin-top: 5px;">
-                      {{ $t('uiAutomation.element.forceActionTip') }}
+                    <div class="force-action-row">
+                      <el-switch v-model="selectedElement.force_action" />
+                      <span class="form-help-text force-action-tip">
+                        {{ $t('uiAutomation.element.forceActionTip') }}
+                      </span>
                     </div>
                   </el-form-item>
                 </el-col>
@@ -238,7 +237,7 @@
       </el-form>
 
       <template #footer>
-        <el-button @click="showCreatePageDialog = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
+        <el-button @click="cancelCreatePage">{{ $t('uiAutomation.common.cancel') }}</el-button>
         <el-button type="primary" @click="createPage">{{ $t('uiAutomation.common.confirm') }}</el-button>
       </template>
     </el-dialog>
@@ -297,7 +296,7 @@ import {
   Folder, Document as DocumentIcon, Operation, DocumentCopy, ArrowDown
 } from '@element-plus/icons-vue'
 import {
-  getUiProjects,
+  loadUiAutomationProjects,
   getElements,
   createElement,
   getElementDetail,
@@ -319,7 +318,33 @@ const { t } = useI18n()
 
 // 响应式数据
 const projects = ref([])
-const selectedProject = ref('')
+const selectedProject = ref('all')
+const ALL_PROJECTS = 'all'
+/** 全部项目模式下，临时指定写入目标项目（如右键在某页面下新建） */
+const writeProjectOverride = ref(null)
+
+const isAllProjectsSelected = () => selectedProject.value === ALL_PROJECTS || selectedProject.value === ''
+
+/** 当前写入操作使用的项目 ID（全部项目模式下需指定具体项目） */
+const resolveWriteProjectId = (element = null) => {
+  if (writeProjectOverride.value) return writeProjectOverride.value
+  if (!isAllProjectsSelected()) return selectedProject.value
+  return element?.project_id || element?.project?.id || null
+}
+
+const ensureWriteProjectSelected = (element = null) => {
+  const projectId = resolveWriteProjectId(element)
+  if (!projectId) {
+    ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+    return null
+  }
+  return projectId
+}
+
+/** 列表/树查询参数：全部项目不传 project */
+const getProjectQueryParams = () => (
+  isAllProjectsSelected() ? {} : { project: selectedProject.value }
+)
 const pages = ref([])
 const locatorStrategies = ref([])
 const treeData = ref([])
@@ -506,12 +531,9 @@ onMounted(async () => {
   console.log('项目数量:', projects.value.length)
   console.log('定位策略:', locatorStrategies.value.length)
 
-  if (projects.value.length > 0) {
-    console.log('设置初始项目为:', projects.value[0].id)
-    selectedProject.value = projects.value[0].id
-    await onProjectChange()
-    console.log('onProjectChange完成')
-  }
+  // 默认「全部项目」
+  selectedProject.value = ALL_PROJECTS
+  await onProjectChange()
 
   // 暴露调试信息
   exposeToWindow()
@@ -519,13 +541,21 @@ onMounted(async () => {
   console.log('=== 组件挂载完成 ===')
 })
 
-// 加载项目列表
+/** 与「项目与版本」一致：仅展示本模块已关联的主项目 */
 const loadProjects = async () => {
   try {
-    const response = await getUiProjects()
-    projects.value = response.data?.results || response.data || []
+    const { projects: list, empty, lastError } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    } else if (list.length === 0) {
+      const detail = lastError?.response?.data?.error || lastError?.message || '请确认后端已重启并支持 ensure 接口'
+      ElMessage.warning(`项目列表加载失败：${detail}`)
+    }
   } catch (error) {
+    projects.value = []
     console.error('获取项目列表失败:', error)
+    ElMessage.error('加载项目列表失败')
   }
 }
 
@@ -584,7 +614,7 @@ const loadPages = async () => {
   if (!selectedProject.value) return
 
   try {
-    const response = await getElementGroups({ project: selectedProject.value })
+    const response = await getElementGroups(getProjectQueryParams())
     pages.value = response.data?.results || response.data || []
   } catch (error) {
     console.error('获取页面失败:', error)
@@ -596,7 +626,7 @@ const loadPageTree = async () => {
   if (!selectedProject.value) return
 
   try {
-    const response = await getElementGroupTree({ project: selectedProject.value })
+    const response = await getElementGroupTree(getProjectQueryParams())
     // 构建完整的树形结构
     const buildTree = (groups) => {
       return groups.map(group => ({
@@ -621,10 +651,11 @@ const loadElementTree = async () => {
   }
 
   try {
+    const query = getProjectQueryParams()
     // 并行加载页面树和元素
     const [pageTreeResponse, elementsResponse] = await Promise.all([
-      getElementGroupTree({ project: selectedProject.value }),
-      getElementTree({ project: selectedProject.value })
+      getElementGroupTree(query),
+      getElementTree(query)
     ])
 
     // 构建完整的树形结构
@@ -783,7 +814,27 @@ const onProjectChange = async () => {
 }
 
 // 创建空元素
-const createEmptyElement = () => {
+const openCreatePageDialog = () => {
+  writeProjectOverride.value = null
+  if (isAllProjectsSelected()) {
+    ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+    return
+  }
+  showCreatePageDialog.value = true
+}
+
+const cancelCreatePage = () => {
+  showCreatePageDialog.value = false
+  writeProjectOverride.value = null
+}
+
+const createEmptyElement = (preferredProjectId = null) => {
+  const projectId = preferredProjectId || resolveWriteProjectId()
+  if (!projectId) {
+    ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+    return
+  }
+
   selectedElement.value = {
     name: '',
     element_type: 'BUTTON',
@@ -793,7 +844,8 @@ const createEmptyElement = () => {
     locator_value: '',
     wait_timeout: 5,
     force_action: false,  // 强制操作选项，默认禁用
-    description: ''
+    description: '',
+    project_id: projectId
   }
 }
 
@@ -831,6 +883,9 @@ const validateElementForm = async () => {
 
 // 创建页面
 const createPage = async () => {
+  const projectId = ensureWriteProjectSelected()
+  if (!projectId) return
+
   const validate = await pageFormRef.value.validate()
   if (!validate) return
 
@@ -839,7 +894,7 @@ const createPage = async () => {
     const pageData = {
       name: pageForm.name,
       description: pageForm.description,
-      project: selectedProject.value
+      project: projectId
     }
 
     // 只有当父页面ID存在且不为空时才添加parent_group字段
@@ -851,6 +906,7 @@ const createPage = async () => {
 
     ElMessage.success(t('uiAutomation.element.messages.pageCreateSuccess'))
     showCreatePageDialog.value = false
+    writeProjectOverride.value = null
 
     // 重置表单
     Object.assign(pageForm, {
@@ -873,8 +929,17 @@ const createPage = async () => {
   }
 }
 
-// 节点点击
-const onNodeClick = async (data) => {
+// 节点点击：页面行展开/收起，元素行打开详情
+const onNodeClick = async (data, node) => {
+  if (data.type === 'page') {
+    if (node.expanded) {
+      node.collapse()
+    } else {
+      node.expand()
+    }
+    return
+  }
+
   if (data.type === 'element') {
     try {
       const response = await getElementDetail(data.id)
@@ -1017,7 +1082,7 @@ const onNodeDrop = async (draggingNode, dropNode, dropType) => {
     await updateElement(dragData.id, {
       group_id: targetGroupId,
       page: targetPageName,
-      project_id: selectedProject.value
+      project_id: resolveWriteProjectId(dragData) || dragData.project_id
     })
     ElMessage.success(t('uiAutomation.element.messages.moveSuccess'))
 
@@ -1067,6 +1132,11 @@ const copyElementNode = async (data) => {
     // 获取完整的元素详情
     const response = await getElementDetail(data.id)
     const src = response.data
+    const projectId = resolveWriteProjectId(src) || resolveWriteProjectId(data) || data.project_id || src.project_id
+    if (!projectId) {
+      ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+      return
+    }
     // 优先使用树节点上的 group_id 和 page（列表接口返回的字段），确保所属页面被复制
     const groupId = data.group_id || src.group_id || null
     const pageName = data.page || src.page || ''
@@ -1081,7 +1151,7 @@ const copyElementNode = async (data) => {
       wait_timeout: src.wait_timeout,
       force_action: src.force_action,
       description: src.description || '',
-      project_id: selectedProject.value
+      project_id: projectId
     }
     // 复制所属页面（分组关联）
     if (groupId) {
@@ -1155,6 +1225,11 @@ const saveElement = async () => {
     console.log('当前选中的元素:', selectedElement.value)
 
     if (selectedElement.value.id) {
+      const projectId = resolveWriteProjectId(selectedElement.value)
+      if (!projectId) {
+        ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+        return
+      }
       // 更新元素 - 构建正确的API数据格式
       const elementUpdateData = {
         name: selectedElement.value.name,
@@ -1166,7 +1241,7 @@ const saveElement = async () => {
         locator_value: selectedElement.value.locator_value,
         wait_timeout: selectedElement.value.wait_timeout,
         force_action: selectedElement.value.force_action,
-        project_id: selectedProject.value
+        project_id: projectId
       }
 
       // 如果元素有分组（页面），确保传递正确的 group_id
@@ -1217,10 +1292,15 @@ const saveElement = async () => {
       ElMessage.success(t('uiAutomation.element.messages.saveSuccess'))
     } else {
       // 创建元素
+      const projectId = resolveWriteProjectId(selectedElement.value)
+      if (!projectId) {
+        ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+        return
+      }
       // 确保传递正确的字段名 project_id 而不是 project
       const elementData = {
         ...selectedElement.value,
-        project_id: selectedProject.value
+        project_id: projectId
       }
 
       // 如果元素有分组（页面），确保传递 group_id
@@ -1351,20 +1431,28 @@ const cancelEdit = () => {
 const addContextElement = () => {
   console.log('Add context element clicked')
   showContextMenu.value = false
-  createEmptyElement()
+
+  const pageNode = rightClickedNode.value?.type === 'page' ? rightClickedNode.value : null
+  const preferredProjectId = pageNode?.project_id
+    || pageNode?.project?.id
+    || null
+  createEmptyElement(preferredProjectId)
 
   // 如果右键点击的是页面节点，设置元素的页面
-  if (rightClickedNode.value && rightClickedNode.value.type === 'page') {
+  if (pageNode) {
     // 特殊处理：如果是"未关联页面"节点，不设置page和group_id
-    if (rightClickedNode.value.id === 'unassigned') {
+    if (pageNode.id === 'unassigned') {
       console.log('在未关联页面节点下添加元素，不设置page和group_id')
       return
     }
 
     if (selectedElement.value) {
-      selectedElement.value.page = rightClickedNode.value.name
+      selectedElement.value.page = pageNode.name
       // 同时设置group_id，确保元素能正确关联到页面
-      selectedElement.value.group_id = rightClickedNode.value.id
+      selectedElement.value.group_id = pageNode.id
+      if (preferredProjectId) {
+        selectedElement.value.project_id = preferredProjectId
+      }
     }
   }
 }
@@ -1378,6 +1466,17 @@ const addSubPage = () => {
   if (rightClickedNode.value && rightClickedNode.value.id === 'unassigned') {
     ElMessage.warning('未关联页面节点下不能创建子页面')
     return
+  }
+
+  if (isAllProjectsSelected()) {
+    const pageProjectId = rightClickedNode.value?.project_id || rightClickedNode.value?.project?.id
+    if (!pageProjectId) {
+      ElMessage.warning(t('uiAutomation.element.messages.selectProject'))
+      return
+    }
+    writeProjectOverride.value = pageProjectId
+  } else {
+    writeProjectOverride.value = null
   }
 
   showCreatePageDialog.value = true
@@ -1522,7 +1621,10 @@ const updatePage = async () => {
     const pageData = {
       name: editPageForm.name,
       description: editPageForm.description,
-      project: selectedProject.value
+      project: resolveWriteProjectId(rightClickedNode.value)
+        || rightClickedNode.value?.project_id
+        || rightClickedNode.value?.project?.id
+        || selectedProject.value
     }
 
     // 只有当父页面ID存在且不为空时才添加parent_group字段
@@ -1556,6 +1658,7 @@ const updatePage = async () => {
   height: 100vh;
   display: flex;
   flex-direction: column;
+  background: #f5f7fa;
 }
 
 .element-layout {
@@ -1569,7 +1672,7 @@ const updatePage = async () => {
   border-right: 1px solid #e4e7ed;
   display: flex;
   flex-direction: column;
-  background: #f5f7fa;
+  background: #ffffff;
 }
 
 .sidebar-header {
@@ -1651,6 +1754,7 @@ const updatePage = async () => {
   flex: 1;
   overflow: auto;
   padding: 20px;
+  background: #f8f9fa;
 }
 
 .empty-state {
@@ -1658,6 +1762,7 @@ const updatePage = async () => {
   align-items: center;
   justify-content: center;
   height: 100%;
+  background: #fafafa;
 }
 
 .element-header {
@@ -1680,6 +1785,16 @@ const updatePage = async () => {
   font-size: 12px;
   color: #909399;
   margin-top: 5px;
+}
+
+.force-action-row {
+  display: flex;
+  align-items: center;
+}
+
+.force-action-tip {
+  margin-top: 0;
+  margin-left: 2ch;
 }
 
 /* 右键菜单样式 */
