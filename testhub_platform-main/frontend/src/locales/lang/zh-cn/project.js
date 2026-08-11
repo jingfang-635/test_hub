@@ -67,6 +67,7 @@ export default {
     updateFailed: '项目更新失败',
     createFailed: '项目创建失败',
     deleteConfirm: '确定要删除这个项目吗？',
+    deleteConfirmWithVersions: '确定删除项目「{name}」及其关联版本吗？此操作不可恢复。',
     deleteSuccess: '项目删除成功',
     deleteFailed: '项目删除失败',
 

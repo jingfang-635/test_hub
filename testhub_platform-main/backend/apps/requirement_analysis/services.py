@@ -36,11 +36,39 @@ def _check_pdf_available():
 
 
 class DocumentProcessor:
-    """文档处理服务"""
-    
+    """文档处理服务（优先通过本地 Tika Server 解析）"""
+
+    TIKA_SUPPORTED_TYPES = ('pdf', 'docx', 'doc', 'pptx', 'xlsx', 'html', 'htm')
+
+    @classmethod
+    def extract_text_via_tika(cls, file_path: str) -> str:
+        """通过 Apache Tika Server 提取文本"""
+        import requests
+        from .models import KnowledgeBaseLLMConfig
+
+        tika_url = KnowledgeBaseLLMConfig.get_tika_server_url()
+        endpoint = f'{tika_url}/tika'
+
+        with open(file_path, 'rb') as file:
+            data = file.read()
+
+        response = requests.put(
+            endpoint,
+            data=data,
+            headers={'Accept': 'text/plain; charset=utf-8'},
+            timeout=120,
+        )
+        response.raise_for_status()
+        # Tika 可能返回 latin-1，优先按 utf-8 解码
+        if response.encoding is None or response.encoding.lower() in ('iso-8859-1', 'latin-1'):
+            text = response.content.decode('utf-8', errors='ignore')
+        else:
+            text = response.text
+        return (text or '').strip()
+
     @staticmethod
     def extract_text_from_pdf(file_path: str) -> str:
-        """从PDF文件提取文本"""
+        """从PDF文件提取文本（本地回退）"""
         _check_pdf_available()
         try:
             text = ""
@@ -55,7 +83,7 @@ class DocumentProcessor:
     
     @staticmethod
     def extract_text_from_docx(file_path: str) -> str:
-        """从Word文档提取文本"""
+        """从Word文档提取文本（本地回退）"""
         try:
             doc = docx.Document(file_path)
             text = ""
@@ -82,18 +110,40 @@ class DocumentProcessor:
         except Exception as e:
             logger.error(f"文本文件读取失败: {e}")
             return f"文本文件读取失败: {str(e)}"
+
+    @classmethod
+    def _extract_text_local(cls, file_path: str, document_type: str) -> str:
+        """本地解析回退"""
+        if document_type == 'pdf':
+            return cls.extract_text_from_pdf(file_path)
+        if document_type == 'docx':
+            return cls.extract_text_from_docx(file_path)
+        if document_type in ('txt', 'md'):
+            return cls.extract_text_from_txt(file_path)
+        return "不支持的文档类型"
     
     @classmethod
     def extract_text_by_type(cls, file_path: str, document_type: str) -> str:
-        """根据文件路径与文档类型提取文本"""
-        if document_type == 'pdf':
-            return cls.extract_text_from_pdf(file_path)
-        elif document_type == 'docx':
-            return cls.extract_text_from_docx(file_path)
-        elif document_type in ('txt', 'md'):
+        """根据文件路径与文档类型提取文本（优先 Tika Server）"""
+        doc_type = (document_type or '').lower()
+
+        # 纯文本直接本地读取，无需走 Tika
+        if doc_type in ('txt', 'md'):
             return cls.extract_text_from_txt(file_path)
-        else:
-            return "不支持的文档类型"
+
+        if doc_type in cls.TIKA_SUPPORTED_TYPES or doc_type in ('pdf', 'docx'):
+            try:
+                text = cls.extract_text_via_tika(file_path)
+                if text:
+                    logger.info(f"Tika 解析成功: type={doc_type}, chars={len(text)}")
+                    return text
+                logger.warning(f"Tika 返回空文本，尝试本地回退: type={doc_type}")
+            except Exception as e:
+                logger.warning(f"Tika 解析失败，尝试本地回退: type={doc_type}, error={e}")
+
+            return cls._extract_text_local(file_path, doc_type)
+
+        return "不支持的文档类型"
 
     @classmethod
     def extract_text(cls, document) -> str:

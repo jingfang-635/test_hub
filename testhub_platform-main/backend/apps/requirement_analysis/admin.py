@@ -96,9 +96,9 @@ class GenerationConfigAdmin(admin.ModelAdmin):
 class KnowledgeBaseLLMConfigAdmin(admin.ModelAdmin):
     list_display = [
         'id', 'embedding_model_name', 'refiner_model_name',
-        'vision_provider', 'vision_model_name', 'updated_at'
+        'tika_server_url', 'updated_at'
     ]
-    list_filter = ['vision_provider', 'updated_at']
+    list_filter = ['updated_at']
     readonly_fields = ['created_at', 'updated_at']
 
 

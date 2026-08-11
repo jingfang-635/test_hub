@@ -67,6 +67,7 @@ export default {
     updateFailed: 'Failed to update project',
     createFailed: 'Failed to create project',
     deleteConfirm: 'Are you sure to delete this project?',
+    deleteConfirmWithVersions: 'Delete project "{name}" and its related versions? This cannot be undone.',
     deleteSuccess: 'Project deleted successfully',
     deleteFailed: 'Failed to delete project',
 

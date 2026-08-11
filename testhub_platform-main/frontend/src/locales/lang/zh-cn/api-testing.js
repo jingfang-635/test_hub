@@ -398,6 +398,8 @@ export default {
     assertions: '断言',
     editAssertions: '编辑断言',
     configure: '配置',
+    moveUp: '上移',
+    moveDown: '下移',
     requestConfig: '请求配置',
     skipCondition: '跳过条件',
     skipConditionPlaceholder: '请输入跳过条件表达式，例如：variables.get("skip_flag") == True',

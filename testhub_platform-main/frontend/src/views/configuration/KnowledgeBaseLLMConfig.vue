@@ -126,58 +126,21 @@
 
           <el-divider />
 
-          <!-- Vision -->
+          <!-- Tika Server -->
           <div class="form-section">
             <h3 class="section-title">
-              {{ $t('configuration.knowledgeLLM.visionTitle') }}
+              {{ $t('configuration.knowledgeLLM.tikaTitle') }}
             </h3>
-            <el-alert
-              type="info"
-              :closable="false"
-              show-icon
-              class="section-alert"
-              :title="$t('configuration.knowledgeLLM.visionTip')"
-            />
-            <el-form-item :label="$t('configuration.knowledgeLLM.provider')" prop="vision_provider">
-              <el-radio-group v-model="form.vision_provider" @change="onVisionProviderChange">
-                <el-radio value="zhipu">
-                  {{ $t('configuration.knowledgeLLM.providers.zhipu') }}
-                </el-radio>
-                <el-radio value="openai_compatible">
-                  {{ $t('configuration.knowledgeLLM.providers.openai_compatible') }}
-                </el-radio>
-              </el-radio-group>
-            </el-form-item>
-            <el-form-item label="API Key" prop="vision_api_key">
-              <el-input
-                v-model="form.vision_api_key"
-                type="password"
-                show-password
-                clearable
-                autocomplete="off"
-                :placeholder="apiKeyPlaceholder"
-              />
-            </el-form-item>
+            <p class="section-tip">{{ $t('configuration.knowledgeLLM.tikaTip') }}</p>
             <el-form-item
-              v-if="form.vision_provider === 'openai_compatible'"
-              :label="$t('configuration.knowledgeLLM.baseUrl')"
-              prop="vision_base_url"
+              :label="$t('configuration.knowledgeLLM.tikaServerUrl')"
+              prop="tika_server_url"
             >
               <el-input
-                v-model="form.vision_base_url"
+                v-model="form.tika_server_url"
                 clearable
-                :placeholder="$t('configuration.knowledgeLLM.visionBaseUrlPlaceholder')"
+                :placeholder="$t('configuration.knowledgeLLM.tikaServerUrlPlaceholder')"
               />
-            </el-form-item>
-            <el-form-item :label="$t('configuration.knowledgeLLM.modelName')" prop="vision_model_name">
-              <el-input
-                v-model="form.vision_model_name"
-                clearable
-                :placeholder="$t('configuration.knowledgeLLM.visionModelPlaceholder')"
-              />
-              <div class="form-tip">
-                {{ $t('configuration.knowledgeLLM.visionModelHint') }}
-              </div>
             </el-form-item>
           </div>
 
@@ -203,8 +166,8 @@
           <el-descriptions-item :label="$t('configuration.knowledgeLLM.refinerApiKey')">
             {{ currentConfig.refiner_api_key_masked || '—' }}
           </el-descriptions-item>
-          <el-descriptions-item :label="$t('configuration.knowledgeLLM.visionApiKey')">
-            {{ currentConfig.vision_api_key_masked || '—' }}
+          <el-descriptions-item :label="$t('configuration.knowledgeLLM.tikaServerUrl')">
+            {{ currentConfig.tika_server_url || '—' }}
           </el-descriptions-item>
           <el-descriptions-item :label="$t('configuration.common.createdAt')">
             {{ formatDate(currentConfig.created_at) }}
@@ -229,7 +192,7 @@ import {
 } from '@/api/requirement-analysis'
 
 const DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-const ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
+const DEFAULT_TIKA_SERVER_URL = 'http://localhost:9987'
 
 const { t, locale } = useI18n()
 
@@ -247,10 +210,7 @@ const form = reactive({
   refiner_model_name: 'qwen-plus',
   refiner_max_tokens: 8192,
   refiner_temperature: 0.3,
-  vision_provider: 'openai_compatible',
-  vision_api_key: '',
-  vision_base_url: ZHIPU_BASE_URL,
-  vision_model_name: 'glm-4.6v'
+  tika_server_url: DEFAULT_TIKA_SERVER_URL
 })
 
 const apiKeyPlaceholder = computed(() => t('configuration.knowledgeLLM.apiKeyPlaceholder'))
@@ -268,23 +228,8 @@ const rules = computed(() => ({
   refiner_model_name: [
     { required: true, message: t('configuration.knowledgeLLM.validation.modelNameRequired'), trigger: 'blur' }
   ],
-  vision_provider: [
-    { required: true, message: t('configuration.knowledgeLLM.validation.providerRequired'), trigger: 'change' }
-  ],
-  vision_base_url: [
-    {
-      validator: (_rule, value, callback) => {
-        if (form.vision_provider === 'openai_compatible' && !value) {
-          callback(new Error(t('configuration.knowledgeLLM.validation.baseUrlRequired')))
-        } else {
-          callback()
-        }
-      },
-      trigger: 'blur'
-    }
-  ],
-  vision_model_name: [
-    { required: true, message: t('configuration.knowledgeLLM.validation.modelNameRequired'), trigger: 'blur' }
+  tika_server_url: [
+    { required: true, message: t('configuration.knowledgeLLM.validation.tikaUrlRequired'), trigger: 'blur' }
   ]
 }))
 
@@ -318,17 +263,14 @@ const assignForm = (data = {}) => {
   form.refiner_model_name = data.refiner_model_name || 'qwen-plus'
   form.refiner_max_tokens = data.refiner_max_tokens ?? 8192
   form.refiner_temperature = data.refiner_temperature ?? 0.3
-  form.vision_provider = data.vision_provider || 'openai_compatible'
-  form.vision_api_key = data.vision_api_key || ''
-  form.vision_base_url = data.vision_base_url || ZHIPU_BASE_URL
-  form.vision_model_name = data.vision_model_name || 'glm-4.6v'
+  form.tika_server_url = data.tika_server_url || DEFAULT_TIKA_SERVER_URL
 }
 
 const resetFormToDefault = () => {
   assignForm({})
   form.embedding_api_key = ''
   form.refiner_api_key = ''
-  form.vision_api_key = ''
+  form.tika_server_url = DEFAULT_TIKA_SERVER_URL
 }
 
 const loadConfig = async () => {
@@ -350,15 +292,6 @@ const loadConfig = async () => {
   }
 }
 
-const onVisionProviderChange = (provider) => {
-  if (provider === 'zhipu') {
-    if (!form.vision_model_name) form.vision_model_name = 'glm-4.6v'
-  } else if (provider === 'openai_compatible') {
-    if (!form.vision_base_url) form.vision_base_url = ZHIPU_BASE_URL
-    if (!form.vision_model_name) form.vision_model_name = 'glm-4.6v'
-  }
-}
-
 const buildPayload = () => {
   const payload = {
     embedding_base_url: (form.embedding_base_url || '').trim(),
@@ -367,9 +300,7 @@ const buildPayload = () => {
     refiner_model_name: (form.refiner_model_name || '').trim(),
     refiner_max_tokens: Number(form.refiner_max_tokens) || 8192,
     refiner_temperature: Number(form.refiner_temperature) || 0,
-    vision_provider: form.vision_provider,
-    vision_base_url: (form.vision_base_url || '').trim() || ZHIPU_BASE_URL,
-    vision_model_name: (form.vision_model_name || '').trim()
+    tika_server_url: (form.tika_server_url || '').trim().replace(/\/$/, '') || DEFAULT_TIKA_SERVER_URL
   }
 
   // 有值则提交；留空则后端保留原 Key
@@ -378,9 +309,6 @@ const buildPayload = () => {
   }
   if (form.refiner_api_key?.trim()) {
     payload.refiner_api_key = form.refiner_api_key.trim()
-  }
-  if (form.vision_api_key?.trim()) {
-    payload.vision_api_key = form.vision_api_key.trim()
   }
 
   return payload
@@ -403,7 +331,6 @@ const saveConfig = async () => {
     const missingKeys = []
     if (!payload.embedding_api_key) missingKeys.push('Embedding')
     if (!payload.refiner_api_key) missingKeys.push('Refiner')
-    if (!payload.vision_api_key) missingKeys.push('Vision')
     if (missingKeys.length) {
       ElMessage.error(t('configuration.knowledgeLLM.messages.apiKeyRequired', {
         keys: missingKeys.join(' / ')

@@ -328,12 +328,7 @@ class GenerationConfig(models.Model):
 class KnowledgeBaseLLMConfig(models.Model):
     """知识库大模型配置（向量化 / 内容整理 / 文档解析）"""
     DASHSCOPE_BASE_URL = 'https://dashscope.aliyuncs.com/compatible-mode/v1'
-    ZHIPU_BASE_URL = 'https://open.bigmodel.cn/api/paas/v4'
-
-    VISION_PROVIDER_CHOICES = [
-        ('zhipu', '智谱（文件解析API）'),
-        ('openai_compatible', 'OpenAI兼容（视觉模型）'),
-    ]
+    DEFAULT_TIKA_SERVER_URL = 'http://localhost:9987'
 
     # 向量化 Embedding（暂仅支持阿里百炼）
     embedding_api_key = models.CharField(max_length=500, verbose_name='Embedding API Key', blank=True, default='')
@@ -359,19 +354,11 @@ class KnowledgeBaseLLMConfig(models.Model):
     refiner_max_tokens = models.IntegerField(default=8192, verbose_name='Refiner 最大Token数')
     refiner_temperature = models.FloatField(default=0.3, verbose_name='Refiner 温度')
 
-    # 文档解析 Vision（支持任意 OpenAI 兼容视觉模型 / 智谱文件解析）
-    vision_provider = models.CharField(
-        max_length=30, choices=VISION_PROVIDER_CHOICES,
-        default='openai_compatible', verbose_name='Vision 服务商'
-    )
-    vision_api_key = models.CharField(max_length=500, verbose_name='Vision API Key', blank=True, default='')
-    vision_base_url = models.URLField(
-        max_length=500, verbose_name='Vision Base URL',
-        blank=True, default=ZHIPU_BASE_URL
-    )
-    vision_model_name = models.CharField(
-        max_length=100, verbose_name='Vision 模型名称',
-        blank=True, default='glm-4.6v'
+    # 文档解析服务（Apache Tika Server）
+    tika_server_url = models.URLField(
+        max_length=500, verbose_name='Tika 服务地址',
+        default=DEFAULT_TIKA_SERVER_URL,
+        help_text='用于解析 PDF、Word 等文档的 Tika Server 地址'
     )
 
     created_by = models.ForeignKey(
@@ -394,6 +381,13 @@ class KnowledgeBaseLLMConfig(models.Model):
     def get_active_config(cls):
         """获取当前配置（单例：取最新一条）"""
         return cls.objects.order_by('-updated_at').first()
+
+    @classmethod
+    def get_tika_server_url(cls) -> str:
+        """获取 Tika Server 地址，未配置时返回默认值"""
+        config = cls.get_active_config()
+        url = (getattr(config, 'tika_server_url', None) or cls.DEFAULT_TIKA_SERVER_URL).strip()
+        return url.rstrip('/')
 
     @staticmethod
     def mask_api_key(api_key: str) -> str:

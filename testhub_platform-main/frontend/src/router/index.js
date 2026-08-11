@@ -431,6 +431,11 @@ const routes = [
             component: () => import('@/views/configuration/AIIntelligentModeConfig.vue')
           },
           {
+            path: 'skills',
+            name: 'ConfigSkills',
+            component: () => import('@/views/configuration/SkillsConfig.vue')
+          },
+          {
             path: 'scheduled-task',
             name: 'ConfigScheduledTask',
             component: () => import('@/views/ui-automation/notification/NotificationConfigs.vue')
@@ -441,25 +446,45 @@ const routes = [
             component: () => import('@/views/configuration/DifyConfig.vue')
           },
           {
+            path: 'mcp-server',
+            name: 'ConfigMCPServer',
+            component: () => import('@/views/configuration/MCPServerConfig.vue')
+          },
+          {
             path: 'performance-stats',
             name: 'ConfigPerformanceStats',
             component: () => import('@/views/configuration/AdminEmbed.vue'),
             props: { path: '/admin/core/performancestatistics/' },
-            meta: { title: '性能统计' }
+            meta: {
+              title: '性能统计',
+              embedTitle: '性能统计',
+              adminPath: '/admin/core/performancestatistics/',
+              refreshLabel: '刷新列表'
+            }
           },
           {
             path: 'request-performance-log',
             name: 'ConfigRequestPerformanceLog',
             component: () => import('@/views/configuration/AdminEmbed.vue'),
             props: { path: '/admin/core/requestperformancelog/' },
-            meta: { title: '请求性能日志' }
+            meta: {
+              title: '请求性能日志',
+              embedTitle: '请求性能日志',
+              adminPath: '/admin/core/requestperformancelog/',
+              refreshLabel: '刷新列表'
+            }
           },
           {
             path: 'notification-template',
             name: 'ConfigNotificationTemplate',
             component: () => import('@/views/configuration/AdminEmbed.vue'),
             props: { path: '/admin/core/notificationtemplate/' },
-            meta: { title: '通知模板' }
+            meta: {
+              title: '通知模板列表',
+              embedTitle: '通知模板列表',
+              adminPath: '/admin/core/notificationtemplate/',
+              refreshLabel: '刷新列表'
+            }
           }
         ]
       }

@@ -237,10 +237,6 @@
                 <el-icon><Setting /></el-icon>
                 <span>{{ $t('menu.generationConfig') }}</span>
               </el-menu-item>
-              <el-menu-item index="/configuration/knowledge-base">
-                <el-icon><Collection /></el-icon>
-                <span>{{ $t('menu.knowledgeBaseManage') }}</span>
-              </el-menu-item>
             </el-sub-menu>
             <el-menu-item index="/configuration/knowledge-llm">
               <el-icon><Connection /></el-icon>
@@ -262,6 +258,10 @@
               <el-icon><MagicStick /></el-icon>
               <span>{{ $t('menu.aiModeConfig') }}</span>
             </el-menu-item>
+            <el-menu-item index="/configuration/skills">
+              <el-icon><Collection /></el-icon>
+              <span>{{ $t('menu.skillsConfig') }}</span>
+            </el-menu-item>
             <el-menu-item index="/configuration/scheduled-task">
               <el-icon><Timer /></el-icon>
               <span>{{ $t('menu.scheduledTaskConfig') }}</span>
@@ -269,6 +269,10 @@
             <el-menu-item index="/configuration/dify">
               <el-icon><ChatDotRound /></el-icon>
               <span>{{ $t('menu.difyConfig') }}</span>
+            </el-menu-item>
+            <el-menu-item index="/configuration/mcp-server">
+              <el-icon><Connection /></el-icon>
+              <span>{{ $t('menu.mcpServerConfig') }}</span>
             </el-menu-item>
             <el-sub-menu index="core-module">
               <template #title>
@@ -496,8 +500,10 @@ const breadcrumbTitle = computed(() => {
     '/configuration/knowledge-llm': t('menu.knowledgeBaseConfig'),
     '/configuration/ui-env': t('menu.uiEnvConfig'),
     '/configuration/ai-mode': t('menu.aiModeConfig'),
+    '/configuration/skills': t('menu.skillsConfig'),
     '/configuration/scheduled-task': t('menu.scheduledTaskConfig'),
     '/configuration/dify': t('menu.difyConfig'),
+    '/configuration/mcp-server': t('menu.mcpServerConfig'),
     
     '/profile': t('nav.profile')
   }

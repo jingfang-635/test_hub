@@ -19,6 +19,10 @@
                   <el-icon><Edit /></el-icon>
                   {{ $t('common.edit') }}
                 </el-button>
+                <el-button type="danger" :loading="deleting" @click="deleteProject">
+                  <el-icon><Delete /></el-icon>
+                  {{ $t('common.delete') }}
+                </el-button>
               </div>
               <el-descriptions :column="2" border>
                 <el-descriptions-item :label="$t('project.projectName')" :span="2">{{ project.name }}</el-descriptions-item>
@@ -71,12 +75,11 @@
                     </div>
                     <el-button
                       v-if="getProjectTypeRoute(type)"
+                      class="enter-module-btn"
                       type="primary"
-                      link
                       @click="goToModule(type)"
                     >
                       {{ $t('project.enterModule') }}
-                      <el-icon><ArrowRight /></el-icon>
                     </el-button>
                   </div>
                 </div>
@@ -192,7 +195,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Edit, ArrowLeft, ArrowRight, Setting, Folder, MagicStick,
+  Edit, Delete, ArrowLeft, Setting, Folder, MagicStick,
   DocumentCopy, Monitor, Iphone
 } from '@element-plus/icons-vue'
 import api from '@/utils/api'
@@ -205,6 +208,7 @@ const project = ref(null)
 const activeTab = ref('info')
 const isEditing = ref(false)
 const saving = ref(false)
+const deleting = ref(false)
 const editFormRef = ref(null)
 const envDialogVisible = ref(false)
 const envSaving = ref(false)
@@ -368,6 +372,42 @@ const cancelEdit = () => {
   isEditing.value = false
 }
 
+const getProjectsListPath = () => {
+  const path = route.path || ''
+  if (path.startsWith('/configuration')) return '/configuration/projects'
+  if (path.startsWith('/api-testing')) return '/api-testing/projects'
+  if (path.startsWith('/ui-automation')) return '/ui-automation/projects'
+  if (path.startsWith('/app-automation')) return '/app-automation/projects'
+  if (path.startsWith('/ai-generation')) return '/ai-generation/projects'
+  if (path.startsWith('/ai-intelligent')) return '/ai-intelligent/projects'
+  return '/configuration/projects'
+}
+
+const deleteProject = async () => {
+  if (!project.value || deleting.value) return
+  try {
+    await ElMessageBox.confirm(
+      t('project.deleteConfirmWithVersions', { name: project.value.name }),
+      t('common.warning'),
+      {
+        confirmButtonText: t('common.confirm'),
+        cancelButtonText: t('common.cancel'),
+        type: 'warning'
+      }
+    )
+    deleting.value = true
+    await api.delete(`/projects/${route.params.id}/`)
+    ElMessage.success(t('project.deleteSuccess'))
+    router.push(getProjectsListPath())
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error(error.response?.data?.detail || error.response?.data?.error || t('project.deleteFailed'))
+    }
+  } finally {
+    deleting.value = false
+  }
+}
+
 const saveProject = async () => {
   if (!editFormRef.value) return
   try {
@@ -473,6 +513,7 @@ onMounted(() => {
   margin-bottom: 16px;
   display: flex;
   justify-content: flex-end;
+  gap: 8px;
 }
 
 .module-tags {
@@ -549,6 +590,16 @@ onMounted(() => {
   font-size: 13px;
   color: #909399;
   line-height: 1.4;
+}
+
+.enter-module-btn {
+  flex-shrink: 0;
+  min-width: 78px;
+  height: 28px;
+  padding: 0 12px;
+  font-size: 12px;
+  font-weight: 500;
+  border-radius: 6px;
 }
 
 .edit-project-form {

@@ -795,6 +795,10 @@ urlpatterns = [
 ]
 
 if settings.DEBUG:
+    # Uvicorn/ASGI 不会像 runserver 那样自动托管 STATIC_URL；
+    # 不挂载会导致 Admin/SimpleUI 的 /static/admin/... CSS/JS 404，列表页看起来“没样式”。
+    from django.contrib.staticfiles.urls import staticfiles_urlpatterns
+    urlpatterns += staticfiles_urlpatterns()
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
     urlpatterns += static(settings.STATIC_FILES_URL, document_root=settings.STATIC_FILES_ROOT)
 

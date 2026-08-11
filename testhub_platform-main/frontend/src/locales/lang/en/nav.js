@@ -59,8 +59,10 @@ export default {
     knowledgeBaseConfig: 'Knowledge Base Config',
     uiEnvConfig: 'UI Environment Configuration',
     aiModeConfig: 'AI Mode Configuration',
+    skillsConfig: 'Skills Configuration',
     scheduledTaskConfig: 'Scheduled Task Configuration',
     difyConfig: 'Dify Configuration',
+    mcpServerConfig: 'MCP Server Configuration',
     // Core Module
     coreModule: 'Core Module',
     performanceStats: 'Performance Statistics',

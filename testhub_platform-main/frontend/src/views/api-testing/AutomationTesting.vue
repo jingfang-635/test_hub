@@ -145,9 +145,37 @@
                   {{ scope.row.assertions?.length || 0 }}
                 </template>
               </el-table-column>
-              <el-table-column :label="$t('apiTesting.common.operation')" width="140" fixed="right">
+              <el-table-column :label="$t('apiTesting.common.operation')" width="220" align="center" fixed="right">
                 <template #default="scope">
-                  <el-button link type="primary" @click="openRequestConfig(scope.row)" size="small">
+                  <el-button
+                    class="request-op-btn"
+                    link
+                    type="primary"
+                    size="small"
+                    :disabled="scope.$index === 0 || movingRequestOrder"
+                    :title="$t('apiTesting.automation.moveUp')"
+                    @click="moveRequest(scope.$index, 'up')"
+                  >
+                    <el-icon><Top /></el-icon>
+                  </el-button>
+                  <el-button
+                    class="request-op-btn"
+                    link
+                    type="primary"
+                    size="small"
+                    :disabled="scope.$index === selectedSuite.suite_requests.length - 1 || movingRequestOrder"
+                    :title="$t('apiTesting.automation.moveDown')"
+                    @click="moveRequest(scope.$index, 'down')"
+                  >
+                    <el-icon><Bottom /></el-icon>
+                  </el-button>
+                  <el-button
+                    class="request-op-btn"
+                    link
+                    type="primary"
+                    @click="openRequestConfig(scope.row)"
+                    size="small"
+                  >
                     {{ $t('apiTesting.automation.configure') }}
                   </el-button>
                   <el-button link type="danger" @click="removeRequest(scope.row)" size="small">
@@ -630,7 +658,7 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import {
   Plus, Refresh, MoreFilled, VideoPlay, Edit,
-  Folder, Document, Delete, ArrowRight
+  Folder, Document, Delete, ArrowRight, Top, Bottom
 } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
@@ -659,6 +687,7 @@ const showRequestConfigDialog = ref(false)
 const editingSuite = ref(null)
 const submittingSuite = ref(false)
 const addingRequests = ref(false)
+const movingRequestOrder = ref(false)
 const savingRequestConfig = ref(false)
 const syncingExtractors = ref(false)
 const syncingAssertions = ref(false)
@@ -1344,6 +1373,51 @@ const removeRequest = async (suiteRequest) => {
   }
 }
 
+const moveRequest = async (index, direction) => {
+  if (!selectedSuite.value?.suite_requests || movingRequestOrder.value) return
+
+  const requests = selectedSuite.value.suite_requests
+  const targetIndex = direction === 'up' ? index - 1 : index + 1
+  if (targetIndex < 0 || targetIndex >= requests.length) return
+
+  const previousOrders = requests.map(item => ({ id: item.id, order: item.order }))
+  const reordered = [...requests]
+  const temp = reordered[index]
+  reordered[index] = reordered[targetIndex]
+  reordered[targetIndex] = temp
+  reordered.forEach((item, i) => {
+    item.order = i
+  })
+  selectedSuite.value.suite_requests = reordered
+
+  movingRequestOrder.value = true
+  try {
+    await api.post(`/api-testing/test-suites/${selectedSuite.value.id}/update-request-order/`, {
+      request_orders: reordered.map((item, i) => ({ id: item.id, order: i }))
+    })
+
+    const suiteIndex = testSuites.value.findIndex(suite => suite.id === selectedSuite.value.id)
+    if (suiteIndex !== -1) {
+      testSuites.value[suiteIndex] = {
+        ...testSuites.value[suiteIndex],
+        suite_requests: [...reordered]
+      }
+    }
+  } catch (error) {
+    ElMessage.error(t('apiTesting.messages.error.updateFailed'))
+    // 失败时按原顺序回滚，避免界面与后端不一致
+    const restored = [...reordered]
+    previousOrders.forEach(({ id, order }) => {
+      const item = restored.find(r => r.id === id)
+      if (item) item.order = order
+    })
+    restored.sort((a, b) => a.order - b.order)
+    selectedSuite.value.suite_requests = restored
+  } finally {
+    movingRequestOrder.value = false
+  }
+}
+
 const reloadCurrentSuite = async () => {
   if (!selectedSuite.value) return
 
@@ -1553,6 +1627,13 @@ onMounted(() => {
   margin: 0;
   color: #303133;
   font-size: 16px;
+}
+
+.request-op-btn,
+.request-op-btn:hover,
+.request-op-btn:focus,
+.request-op-btn:active {
+  box-shadow: none !important;
 }
 
 .add-request-content {

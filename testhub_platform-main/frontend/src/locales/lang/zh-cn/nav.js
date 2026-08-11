@@ -59,8 +59,10 @@ export default {
     knowledgeBaseConfig: '知识库配置',
     uiEnvConfig: 'UI环境配置',
     aiModeConfig: 'AI智能模式配置',
+    skillsConfig: 'Skills 技能配置',
     scheduledTaskConfig: '定时任务配置',
     difyConfig: 'AI评测师配置',
+    mcpServerConfig: 'MCP服务器配置',
     // 核心模块
     coreModule: '核心模块',
     performanceStats: '性能统计',

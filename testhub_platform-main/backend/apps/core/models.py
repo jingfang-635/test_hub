@@ -171,3 +171,105 @@ class PerformanceStatistics(models.Model):
 
     def __str__(self):
         return f"{self.date} - {self.total_requests}请求"
+
+
+class Skill(models.Model):
+    """AI Skills 技能配置（SKILL.md + 附属文件）"""
+    name = models.CharField(max_length=100, unique=True, verbose_name='技能名称',
+                            help_text='唯一标识，如 api-testcase-generator')
+    description = models.TextField(blank=True, verbose_name='技能描述')
+    tags = models.JSONField(default=list, blank=True, verbose_name='标签')
+    content = models.TextField(blank=True, verbose_name='SKILL.md 内容')
+    files = models.JSONField(default=dict, blank=True, verbose_name='附属文件',
+                             help_text='相对路径 -> 文件内容，如 references/guide.md')
+    is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
+    is_builtin = models.BooleanField(default=False, verbose_name='是否内置')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name='创建者', related_name='created_skills'
+    )
+
+    class Meta:
+        db_table = 'core_skills'
+        verbose_name = 'Skill 技能'
+        verbose_name_plural = 'Skill 技能'
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['is_enabled']),
+            models.Index(fields=['is_builtin']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def file_folders(self):
+        folders = set()
+        for path in (self.files or {}).keys():
+            parts = str(path).replace('\\', '/').split('/')
+            if len(parts) > 1 and parts[0]:
+                folders.add(parts[0])
+        return sorted(folders)
+
+    @property
+    def file_count(self):
+        # SKILL.md + 附属文件
+        return 1 + len(self.files or {})
+
+
+class MCPServer(models.Model):
+    """MCP（Model Context Protocol）外部服务器配置"""
+
+    TRANSPORT_CHOICES = [
+        ('stdio', 'stdio'),
+        ('sse', 'SSE'),
+        ('http', 'HTTP'),
+    ]
+    STATUS_CHOICES = [
+        ('unknown', '未知'),
+        ('connected', '已连接'),
+        ('disconnected', '未连接'),
+        ('error', '错误'),
+    ]
+
+    name = models.CharField(max_length=100, unique=True, verbose_name='服务器名称')
+    description = models.TextField(blank=True, verbose_name='描述')
+    transport = models.CharField(max_length=20, choices=TRANSPORT_CHOICES, default='stdio', verbose_name='传输方式')
+    command = models.CharField(max_length=255, blank=True, verbose_name='启动命令',
+                               help_text='stdio 模式：可执行文件，如 npx / python')
+    args = models.JSONField(default=list, blank=True, verbose_name='启动参数')
+    env = models.JSONField(default=dict, blank=True, verbose_name='环境变量')
+    url = models.URLField(blank=True, verbose_name='服务器 URL',
+                          help_text='sse / http 模式使用')
+    is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
+    connection_status = models.CharField(
+        max_length=20, choices=STATUS_CHOICES, default='unknown', verbose_name='连接状态'
+    )
+    tools = models.JSONField(default=list, blank=True, verbose_name='已发现工具')
+    last_error = models.TextField(blank=True, verbose_name='最近错误')
+    last_tested_at = models.DateTimeField(null=True, blank=True, verbose_name='最近测试时间')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+    created_by = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name='创建者', related_name='created_mcp_servers'
+    )
+
+    class Meta:
+        db_table = 'core_mcp_servers'
+        verbose_name = 'MCP 服务器'
+        verbose_name_plural = 'MCP 服务器'
+        ordering = ['name']
+        indexes = [
+            models.Index(fields=['is_enabled']),
+            models.Index(fields=['connection_status']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    @property
+    def tools_count(self):
+        return len(self.tools or [])

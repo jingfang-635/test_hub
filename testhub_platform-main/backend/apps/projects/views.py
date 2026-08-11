@@ -46,6 +46,19 @@ class ProjectDetailView(generics.RetrieveUpdateDestroyAPIView):
     serializer_class = ProjectSerializer
     permission_classes = [permissions.IsAuthenticated]
 
+    def perform_destroy(self, instance):
+        """删除项目时同步清理仅属于该项目的关联版本"""
+        from apps.versions.models import Version
+
+        related_versions = list(instance.versions.all())
+        for version in related_versions:
+            # 仅被当前项目关联时删除版本；多项目共享则只解除关联
+            if version.projects.exclude(id=instance.id).exists():
+                version.projects.remove(instance)
+            else:
+                version.delete()
+        instance.delete()
+
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
 def add_project_member(request, project_id):

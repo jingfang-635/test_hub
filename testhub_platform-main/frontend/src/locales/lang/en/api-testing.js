@@ -388,6 +388,8 @@ export default {
     editAssertion: 'Edit Assertion',
     editAssertions: 'Edit Assertions',
     configure: 'Configure',
+    moveUp: 'Move Up',
+    moveDown: 'Move Down',
     requestConfig: 'Request Configuration',
     skipCondition: 'Skip Condition',
     skipConditionPlaceholder: 'Enter skip condition expression, e.g. variables.get("skip_flag") == True',

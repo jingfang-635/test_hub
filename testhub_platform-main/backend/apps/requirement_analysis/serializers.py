@@ -312,10 +312,6 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
     """知识库大模型配置序列化器"""
     embedding_api_key_masked = serializers.SerializerMethodField(read_only=True)
     refiner_api_key_masked = serializers.SerializerMethodField(read_only=True)
-    vision_api_key_masked = serializers.SerializerMethodField(read_only=True)
-    vision_provider_display = serializers.CharField(
-        source='get_vision_provider_display', read_only=True
-    )
 
     class Meta:
         model = KnowledgeBaseLLMConfig
@@ -326,9 +322,7 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
             'refiner_api_key', 'refiner_api_key_masked',
             'refiner_base_url', 'refiner_model_name',
             'refiner_max_tokens', 'refiner_temperature',
-            'vision_provider', 'vision_provider_display',
-            'vision_api_key', 'vision_api_key_masked',
-            'vision_base_url', 'vision_model_name',
+            'tika_server_url',
             'created_at', 'updated_at',
         ]
         read_only_fields = ['created_at', 'updated_at']
@@ -336,7 +330,7 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
             # 配置中心需回显完整 Key，供「显示密码」查看；空值在 update 时保留原值
             'embedding_api_key': {'required': False, 'allow_blank': True},
             'refiner_api_key': {'required': False, 'allow_blank': True},
-            'vision_api_key': {'required': False, 'allow_blank': True},
+            'tika_server_url': {'required': False},
         }
 
     def get_embedding_api_key_masked(self, obj):
@@ -345,12 +339,9 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
     def get_refiner_api_key_masked(self, obj):
         return KnowledgeBaseLLMConfig.mask_api_key(obj.refiner_api_key)
 
-    def get_vision_api_key_masked(self, obj):
-        return KnowledgeBaseLLMConfig.mask_api_key(obj.vision_api_key)
-
     def _normalize_api_keys(self, validated_data, instance=None):
         """忽略空值/掩码值，更新时保留原 Key"""
-        for field in ('embedding_api_key', 'refiner_api_key', 'vision_api_key'):
+        for field in ('embedding_api_key', 'refiner_api_key'):
             if field not in validated_data:
                 continue
             value = validated_data.get(field)
@@ -371,6 +362,8 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
 
     def create(self, validated_data):
         validated_data = self._normalize_api_keys(validated_data)
+        if not validated_data.get('tika_server_url'):
+            validated_data['tika_server_url'] = KnowledgeBaseLLMConfig.DEFAULT_TIKA_SERVER_URL
         request = self.context.get('request')
         if request and getattr(request, 'user', None) and request.user.is_authenticated:
             validated_data['created_by'] = request.user
@@ -378,6 +371,13 @@ class KnowledgeBaseLLMConfigSerializer(serializers.ModelSerializer):
 
     def update(self, instance, validated_data):
         validated_data = self._normalize_api_keys(validated_data, instance=instance)
+        tika_url = validated_data.get('tika_server_url')
+        if isinstance(tika_url, str):
+            tika_url = tika_url.strip()
+            if tika_url:
+                validated_data['tika_server_url'] = tika_url.rstrip('/')
+            else:
+                validated_data.pop('tika_server_url', None)
         return super().update(instance, validated_data)
 
 

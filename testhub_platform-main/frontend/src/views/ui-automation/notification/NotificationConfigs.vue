@@ -484,12 +484,30 @@ export default {
 }
 
 .notification-tabs :deep(.el-tabs__item) {
-  padding: 16px 32px;
+  padding: 16px 24px !important;
   font-size: 15px;
   font-weight: 500;
   color: #6c757d;
   border: none;
   position: relative;
+}
+
+/*
+ * 首个 tab：左侧 padding 并入选中区域（铺满到左边缘），
+ * 文字起点 = tab-content(24px) + el-row gutter/2(10px) = 34px，与「机器人名称」对齐。
+ * 不用 :first-of-type（前面常有 .el-tabs__active-bar）
+ */
+.notification-tabs :deep(.el-tabs__item#tab-feishu),
+.notification-tabs :deep(.el-tabs__nav > .el-tabs__item:nth-child(2)) {
+  padding-left: 34px !important;
+  padding-right: 24px !important;
+}
+
+/* 末个 tab（钉钉）：覆盖 Element Plus 默认 padding-right:0，保证左右选中留白一致 */
+.notification-tabs :deep(.el-tabs__item#tab-dingtalk),
+.notification-tabs :deep(.el-tabs__nav > .el-tabs__item:last-child) {
+  padding-left: 24px !important;
+  padding-right: 24px !important;
 }
 
 .notification-tabs :deep(.el-tabs__item:hover) {
@@ -556,8 +574,20 @@ export default {
   }
 
   .notification-tabs :deep(.el-tabs__item) {
-    padding: 12px 20px;
+    padding: 12px 20px !important;
     font-size: 14px;
+  }
+
+  .notification-tabs :deep(.el-tabs__item#tab-feishu),
+  .notification-tabs :deep(.el-tabs__nav > .el-tabs__item:nth-child(2)) {
+    padding-left: 26px !important;
+    padding-right: 20px !important;
+  }
+
+  .notification-tabs :deep(.el-tabs__item#tab-dingtalk),
+  .notification-tabs :deep(.el-tabs__nav > .el-tabs__item:last-child) {
+    padding-left: 20px !important;
+    padding-right: 20px !important;
   }
 
   .tab-content {

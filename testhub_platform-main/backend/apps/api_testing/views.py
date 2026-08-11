@@ -1026,6 +1026,31 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
             
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=True, methods=['post'], url_path='update-request-order')
+    def update_request_order(self, request, pk=None):
+        """更新测试套件中请求的执行顺序"""
+        test_suite = self.get_object()
+        request_orders = request.data.get('request_orders', [])
+
+        if not isinstance(request_orders, list) or not request_orders:
+            return Response({'error': 'request_orders 不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            with transaction.atomic():
+                for item in request_orders:
+                    suite_request_id = item.get('id')
+                    order = item.get('order')
+                    if suite_request_id is None or order is None:
+                        continue
+                    TestSuiteRequest.objects.filter(
+                        id=suite_request_id,
+                        test_suite=test_suite
+                    ).update(order=order)
+
+            return Response({'message': '顺序更新成功'})
+        except Exception as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
     
     def _replace_variables(self, text, variables):
         """替换文本中的变量"""
