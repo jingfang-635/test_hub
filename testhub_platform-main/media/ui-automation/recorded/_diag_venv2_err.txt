@@ -1,0 +1,12 @@
+node:internal/process/promises:394
+    triggerUncaughtException(err, true /* fromPromise */);
+    ^
+
+[TargetClosedError2: Target page, context or browser has been closed
+Call log:
+  - navigating to "https://example.com/", waiting until "load"
+] {
+  log: [ '  - navigating to "https://example.com/", waiting until "load"' ]
+}
+
+Node.js v24.17.0

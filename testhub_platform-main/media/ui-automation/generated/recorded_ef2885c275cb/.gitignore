@@ -1,0 +1,13 @@
+.env
+.venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+test-results/
+playwright-report/
+allure-results/
+allure-report/
+reports/
+*.egg-info/
+.DS_Store
+tests/fixtures/auth.json
