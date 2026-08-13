@@ -42,8 +42,18 @@
             {{ formatTime(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('uiAutomation.script.operationColumn')" width="280" fixed="right">
+        <el-table-column :label="$t('uiAutomation.script.operationColumn')" width="340" fixed="right">
           <template #default="{ row }">
+            <el-button
+              size="small"
+              text
+              type="success"
+              :loading="runningScriptId === row.id"
+              @click="openRunDialog(row)"
+            >
+              <el-icon><VideoPlay /></el-icon>
+              {{ $t('uiAutomation.script.run') }}
+            </el-button>
             <el-button size="small" text @click="viewScript(row)">
               <el-icon><View /></el-icon>
               {{ $t('uiAutomation.script.viewDetail') }}
@@ -114,6 +124,35 @@
       </template>
     </el-dialog>
 
+    <!-- 运行脚本对话框 -->
+    <el-dialog v-model="showRunDialog" :title="$t('uiAutomation.script.runTitle')" width="480px">
+      <el-form :model="runForm" label-width="100px">
+        <el-form-item :label="$t('uiAutomation.script.scriptName')">
+          <span>{{ runForm.scriptName }}</span>
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.script.runBrowser')">
+          <el-select v-model="runForm.browser" style="width: 100%">
+            <el-option label="Chrome" value="chrome" />
+            <el-option label="Firefox" value="firefox" />
+            <el-option label="WebKit" value="webkit" />
+            <el-option label="Edge" value="edge" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.script.runMode')">
+          <el-radio-group v-model="runForm.headless">
+            <el-radio :label="false">{{ $t('uiAutomation.script.headedMode') }}</el-radio>
+            <el-radio :label="true">{{ $t('uiAutomation.script.headlessMode') }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showRunDialog = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="running" @click="confirmRun">
+          {{ $t('uiAutomation.script.confirmRun') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
     <!-- 编辑对话框 -->
     <el-dialog v-model="showEditDialog" :title="$t('uiAutomation.script.editScript')" width="80%" :close-on-click-modal="false">
       <div v-if="editingScript" class="script-editor">
@@ -147,7 +186,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, View, Edit, Delete, EditPen } from '@element-plus/icons-vue'
+import { Plus, View, Edit, Delete, EditPen, VideoPlay } from '@element-plus/icons-vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 
@@ -155,7 +194,8 @@ import {
   loadUiAutomationProjects,
   getTestScripts,
   updateTestScript,
-  deleteTestScript
+  deleteTestScript,
+  runTestScript
 } from '@/api/ui_automation'
 
 const router = useRouter()
@@ -176,16 +216,27 @@ const total = ref(0)
 const showDetailDialog = ref(false)
 const showRenameDialog = ref(false)
 const showEditDialog = ref(false)
+const showRunDialog = ref(false)
 
 // 当前操作的脚本
 const currentScript = ref(null)
 const editingScript = ref(null)
 const saving = ref(false)
+const running = ref(false)
+const runningScriptId = ref(null)
 
 // 重命名表单
 const renameForm = reactive({
   scriptId: null,
   newName: ''
+})
+
+// 运行表单
+const runForm = reactive({
+  scriptId: null,
+  scriptName: '',
+  browser: 'chrome',
+  headless: false
 })
 
 // 加载项目列表（与「项目与版本」一致：仅已勾选 UI自动化 的主项目）
@@ -321,6 +372,73 @@ const confirmRename = async () => {
   } catch (error) {
     ElMessage.error(t('uiAutomation.script.messages.renameFailed'))
     console.error('重命名失败:', error)
+  }
+}
+
+// 打开运行对话框
+const openRunDialog = (script) => {
+  if (!script?.content?.trim()) {
+    ElMessage.warning(t('uiAutomation.script.messages.emptyContent'))
+    return
+  }
+  runForm.scriptId = script.id
+  runForm.scriptName = script.name
+  runForm.browser = script.framework === 'selenium' ? 'chrome' : 'chrome'
+  runForm.headless = false
+  showRunDialog.value = true
+}
+
+// 确认运行脚本
+const confirmRun = async () => {
+  if (!runForm.scriptId) return
+
+  try {
+    running.value = true
+    runningScriptId.value = runForm.scriptId
+    const modeText = runForm.headless
+      ? t('uiAutomation.script.headlessMode')
+      : t('uiAutomation.script.headedMode')
+    ElMessage.info(
+      t('uiAutomation.script.messages.runStart', {
+        name: runForm.scriptName,
+        browser: runForm.browser.toUpperCase(),
+        mode: modeText
+      })
+    )
+
+    const response = await runTestScript(runForm.scriptId, {
+      browser: runForm.browser,
+      headless: runForm.headless
+    })
+
+    showRunDialog.value = false
+    ElMessage.success(
+      t('uiAutomation.script.messages.runStarted', {
+        id: response.data?.execution_id || '-'
+      })
+    )
+
+    try {
+      await ElMessageBox.confirm(
+        t('uiAutomation.script.messages.goToReports'),
+        t('uiAutomation.script.messages.runStartedTitle'),
+        {
+          confirmButtonText: t('uiAutomation.script.viewReports'),
+          cancelButtonText: t('uiAutomation.common.cancel'),
+          type: 'success'
+        }
+      )
+      router.push('/ui-automation/reports')
+    } catch {
+      // 用户取消跳转
+    }
+  } catch (error) {
+    const message = error.response?.data?.error || error.message || t('uiAutomation.messages.error.unknown')
+    ElMessage.error(t('uiAutomation.script.messages.runFailed', { message }))
+    console.error('脚本运行失败:', error)
+  } finally {
+    running.value = false
+    runningScriptId.value = null
   }
 }
 

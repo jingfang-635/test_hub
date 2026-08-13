@@ -733,6 +733,58 @@ class TestScriptViewSet(viewsets.ModelViewSet):
             'project', 'project__hub_project'
         )
 
+    @action(detail=True, methods=['post'])
+    def run(self, request, pk=None):
+        """直接运行脚本（后台执行，写入 TestExecution）"""
+        script = self.get_object()
+        content = (script.content or '').strip()
+        if not content:
+            return Response({'error': '脚本内容为空，无法执行'}, status=status.HTTP_400_BAD_REQUEST)
+
+        browser = request.data.get('browser', 'chrome')
+        headless = request.data.get('headless', False)
+        if isinstance(headless, str):
+            headless = headless.lower() in ('1', 'true', 'yes', 'on')
+
+        log_operation('run', 'script', script.id, script.name, request.user)
+
+        import threading
+        from .script_runner import ScriptRunner
+
+        runner = ScriptRunner(
+            script=script,
+            browser=browser,
+            headless=headless,
+            executed_by=request.user,
+        )
+        execution = runner.create_execution_record()
+        execution_id = execution.id
+
+        def run_in_background():
+            try:
+                bg_runner = ScriptRunner(
+                    script=TestScript.objects.select_related('project').get(pk=script.id),
+                    browser=browser,
+                    headless=headless,
+                    executed_by=request.user,
+                )
+                bg_runner.execution = TestExecution.objects.get(pk=execution_id)
+                bg_runner.run()
+            except Exception:
+                logger.exception('脚本后台线程异常: script_id=%s execution_id=%s', script.id, execution_id)
+
+        thread = threading.Thread(target=run_in_background, daemon=False)
+        thread.start()
+
+        return Response({
+            'message': '脚本开始执行',
+            'script_id': script.id,
+            'script_name': script.name,
+            'execution_id': execution_id,
+            'browser': browser,
+            'headless': headless,
+        }, status=status.HTTP_200_OK)
+
 
 class TestSuiteViewSet(viewsets.ModelViewSet):
     queryset = TestSuite.objects.all()

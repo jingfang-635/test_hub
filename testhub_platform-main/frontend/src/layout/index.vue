@@ -107,18 +107,16 @@
               <el-icon><Aim /></el-icon>
               <span>{{ $t('menu.elementManagement') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/test-cases">
-              <el-icon><Document /></el-icon>
-              <span>{{ $t('menu.caseManagement') }}</span>
-            </el-menu-item>
-            <el-menu-item index="/ui-automation/scripts-enhanced">
-              <el-icon><Edit /></el-icon>
-              <span>{{ $t('menu.scriptGeneration') }}</span>
-            </el-menu-item>
-            <el-menu-item index="/ui-automation/scripts">
-              <el-icon><DocumentCopy /></el-icon>
-              <span>{{ $t('menu.scriptList') }}</span>
-            </el-menu-item>
+            <el-sub-menu index="ui-cases-scripts">
+              <template #title>
+                <el-icon><Document /></el-icon>
+                <span>{{ $t('menu.casesAndScripts') }}</span>
+              </template>
+              <el-menu-item index="/ui-automation/test-cases">{{ $t('menu.caseManagement') }}</el-menu-item>
+              <el-menu-item index="/ui-automation/scripts-enhanced">{{ $t('menu.scriptGeneration') }}</el-menu-item>
+              <el-menu-item index="/ui-automation/playwright-recording">{{ $t('menu.playwrightScriptRecording') }}</el-menu-item>
+              <el-menu-item index="/ui-automation/scripts">{{ $t('menu.scriptList') }}</el-menu-item>
+            </el-sub-menu>
             <el-menu-item index="/ui-automation/suites">
               <el-icon><Collection /></el-icon>
               <span>{{ $t('menu.suiteManagement') }}</span>
@@ -381,7 +379,7 @@ import { ElMessage } from 'element-plus'
 import { useI18n } from 'vue-i18n'
 import {
   Monitor, Folder, Document, Check, Collection, VideoPlay,
-  DataAnalysis, ChatDotRound, DocumentCopy, Link, MagicStick,
+  DataAnalysis, ChatDotRound, Link, MagicStick,
   Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, Cellphone, Connection, FolderOpened, Compass,
   TrendCharts, Moon, Sunny, UserFilled
 } from '@element-plus/icons-vue'
@@ -462,6 +460,7 @@ const breadcrumbTitle = computed(() => {
     '/ui-automation/elements-enhanced': t('menu.elementManagement'),
     '/ui-automation/test-cases': t('menu.caseManagement'),
     '/ui-automation/scripts-enhanced': t('menu.scriptGeneration'),
+    '/ui-automation/playwright-recording': t('menu.playwrightScriptRecording'),
     '/ui-automation/scripts': t('menu.scriptList'),
     '/ui-automation/suites': t('menu.suiteManagement'),
     '/ui-automation/executions': t('menu.executionRecords'),

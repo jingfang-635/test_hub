@@ -21,6 +21,7 @@ import UiDashboard from '@/views/ui-automation/dashboard/Dashboard.vue'
 import UiElementManagerEnhanced from '@/views/ui-automation/elements/ElementManagerEnhanced.vue'
 import UiTestCaseManager from '@/views/ui-automation/test-cases/TestCaseManager.vue'
 import UiScriptEditorEnhanced from '@/views/ui-automation/scripts/ScriptEditorEnhanced.vue'
+import UiPlaywrightRecording from '@/views/ui-automation/scripts/PlaywrightRecording.vue'
 import UiScriptList from '@/views/ui-automation/scripts/ScriptList.vue'
 import UiSuiteList from '@/views/ui-automation/suites/SuiteList.vue'
 import UiExecutionList from '@/views/ui-automation/executions/ExecutionList.vue'
@@ -287,6 +288,11 @@ const routes = [
         path: 'scripts/editor',
         name: 'UiScriptEditor',
         component: UiScriptEditorEnhanced
+      },
+      {
+        path: 'playwright-recording',
+        name: 'UiPlaywrightRecording',
+        component: UiPlaywrightRecording
       },
       {
         path: 'scripts',

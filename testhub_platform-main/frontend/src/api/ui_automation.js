@@ -211,6 +211,15 @@ export function deleteTestScript(id) {
   })
 }
 
+// 直接运行测试脚本
+export function runTestScript(id, data) {
+  return request({
+    url: `/ui-automation/test-scripts/${id}/run/`,
+    method: 'post',
+    data
+  })
+}
+
 // 测试套件相关API
 
 // 获取测试套件列表
@@ -1190,5 +1199,119 @@ export function updateAIExplorationStep(stepId, data) {
     url: `/ui-automation/ai-exploration-steps/${stepId}/`,
     method: 'patch',
     data
+  })
+}
+
+// ========== Playwright Codegen 录制 ==========
+
+export function checkCodegenEnv() {
+  return request({
+    url: '/ui-automation/codegen/check-env/',
+    method: 'get'
+  })
+}
+
+export function startCodegenRecording(data) {
+  return request({
+    url: '/ui-automation/codegen/start/',
+    method: 'post',
+    data
+  })
+}
+
+export function getCodegenStatus(params) {
+  return request({
+    url: '/ui-automation/codegen/status/',
+    method: 'get',
+    params
+  })
+}
+
+export function stopCodegenRecording() {
+  return request({
+    url: '/ui-automation/codegen/stop/',
+    method: 'post'
+  })
+}
+
+export function listCodegenRecorded() {
+  return request({
+    url: '/ui-automation/codegen/recorded/',
+    method: 'get'
+  })
+}
+
+export function getCodegenRecordedContent(name) {
+  return request({
+    url: '/ui-automation/codegen/recorded-content/',
+    method: 'get',
+    params: { name }
+  })
+}
+
+// ========== Codegen Phase 2–4 流水线 ==========
+
+export function parseCodegenPipeline(data) {
+  return request({
+    url: '/ui-automation/codegen/pipeline/parse/',
+    method: 'post',
+    data
+  })
+}
+
+/** 录制脚本解析为用例步骤（用例管理「录制步骤」） */
+export function parseCodegenToCaseSteps(data) {
+  return request({
+    url: '/ui-automation/codegen/pipeline/to-case-steps/',
+    method: 'post',
+    data
+  })
+}
+
+export function getCodegenPipeline(id) {
+  return request({
+    url: `/ui-automation/codegen/pipeline/detail/${id}/`,
+    method: 'get'
+  })
+}
+
+export function generateCodegenPlan(id, data = {}) {
+  const useAi = Boolean(data.use_ai)
+  return request({
+    url: `/ui-automation/codegen/pipeline/${id}/generate-plan/`,
+    method: 'post',
+    data: {
+      user_cases_md: data.user_cases_md,
+      use_ai: useAi,
+    },
+    // 模板生成很快；AI 增强最多约 60s
+    timeout: useAi ? 120000 : 30000
+  })
+}
+
+export function updateCodegenPlan(id, data) {
+  return request({
+    url: `/ui-automation/codegen/pipeline/${id}/plan/`,
+    method: 'patch',
+    data
+  })
+}
+
+export function confirmCodegenPlan(id, data = {}) {
+  return request({
+    url: `/ui-automation/codegen/pipeline/${id}/confirm-plan/`,
+    method: 'post',
+    data
+  })
+}
+
+export function generateCodegenScripts(id, data = {}) {
+  const useAi = Boolean(data.use_ai)
+  return request({
+    url: `/ui-automation/codegen/pipeline/${id}/generate-scripts/`,
+    method: 'post',
+    data: { use_ai: useAi },
+    // 模板生成很快；AI 增强最多约 60s，预留缓冲
+    timeout: useAi ? 120000 : 30000
   })
 }

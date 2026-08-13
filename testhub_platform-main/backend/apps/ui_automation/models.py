@@ -1178,3 +1178,61 @@ class AIExplorationStep(models.Model):
 
     def __str__(self):
         return f"{self.case.name} - 步骤{self.order}"
+
+
+class CodegenConversion(models.Model):
+    """Playwright 录制 → 计划 → 工程化脚本 转换流水线"""
+
+    PLAN_STATUS_CHOICES = [
+        ('draft', '待确认'),
+        ('confirmed', '已确认'),
+    ]
+    STATUS_CHOICES = [
+        ('parsed', '已解析'),
+        ('plan_ready', '计划已生成'),
+        ('confirmed', '计划已确认'),
+        ('generated', '脚本已生成'),
+        ('failed', '失败'),
+    ]
+    LANGUAGE_CHOICES = [
+        ('python', 'Python'),
+        ('javascript', 'JavaScript'),
+    ]
+
+    project = models.ForeignKey(
+        UiProject, on_delete=models.CASCADE, related_name='codegen_conversions', verbose_name='所属项目'
+    )
+    user = models.ForeignKey(
+        User, on_delete=models.SET_NULL, null=True, blank=True, related_name='codegen_conversions', verbose_name='创建人'
+    )
+    scenario = models.CharField(max_length=200, verbose_name='场景名')
+    language = models.CharField(max_length=20, choices=LANGUAGE_CHOICES, default='python', verbose_name='语言')
+    target_url = models.CharField(max_length=1000, blank=True, default='', verbose_name='目标URL')
+    recorded_name = models.CharField(max_length=255, blank=True, default='', verbose_name='录制文件名')
+    recorded_content = models.TextField(verbose_name='录制脚本内容')
+    parse_result = models.JSONField(default=dict, blank=True, verbose_name='解析结果')
+    plan_md = models.TextField(blank=True, default='', verbose_name='用例计划Markdown')
+    plan_status = models.CharField(
+        max_length=20, choices=PLAN_STATUS_CHOICES, default='draft', verbose_name='计划状态'
+    )
+    user_cases_md = models.TextField(blank=True, default='', verbose_name='用户提供用例')
+    generated_files = models.JSONField(default=list, blank=True, verbose_name='生成文件列表')
+    generated_script_ids = models.JSONField(default=list, blank=True, verbose_name='生成脚本ID')
+    generated_page_object_ids = models.JSONField(default=list, blank=True, verbose_name='生成页面对象ID')
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='parsed', verbose_name='流水线状态')
+    error = models.TextField(blank=True, default='', verbose_name='错误信息')
+    source_script = models.ForeignKey(
+        TestScript, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='codegen_conversions', verbose_name='来源原始脚本'
+    )
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'ui_codegen_conversions'
+        verbose_name = 'Codegen转换流水线'
+        verbose_name_plural = 'Codegen转换流水线'
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f'{self.scenario} ({self.status})'

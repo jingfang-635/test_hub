@@ -252,8 +252,12 @@ class TestExecutionSerializer(serializers.ModelSerializer):
         )
 
     def get_test_suite_name(self, obj):
-        """获取测试套件名称"""
-        return obj.test_suite.name if obj.test_suite else '-'
+        """获取测试套件/脚本名称（脚本直跑时回退脚本名）"""
+        if obj.test_suite:
+            return obj.test_suite.name
+        if obj.test_script:
+            return obj.test_script.name
+        return '-'
     
     def get_executed_by_name(self, obj):
         """获取执行人姓名"""

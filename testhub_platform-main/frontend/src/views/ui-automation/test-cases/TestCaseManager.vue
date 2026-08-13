@@ -76,6 +76,10 @@
                 <el-icon><Plus /></el-icon>
                 {{ t('uiAutomation.testCase.addStep') }}
               </el-button>
+              <el-button size="small" type="warning" @click="openRecordStepsDialog">
+                <el-icon><VideoCamera /></el-icon>
+                {{ t('uiAutomation.testCase.recordSteps') }}
+              </el-button>
               <el-button size="small" type="primary" @click="saveTestCase">
                 <el-icon><Check /></el-icon>
                 {{ t('uiAutomation.testCase.saveTestCase') }}
@@ -513,14 +517,114 @@
       v-model="showDataFactorySelector"
       @select="handleDataFactorySelect"
     />
+
+    <!-- 录制步骤对话框 -->
+    <el-dialog
+      v-model="showRecordDialog"
+      :title="t('uiAutomation.testCase.recordStepsTitle')"
+      width="780px"
+      :close-on-click-modal="false"
+      @closed="onRecordDialogClosed"
+    >
+      <el-alert
+        type="info"
+        :closable="false"
+        show-icon
+        class="record-tip"
+        :title="t('uiAutomation.testCase.recordStepsTip')"
+      />
+
+      <el-form label-width="100px" class="record-form" style="margin-top: 16px">
+        <el-form-item :label="t('uiAutomation.testCase.recordTargetUrl')" required>
+          <el-input
+            v-model="recordForm.targetUrl"
+            :placeholder="t('uiAutomation.testCase.recordTargetUrlPlaceholder')"
+            :disabled="recordIsRecording"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item :label="t('uiAutomation.testCase.recordBrowser')">
+          <el-radio-group v-model="recordForm.browser" :disabled="recordIsRecording">
+            <el-radio-button value="chromium">Chromium</el-radio-button>
+            <el-radio-button value="firefox">Firefox</el-radio-button>
+            <el-radio-button value="webkit">WebKit</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="t('uiAutomation.testCase.recordStatus')">
+          <el-tag :type="recordStatusTagType">{{ recordStatusText }}</el-tag>
+        </el-form-item>
+        <el-form-item>
+          <el-button
+            type="primary"
+            :loading="recordStarting"
+            :disabled="recordIsRecording || !recordEnvReady"
+            @click="startRecordSteps"
+          >
+            {{ t('uiAutomation.testCase.recordStart') }}
+          </el-button>
+          <el-button
+            type="danger"
+            plain
+            :loading="recordStopping"
+            :disabled="!recordIsRecording"
+            @click="stopRecordSteps"
+          >
+            {{ t('uiAutomation.testCase.recordStop') }}
+          </el-button>
+          <el-button
+            type="success"
+            :loading="recordParsing"
+            :disabled="!recordScriptContent.trim() || recordIsRecording"
+            @click="parseRecordedSteps"
+          >
+            {{ t('uiAutomation.testCase.recordParse') }}
+          </el-button>
+        </el-form-item>
+      </el-form>
+
+      <div v-if="parsedRecordSteps.length" class="record-preview">
+        <div class="record-preview-header">
+          <span>{{ t('uiAutomation.testCase.recordPreview', { count: parsedRecordSteps.length }) }}</span>
+          <el-radio-group v-model="recordImportMode" size="small">
+            <el-radio-button value="append">{{ t('uiAutomation.testCase.recordAppend') }}</el-radio-button>
+            <el-radio-button value="replace">{{ t('uiAutomation.testCase.recordReplace') }}</el-radio-button>
+          </el-radio-group>
+        </div>
+        <el-table :data="parsedRecordSteps" size="small" max-height="280" stripe border>
+          <el-table-column type="index" width="50" :label="t('uiAutomation.testCase.step')" />
+          <el-table-column prop="action_type" :label="t('uiAutomation.testCase.selectAction')" width="110">
+            <template #default="{ row }">
+              {{ getActionTypeText(row.action_type) }}
+            </template>
+          </el-table-column>
+          <el-table-column prop="description" :label="t('uiAutomation.testCase.description')" min-width="180" show-overflow-tooltip />
+          <el-table-column prop="input_value" :label="t('uiAutomation.testCase.inputValue')" min-width="120" show-overflow-tooltip />
+          <el-table-column prop="raw" label="raw" min-width="160" show-overflow-tooltip />
+        </el-table>
+      </div>
+      <div v-else-if="recordScriptContent" class="record-script-hint">
+        {{ t('uiAutomation.testCase.recordScriptReady') }}
+      </div>
+
+      <template #footer>
+        <el-button @click="showRecordDialog = false">{{ t('uiAutomation.common.cancel') }}</el-button>
+        <el-button
+          type="primary"
+          :disabled="!parsedRecordSteps.length"
+          @click="importRecordedSteps"
+        >
+          {{ t('uiAutomation.testCase.recordImport') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, Plus, Edit, Delete, Check, CaretRight, ArrowUp, ArrowDown, Rank, Picture, Warning, View, ZoomIn, Refresh, WarningFilled, MagicStick
+  Search, Plus, Edit, Delete, Check, CaretRight, ArrowUp, ArrowDown, Rank, Picture, Warning, View, ZoomIn, Refresh, WarningFilled, MagicStick, VideoCamera
 } from '@element-plus/icons-vue'
 import draggable from 'vuedraggable'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
@@ -537,7 +641,13 @@ import {
   getTestCases,
   runTestCase as runTestCaseApi,
   copyTestCase as copyTestCaseApi,
-  getLocatorStrategies
+  getLocatorStrategies,
+  checkCodegenEnv,
+  startCodegenRecording,
+  getCodegenStatus,
+  stopCodegenRecording,
+  getCodegenRecordedContent,
+  parseCodegenToCaseSteps
 } from '@/api/ui_automation'
 import { getVariableFunctions } from '@/api/data-factory'
 
@@ -579,6 +689,45 @@ const currentStepForDataFactory = ref(null)
 const currentFieldForDataFactory = ref('')
 const variableCategories = ref([])
 const loading = ref(false)
+
+// 录制步骤
+const showRecordDialog = ref(false)
+const recordForm = reactive({
+  targetUrl: 'https://',
+  browser: 'chromium',
+  language: 'python'
+})
+const recordSession = ref(null)
+const recordScriptContent = ref('')
+const recordStarting = ref(false)
+const recordStopping = ref(false)
+const recordParsing = ref(false)
+const recordEnvReady = ref(true)
+const parsedRecordSteps = ref([])
+const recordImportMode = ref('append')
+let recordPollTimer = null
+
+const recordIsRecording = computed(() => ['starting', 'recording'].includes(recordSession.value?.status))
+
+const recordStatusText = computed(() => {
+  const status = recordSession.value?.status
+  const map = {
+    starting: t('uiAutomation.testCase.recordStatusStarting'),
+    recording: t('uiAutomation.testCase.recordStatusRecording'),
+    finished: t('uiAutomation.testCase.recordStatusFinished'),
+    stopped: t('uiAutomation.testCase.recordStatusStopped'),
+    failed: t('uiAutomation.testCase.recordStatusFailed')
+  }
+  return map[status] || t('uiAutomation.testCase.recordStatusIdle')
+})
+
+const recordStatusTagType = computed(() => {
+  const status = recordSession.value?.status
+  if (status === 'recording' || status === 'starting') return 'warning'
+  if (status === 'finished') return 'success'
+  if (status === 'failed') return 'danger'
+  return 'info'
+})
 
 
 
@@ -739,6 +888,214 @@ const addStep = () => {
     expanded: true
   }
   currentSteps.value.push(newStep)
+}
+
+const clearRecordPoll = () => {
+  if (recordPollTimer) {
+    clearInterval(recordPollTimer)
+    recordPollTimer = null
+  }
+}
+
+const applyRecordSession = (nextSession) => {
+  recordSession.value = nextSession || null
+  if (nextSession?.content) {
+    recordScriptContent.value = nextSession.content
+  }
+  if (['finished', 'stopped', 'failed'].includes(nextSession?.status)) {
+    clearRecordPoll()
+    if (nextSession.status === 'finished') {
+      ElMessage.success(t('uiAutomation.testCase.messages.recordFinished'))
+      if (recordScriptContent.value.trim() && !parsedRecordSteps.value.length) {
+        parseRecordedSteps()
+      }
+    } else if (nextSession.status === 'failed' && nextSession.error) {
+      ElMessage.error(nextSession.error)
+    }
+  }
+}
+
+const pollRecordStatus = async () => {
+  try {
+    const res = await getCodegenStatus({ include_content: 1 })
+    const data = res.data || res
+    applyRecordSession(data.session)
+  } catch (error) {
+    console.error(error)
+  }
+}
+
+const startRecordPolling = () => {
+  clearRecordPoll()
+  recordPollTimer = setInterval(pollRecordStatus, 2000)
+}
+
+const resolveRecordProjectId = () => {
+  if (!isAllProjectsSelected()) {
+    return projectId.value
+  }
+  const tc = selectedTestCase.value
+  return tc?.project?.id || tc?.project_id || tc?.project || null
+}
+
+const openRecordStepsDialog = async () => {
+  if (!selectedTestCase.value) {
+    ElMessage.warning(t('uiAutomation.testCase.selectTestCase'))
+    return
+  }
+  const pid = resolveRecordProjectId()
+  if (!pid) {
+    ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
+    return
+  }
+
+  showRecordDialog.value = true
+  parsedRecordSteps.value = []
+  recordScriptContent.value = ''
+  recordSession.value = null
+  recordImportMode.value = 'append'
+
+  try {
+    const res = await checkCodegenEnv()
+    const env = res.data || res
+    recordEnvReady.value = Boolean(env?.can_start)
+    if (!recordEnvReady.value) {
+      ElMessage.warning(t('uiAutomation.testCase.messages.recordEnvNotReady'))
+    }
+  } catch (error) {
+    recordEnvReady.value = false
+    console.error(error)
+    ElMessage.warning(t('uiAutomation.testCase.messages.recordEnvCheckFailed'))
+  }
+
+  const currentProject = projects.value.find(p => p.id === pid)
+  if (currentProject?.base_url && (!recordForm.targetUrl || recordForm.targetUrl === 'https://')) {
+    recordForm.targetUrl = currentProject.base_url
+  }
+}
+
+const startRecordSteps = async () => {
+  if (!recordForm.targetUrl || ['https://', 'http://'].includes(recordForm.targetUrl.trim())) {
+    ElMessage.warning(t('uiAutomation.testCase.messages.recordEmptyUrl'))
+    return
+  }
+  recordStarting.value = true
+  parsedRecordSteps.value = []
+  try {
+    const res = await startCodegenRecording({
+      url: recordForm.targetUrl.trim(),
+      browser: recordForm.browser,
+      language: recordForm.language,
+      project_id: resolveRecordProjectId(),
+      script_name: `case_${selectedTestCase.value?.id || 'tmp'}_record`
+    })
+    const data = res.data || res
+    applyRecordSession(data.session)
+    ElMessage.success(data.message || t('uiAutomation.testCase.messages.recordStarted'))
+    startRecordPolling()
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.testCase.messages.recordStartFailed')
+    ElMessage.error(msg)
+  } finally {
+    recordStarting.value = false
+  }
+}
+
+const stopRecordSteps = async () => {
+  recordStopping.value = true
+  clearRecordPoll()
+  try {
+    const res = await stopCodegenRecording()
+    const data = res.data || res
+    applyRecordSession(data.session)
+    if (data.session?.content) {
+      recordScriptContent.value = data.session.content
+    } else if (data.session?.script_name) {
+      try {
+        const fileRes = await getCodegenRecordedContent(data.session.script_name)
+        const fileData = fileRes.data || fileRes
+        if (fileData.content) {
+          recordScriptContent.value = fileData.content
+        }
+      } catch (e) {
+        console.error(e)
+      }
+    }
+    ElMessage.success(data.message || t('uiAutomation.testCase.messages.recordStopped'))
+    if (recordScriptContent.value.trim()) {
+      await parseRecordedSteps()
+    }
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.testCase.messages.recordStopFailed')
+    ElMessage.error(msg)
+    if (recordIsRecording.value) {
+      startRecordPolling()
+    }
+  } finally {
+    recordStopping.value = false
+  }
+}
+
+const parseRecordedSteps = async () => {
+  if (!recordScriptContent.value.trim()) {
+    ElMessage.warning(t('uiAutomation.testCase.messages.recordEmptyScript'))
+    return
+  }
+  recordParsing.value = true
+  try {
+    const res = await parseCodegenToCaseSteps({
+      content: recordScriptContent.value,
+      project_id: resolveRecordProjectId(),
+      language: recordForm.language,
+      create_elements: true
+    })
+    const data = res.data || res
+    parsedRecordSteps.value = data.steps || []
+    if (!parsedRecordSteps.value.length) {
+      ElMessage.warning(t('uiAutomation.testCase.messages.recordNoSteps'))
+    } else {
+      ElMessage.success(data.message || t('uiAutomation.testCase.messages.recordParsed', { count: parsedRecordSteps.value.length }))
+      // 刷新元素列表，以便步骤下拉能选到新元素
+      await loadElements()
+    }
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.testCase.messages.recordParseFailed')
+    ElMessage.error(msg)
+  } finally {
+    recordParsing.value = false
+  }
+}
+
+const importRecordedSteps = () => {
+  if (!parsedRecordSteps.value.length) return
+
+  const mapped = parsedRecordSteps.value.map((step, index) => ({
+    id: Date.now() + index,
+    action_type: step.action_type || 'click',
+    page_filter: step.page_filter || '',
+    element_id: step.element_id || '',
+    input_value: step.input_value || '',
+    wait_time: step.wait_time || 1000,
+    assert_type: step.assert_type || 'textContains',
+    assert_value: step.assert_value || '',
+    description: step.description || '',
+    expanded: true
+  }))
+
+  if (recordImportMode.value === 'replace') {
+    currentSteps.value = mapped
+  } else {
+    currentSteps.value = [...currentSteps.value, ...mapped]
+  }
+
+  showSteps.value = true
+  showRecordDialog.value = false
+  ElMessage.success(t('uiAutomation.testCase.messages.recordImported', { count: mapped.length }))
+}
+
+const onRecordDialogClosed = () => {
+  clearRecordPoll()
+  // 录制进行中不强制 stop，用户可到 Playwright 录制页继续；此处仅停轮询
 }
 
 const removeStep = (index) => {
@@ -1283,6 +1640,10 @@ onMounted(async () => {
   await onProjectChange()
 })
 
+onBeforeUnmount(() => {
+  clearRecordPoll()
+})
+
 const openCreateDialog = () => {
   if (!ensureProjectSelected()) return
   showCreateDialog.value = true
@@ -1462,7 +1823,31 @@ const openCreateDialog = () => {
 
 .detail-actions {
   display: flex;
-  gap: 10px;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.record-tip {
+  margin-bottom: 4px;
+}
+
+.record-preview {
+  margin-top: 12px;
+}
+
+.record-preview-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 8px;
+  font-weight: 600;
+}
+
+.record-script-hint {
+  margin-top: 12px;
+  color: #909399;
+  font-size: 13px;
 }
 
 .steps-container {

@@ -22,6 +22,12 @@ echo   Uvicorn ASGI + Django-Q2 + Scheduler
 echo   (HTTP + SSE + WebSocket on one port)
 echo ============================================
 
+REM Free backend port if a previous start_backend is still holding it
+for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:":%BACKEND_PORT% .*LISTENING"') do (
+  echo Stopping old backend PID %%a on port %BACKEND_PORT% ...
+  taskkill /F /PID %%a >nul 2>&1
+)
+
 REM 1. Start frontend (separate window)
 start "TestHub-Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
 

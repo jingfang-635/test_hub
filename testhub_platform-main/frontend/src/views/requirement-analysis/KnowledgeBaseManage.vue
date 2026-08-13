@@ -60,9 +60,9 @@
               {{ formatDateTime(row.created_at) }}
             </template>
           </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.actions')" width="180" fixed="right">
+          <el-table-column :label="$t('knowledgeBase.actions')" width="200" fixed="right">
             <template #default="{ row }">
-              <el-button link type="primary" @click="openDocuments(row)">{{ $t('knowledgeBase.upload') }}</el-button>
+              <el-button link type="primary" @click="openDocuments(row)">{{ $t('knowledgeBase.detail') }}</el-button>
               <el-button link type="primary" @click="editBase(row)">{{ $t('knowledgeBase.edit') }}</el-button>
               <el-button link type="danger" @click="removeBase(row)">{{ $t('knowledgeBase.delete') }}</el-button>
             </template>
@@ -71,70 +71,204 @@
       </el-card>
     </template>
 
-    <!-- 文档详情页 -->
+    <!-- 知识库详情页 -->
     <template v-else>
-      <div class="page-header">
-        <div class="header-left">
-          <el-button link type="primary" @click="backToList">← {{ $t('knowledgeBase.backToList') }}</el-button>
-          <h1>{{ selectedBase.name }}</h1>
-          <p>{{ $t('knowledgeBase.documents') }}</p>
+      <div class="detail-page">
+        <div class="detail-header">
+          <el-button class="back-btn" link type="primary" @click="backToList">
+            ← {{ $t('knowledgeBase.backToList') }}
+          </el-button>
+          <h1 class="detail-title">{{ selectedBase.name }}</h1>
+          <el-tag
+            :type="selectedBase.is_active ? 'success' : 'info'"
+            size="small"
+            effect="light"
+            class="status-tag"
+          >
+            {{ selectedBase.is_active ? $t('knowledgeBase.enabled') : $t('knowledgeBase.disabled') }}
+          </el-tag>
         </div>
-      </div>
 
-      <el-card shadow="never" class="upload-card">
-        <el-upload
-          drag
-          multiple
-          :auto-upload="false"
-          :show-file-list="false"
-          accept=".pdf,.doc,.docx,.txt,.md"
-          :disabled="isUploading"
-          :on-change="onUploadChange"
-        >
-          <el-icon class="el-icon--upload"><UploadFilled /></el-icon>
-          <div class="el-upload__text">
-            {{ isUploading ? $t('knowledgeBase.uploading') : $t('knowledgeBase.dragTip') }}
-          </div>
-          <template #tip>
-            <div class="el-upload__tip">{{ $t('knowledgeBase.uploadHint') }}</div>
+        <!-- 基本信息 -->
+        <el-card shadow="never" class="section-card info-card">
+          <el-descriptions :column="3" border class="kb-descriptions">
+            <el-descriptions-item :label="$t('knowledgeBase.project')">
+              {{ selectedBase.project_name || '-' }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('knowledgeBase.chunkSize')">
+              {{ selectedBase.chunk_size ?? 500 }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('knowledgeBase.chunkOverlap')">
+              {{ selectedBase.chunk_overlap ?? 50 }}
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('knowledgeBase.vectorStatus')">
+              <el-tag :type="vectorStatusTagType" size="small" effect="light">
+                {{ vectorStatusLabel }}
+              </el-tag>
+            </el-descriptions-item>
+            <el-descriptions-item :label="$t('knowledgeBase.totalSize')">
+              {{ formatFileSize(detailTotalSize) }}
+            </el-descriptions-item>
+          </el-descriptions>
+        </el-card>
+
+        <!-- 文档列表 -->
+        <el-card shadow="never" class="section-card" v-loading="docsLoading">
+          <template #header>
+            <div class="section-header">
+              <span class="section-title">
+                {{ $t('knowledgeBase.documentCount') }} ({{ documents.length }})
+              </span>
+              <el-upload
+                multiple
+                :auto-upload="false"
+                :show-file-list="false"
+                accept=".pdf,.doc,.docx,.txt,.md"
+                :disabled="isUploading"
+                :on-change="onUploadChange"
+              >
+                <el-button link type="primary" :loading="isUploading" class="upload-link">
+                  +{{ $t('knowledgeBase.uploadDocument') }}
+                </el-button>
+              </el-upload>
+            </div>
           </template>
-        </el-upload>
-      </el-card>
 
-      <el-card shadow="never" class="table-card" v-loading="docsLoading">
-        <el-table :data="documents" style="width: 100%">
-          <el-table-column prop="title" :label="$t('knowledgeBase.documentTitle')" min-width="180">
-            <template #default="{ row }">
-              <div class="doc-title">{{ row.title }}</div>
-              <div class="doc-filename">{{ row.file_name }}</div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.fileType')" width="100">
-            <template #default="{ row }">{{ formatDocType(row.document_type) }}</template>
-          </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.fileSize')" width="110">
-            <template #default="{ row }">{{ formatFileSize(row.file_size) }}</template>
-          </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.status')" width="130">
-            <template #default="{ row }">
-              <el-tag :type="statusTagType(row.status)" size="small">{{ formatStatus(row.status) }}</el-tag>
-              <div v-if="row.is_vectorized" class="doc-vectorized">
-                {{ $t('knowledgeBase.vectorized', { count: row.chunk_count || 0 }) }}
+          <el-table :data="documents" style="width: 100%" class="doc-table">
+            <el-table-column type="index" :label="$t('knowledgeBase.index')" width="70" />
+            <el-table-column prop="title" :label="$t('knowledgeBase.documentTitle')" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">
+                <span class="doc-title">{{ row.title }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('knowledgeBase.documentType')" width="140">
+              <template #default="{ row }">
+                {{ row.document_type_display || formatDocType(row.document_type) }}
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('knowledgeBase.vectorStatus')" width="130">
+              <template #default="{ row }">
+                <el-tag :type="docVectorTagType(row)" size="small" effect="light">
+                  {{ docVectorLabel(row) }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('knowledgeBase.createdAt')" width="180">
+              <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
+            </el-table-column>
+            <el-table-column :label="$t('knowledgeBase.actions')" width="200" fixed="right">
+              <template #default="{ row }">
+                <el-button link type="primary" @click="viewOriginal(row)">
+                  {{ $t('knowledgeBase.viewOriginal') }}
+                </el-button>
+                <el-button link type="danger" @click="removeDocument(row)">
+                  {{ $t('knowledgeBase.delete') }}
+                </el-button>
+              </template>
+            </el-table-column>
+          </el-table>
+        </el-card>
+
+        <!-- 混合检索 -->
+        <el-card shadow="never" class="section-card search-card">
+          <div class="search-type-tabs">
+            <button
+              v-for="item in searchTypeOptions"
+              :key="item.value"
+              type="button"
+              class="search-type-btn"
+              :class="{ active: searchForm.searchType === item.value }"
+              @click="searchForm.searchType = item.value"
+            >
+              {{ item.label }}
+            </button>
+          </div>
+
+          <div class="search-input-row">
+            <el-input
+              v-model="searchForm.query"
+              clearable
+              :placeholder="$t('knowledgeBase.searchPlaceholder')"
+              class="search-input"
+              @keyup.enter="runSearch"
+            >
+              <template #prefix>
+                <el-icon><Search /></el-icon>
+              </template>
+            </el-input>
+            <el-button type="primary" class="search-btn" :loading="searchLoading" @click="runSearch">
+              <el-icon><Search /></el-icon>
+              {{ $t('knowledgeBase.search') }}
+            </el-button>
+          </div>
+
+          <div class="search-params">
+            <div class="param-item param-slider" v-if="searchForm.searchType !== 'keyword'">
+              <label>{{ $t('knowledgeBase.similarityThreshold') }}</label>
+              <div class="slider-row">
+                <el-slider
+                  v-model="searchForm.similarity"
+                  :min="0"
+                  :max="100"
+                  :show-tooltip="true"
+                  :format-tooltip="(v) => `${v}%`"
+                />
+                <span class="slider-value">{{ searchForm.similarity }}%</span>
               </div>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.uploadedAt')" width="180">
-            <template #default="{ row }">{{ formatDateTime(row.created_at) }}</template>
-          </el-table-column>
-          <el-table-column :label="$t('knowledgeBase.actions')" width="220" fixed="right">
-            <template #default="{ row }">
-              <el-button link type="primary" @click="viewText(row)">{{ $t('knowledgeBase.viewText') }}</el-button>
-              <el-button link type="primary" @click="reExtract(row)">{{ $t('knowledgeBase.reExtract') }}</el-button>
-              <el-button link type="danger" @click="removeDocument(row)">{{ $t('knowledgeBase.delete') }}</el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-      </el-card>
+            </div>
+
+            <div class="param-item param-recall">
+              <label>{{ $t('knowledgeBase.recallCount') }}</label>
+              <el-input-number
+                v-model="searchForm.recallCount"
+                :min="1"
+                :max="50"
+                controls-position="right"
+                class="recall-input"
+              />
+            </div>
+
+            <div class="param-item param-slider" v-if="searchForm.searchType === 'hybrid'">
+              <label>
+                {{ $t('knowledgeBase.vectorRatio') }}
+                <el-tooltip :content="$t('knowledgeBase.vectorRatioTip')" placement="top">
+                  <el-icon class="label-tip"><InfoFilled /></el-icon>
+                </el-tooltip>
+              </label>
+              <div class="slider-row">
+                <el-slider
+                  v-model="searchForm.vectorRatio"
+                  :min="0"
+                  :max="100"
+                  :show-tooltip="true"
+                  :format-tooltip="(v) => `${v}%`"
+                />
+                <span class="slider-value">{{ searchForm.vectorRatio }}%</span>
+              </div>
+            </div>
+          </div>
+
+          <div v-if="searchResults.length" class="search-results">
+            <div class="search-results-title">
+              {{ $t('knowledgeBase.searchResults') }} ({{ searchResults.length }})
+            </div>
+            <div
+              v-for="(item, idx) in searchResults"
+              :key="`${item.id}-${idx}`"
+              class="search-result-item"
+            >
+              <div class="result-meta">
+                <span class="result-index">#{{ idx + 1 }}</span>
+                <span class="result-title">{{ item.title }}</span>
+                <el-tag v-if="item.score != null" size="small" type="info">
+                  {{ (item.score * 100).toFixed(1) }}%
+                </el-tag>
+              </div>
+              <div class="result-content">{{ item.content }}</div>
+            </div>
+          </div>
+        </el-card>
+      </div>
     </template>
 
     <!-- 新建/编辑知识库 -->
@@ -246,6 +380,7 @@
 <script>
 import {
   getKnowledgeBases,
+  getKnowledgeBaseDetail,
   createKnowledgeBase,
   updateKnowledgeBase,
   deleteKnowledgeBase,
@@ -256,7 +391,7 @@ import {
 } from '@/api/requirement-analysis'
 import api from '@/utils/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, UploadFilled, InfoFilled } from '@element-plus/icons-vue'
+import { Plus, UploadFilled, InfoFilled, Search } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 
 const ALLOWED_EXTENSIONS = ['.pdf', '.doc', '.docx', '.txt', '.md']
@@ -274,7 +409,7 @@ const defaultBaseForm = () => ({
 
 export default {
   name: 'KnowledgeBaseManage',
-  components: { Plus, UploadFilled, InfoFilled },
+  components: { Plus, UploadFilled, InfoFilled, Search },
   setup() {
     const { t, locale } = useI18n()
     return { t, locale }
@@ -298,12 +433,61 @@ export default {
       showTextModal: false,
       previewDoc: null,
       pendingUploadFiles: [],
-      uploadConfirmTimer: null
+      uploadConfirmTimer: null,
+      searchLoading: false,
+      searchResults: [],
+      searchForm: {
+        searchType: 'hybrid',
+        query: '',
+        similarity: 0,
+        recallCount: 5,
+        vectorRatio: 30
+      }
     }
   },
   computed: {
     totalSize() {
       return this.bases.reduce((sum, item) => sum + (item.total_size || 0), 0)
+    },
+    detailTotalSize() {
+      if (this.selectedBase?.total_size != null) return this.selectedBase.total_size
+      return this.documents.reduce((sum, doc) => sum + (doc.file_size || 0), 0)
+    },
+    vectorStatusKey() {
+      if (!this.selectedBase) return 'pending'
+      if (this.selectedBase.enable_vectorization === false) return 'disabled'
+      if (!this.documents.length) return 'pending'
+      if (this.documents.some((d) => d.status === 'processing')) return 'processing'
+      if (this.documents.every((d) => d.is_vectorized)) return 'completed'
+      if (this.documents.some((d) => d.status === 'failed')) return 'failed'
+      return 'pending'
+    },
+    vectorStatusLabel() {
+      const map = {
+        completed: this.t('knowledgeBase.vectorCompleted'),
+        processing: this.t('knowledgeBase.vectorProcessing'),
+        failed: this.t('knowledgeBase.vectorFailed'),
+        disabled: this.t('knowledgeBase.vectorDisabled'),
+        pending: this.t('knowledgeBase.vectorPending')
+      }
+      return map[this.vectorStatusKey] || map.pending
+    },
+    vectorStatusTagType() {
+      const map = {
+        completed: 'success',
+        processing: 'warning',
+        failed: 'danger',
+        disabled: 'info',
+        pending: 'info'
+      }
+      return map[this.vectorStatusKey] || 'info'
+    },
+    searchTypeOptions() {
+      return [
+        { value: 'hybrid', label: this.t('knowledgeBase.searchHybrid') },
+        { value: 'semantic', label: this.t('knowledgeBase.searchSemantic') },
+        { value: 'keyword', label: this.t('knowledgeBase.searchKeyword') }
+      ]
     },
     baseRules() {
       return {
@@ -465,12 +649,33 @@ export default {
 
     async openDocuments(base) {
       this.selectedBase = base
-      await this.loadDocuments()
+      this.searchResults = []
+      this.searchForm = {
+        searchType: 'hybrid',
+        query: '',
+        similarity: 0,
+        recallCount: 5,
+        vectorRatio: 30
+      }
+      await Promise.all([this.refreshSelectedBase(), this.loadDocuments()])
+    },
+
+    async refreshSelectedBase() {
+      if (!this.selectedBase?.id) return
+      try {
+        const response = await getKnowledgeBaseDetail(this.selectedBase.id)
+        if (response.data) {
+          this.selectedBase = { ...this.selectedBase, ...response.data }
+        }
+      } catch (error) {
+        // 保留列表中的基础信息即可
+      }
     },
 
     backToList() {
       this.selectedBase = null
       this.documents = []
+      this.searchResults = []
       this.loadBases()
     },
 
@@ -486,6 +691,69 @@ export default {
       } finally {
         this.docsLoading = false
       }
+    },
+
+    docVectorLabel(row) {
+      if (row.status === 'processing') return this.t('knowledgeBase.vectorProcessing')
+      if (row.status === 'failed') return this.t('knowledgeBase.vectorFailed')
+      if (row.is_vectorized) return this.t('knowledgeBase.vectorCompleted')
+      return this.t('knowledgeBase.vectorPending')
+    },
+
+    docVectorTagType(row) {
+      if (row.status === 'processing') return 'warning'
+      if (row.status === 'failed') return 'danger'
+      if (row.is_vectorized) return 'success'
+      return 'info'
+    },
+
+    viewOriginal(doc) {
+      if (doc.file_url) {
+        window.open(doc.file_url, '_blank')
+        return
+      }
+      this.viewText(doc)
+    },
+
+    runSearch() {
+      const query = (this.searchForm.query || '').trim()
+      if (!query) {
+        ElMessage.warning(this.t('knowledgeBase.searchPlaceholder'))
+        return
+      }
+
+      // 关键词检索：基于已提取文本做本地召回，便于验证知识库内容
+      if (this.searchForm.searchType === 'keyword') {
+        this.searchLoading = true
+        try {
+          const lower = query.toLowerCase()
+          const matched = []
+          for (const doc of this.documents) {
+            const text = doc.extracted_text || ''
+            if (!text.toLowerCase().includes(lower)) continue
+            const idx = text.toLowerCase().indexOf(lower)
+            const start = Math.max(0, idx - 60)
+            const end = Math.min(text.length, idx + query.length + 140)
+            matched.push({
+              id: doc.id,
+              title: doc.title,
+              content: `${start > 0 ? '...' : ''}${text.slice(start, end)}${end < text.length ? '...' : ''}`,
+              score: null
+            })
+            if (matched.length >= this.searchForm.recallCount) break
+          }
+          this.searchResults = matched
+          if (!matched.length) {
+            ElMessage.info(this.t('knowledgeBase.searchEmpty'))
+          }
+        } finally {
+          this.searchLoading = false
+        }
+        return
+      }
+
+      this.searchResults = []
+      ElMessage.info(this.t('knowledgeBase.searchComingSoon'))
     },
 
     onUploadChange(uploadFile) {
@@ -581,7 +849,7 @@ export default {
               : this.t('knowledgeBase.uploadSuccess')
           )
           if (this.selectedBase?.id === baseId) {
-            await this.loadDocuments()
+            await Promise.all([this.loadDocuments(), this.refreshSelectedBase()])
           }
         }
       } finally {
@@ -599,7 +867,7 @@ export default {
         )
         await deleteKnowledgeDocument(doc.id)
         ElMessage.success(this.t('knowledgeBase.deleteDocSuccess'))
-        await this.loadDocuments()
+        await Promise.all([this.loadDocuments(), this.refreshSelectedBase()])
       } catch (error) {
         if (error !== 'cancel') {
           ElMessage.error(error.response?.data?.detail || error.message || this.t('knowledgeBase.loadFailed'))
@@ -664,7 +932,10 @@ export default {
     formatDateTime(value) {
       if (!value) return '-'
       try {
-        return new Date(value).toLocaleString(this.locale === 'zh-cn' ? 'zh-CN' : 'en-US')
+        const d = new Date(value)
+        if (Number.isNaN(d.getTime())) return value
+        const pad = (n) => String(n).padStart(2, '0')
+        return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`
       } catch (e) {
         return value
       }
@@ -678,6 +949,12 @@ export default {
   padding: 24px;
   min-height: 100%;
   background: #f5f7fa;
+}
+
+/* 去掉文字/链接按钮阴影（全局 primary 按钮阴影会作用到 link） */
+.knowledge-base-manage :deep(.el-button.is-link),
+.knowledge-base-manage :deep(.el-button.is-text) {
+  box-shadow: none !important;
 }
 
 .page-header {
@@ -740,31 +1017,281 @@ export default {
   opacity: 0.95;
 }
 
-.table-card,
-.upload-card {
+.table-card {
   border-radius: 8px;
   margin-bottom: 16px;
 }
 
+.detail-page {
+  max-width: 1200px;
+}
+
+.detail-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+}
+
+.back-btn {
+  font-size: 14px;
+  padding: 0;
+}
+
+.detail-title {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: #303133;
+  line-height: 1.3;
+}
+
+.status-tag {
+  vertical-align: middle;
+}
+
+.section-card {
+  border-radius: 8px;
+  margin-bottom: 16px;
+  border: 1px solid #ebeef5;
+}
+
+.info-card :deep(.el-card__body) {
+  padding: 0;
+}
+
+.info-card :deep(.el-descriptions) {
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.info-card :deep(.el-descriptions__body .el-descriptions__table) {
+  border-radius: 8px;
+}
+
+.info-card :deep(.el-descriptions__body .el-descriptions__table.is-bordered .el-descriptions__cell) {
+  border-color: #ebeef5;
+}
+
+.section-card :deep(.el-card__header) {
+  padding: 14px 20px;
+  border-bottom: 1px solid #ebeef5;
+}
+
+.section-card :deep(.el-card__body) {
+  padding: 20px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.section-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: #303133;
+}
+
+.upload-link {
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.kb-descriptions :deep(.el-descriptions__label) {
+  width: 120px;
+  color: #606266;
+  background: #fafafa;
+}
+
+.kb-descriptions :deep(.el-descriptions__content) {
+  color: #303133;
+  min-width: 140px;
+}
+
 .doc-title {
   color: #303133;
+  font-weight: 500;
+}
+
+.doc-table :deep(.el-table__header th) {
+  background: #fafafa;
+  color: #606266;
   font-weight: 600;
 }
 
-.doc-filename {
-  color: #909399;
-  font-size: 12px;
-  margin-top: 4px;
+.search-card :deep(.el-card__body) {
+  padding: 20px 24px 24px;
 }
 
-.doc-vectorized {
-  margin-top: 4px;
-  color: #67c23a;
+.search-type-tabs {
+  display: inline-flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 16px;
+  border: 1px solid #e4e7ed;
+  border-radius: 6px;
+  overflow: hidden;
+  background: #fff;
+}
+
+.search-type-btn {
+  appearance: none;
+  border: none;
+  background: transparent;
+  padding: 8px 18px;
+  font-size: 13px;
+  color: #606266;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  border-right: 1px solid #e4e7ed;
+  line-height: 1.4;
+}
+
+.search-type-btn:last-child {
+  border-right: none;
+}
+
+.search-type-btn:hover {
+  color: var(--th-color-primary, #6c5ce7);
+}
+
+.search-type-btn.active {
+  background: var(--th-color-primary, #6c5ce7);
+  color: #fff;
+}
+
+.search-input-row {
+  display: flex;
+  align-items: center;
+  gap: 0;
+  margin-bottom: 20px;
+}
+
+.search-input {
+  flex: 1;
+}
+
+.search-input :deep(.el-input__wrapper) {
+  border-radius: 6px 0 0 6px;
+  box-shadow: 0 0 0 1px #dcdfe6 inset;
+}
+
+.search-input :deep(.el-input__wrapper.is-focus) {
+  box-shadow: 0 0 0 1px var(--th-color-primary, #6c5ce7) inset;
+}
+
+.search-btn {
+  height: 32px;
+  border-radius: 0 6px 6px 0;
+  padding: 0 18px;
+  margin-left: -1px;
+}
+
+.search-params {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 24px 32px;
+}
+
+.param-item {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.param-item label {
+  font-size: 13px;
+  color: #606266;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.param-slider {
+  flex: 1;
+  min-width: 220px;
+  max-width: 360px;
+}
+
+.slider-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+.slider-row :deep(.el-slider) {
+  flex: 1;
+}
+
+.slider-value {
+  min-width: 42px;
+  text-align: right;
+  color: #606266;
+  font-size: 13px;
+}
+
+.param-recall {
+  min-width: 120px;
+}
+
+.recall-input {
+  width: 110px;
+}
+
+.search-results {
+  margin-top: 20px;
+  border-top: 1px solid #ebeef5;
+  padding-top: 16px;
+}
+
+.search-results-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #303133;
+  margin-bottom: 12px;
+}
+
+.search-result-item {
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  margin-bottom: 10px;
+  background: #fafbfc;
+}
+
+.result-meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.result-index {
+  color: #909399;
   font-size: 12px;
+}
+
+.result-title {
+  font-weight: 600;
+  color: #303133;
+  font-size: 13px;
+}
+
+.result-content {
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 .label-tip {
-  margin-left: 4px;
+  margin-left: 2px;
   color: #909399;
   vertical-align: middle;
   cursor: help;
@@ -795,5 +1322,27 @@ export default {
   color: #303133;
   line-height: 1.6;
   margin: 0;
+}
+
+@media (max-width: 768px) {
+  .search-input-row {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 8px;
+  }
+
+  .search-input :deep(.el-input__wrapper),
+  .search-btn {
+    border-radius: 6px;
+    margin-left: 0;
+  }
+
+  .search-btn {
+    width: 100%;
+  }
+
+  .param-slider {
+    max-width: none;
+  }
 }
 </style>

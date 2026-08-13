@@ -39,8 +39,10 @@ export default {
 
     // UI Automation
     elementManagement: 'Element Management',
+    casesAndScripts: 'Cases & Scripts',
     caseManagement: 'Case Management',
     scriptGeneration: 'Script Generation',
+    playwrightScriptRecording: 'Playwright Script Recording',
     scriptList: 'Script List',
     suiteManagement: 'Suite Management',
     executionRecords: 'Execution Records',

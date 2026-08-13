@@ -127,7 +127,7 @@ export default {
     apiTesting: 'API Testing',
     apiTestingDesc: 'Efficient API automation testing and management',
     uiAutomation: 'UI Automation Testing',
-    uiAutomationDesc: 'Visual Web/App UI automation testing',
+    uiAutomationDesc: 'Visual Web UI automation testing',
     dataFactory: 'Data Factory',
     dataFactoryDesc: 'Flexible test data construction and management',
     aiIntelligentMode: 'AI Intelligent Mode',

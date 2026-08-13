@@ -152,11 +152,6 @@
             </router-link>
           </div>
         </el-form>
-
-        <!-- 底部信息 -->
-        <div class="bottom-info">
-          <p>{{ $t('auth.copyright') }}</p>
-        </div>
       </div>
     </div>
   </div>
@@ -612,17 +607,6 @@ const handleLogin = async () => {
       &:hover {
         color: var(--th-color-primary);
       }
-    }
-  }
-
-  .bottom-info {
-    margin-top: 60px;
-    text-align: center;
-
-    p {
-      font-size: 12px;
-      color: #c0c4cc;
-      margin: 0;
     }
   }
 }

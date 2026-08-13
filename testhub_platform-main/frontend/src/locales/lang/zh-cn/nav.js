@@ -39,8 +39,10 @@ export default {
 
     // UI自动化
     elementManagement: '元素管理',
+    casesAndScripts: '用例与脚本',
     caseManagement: '用例管理',
     scriptGeneration: '脚本生成',
+    playwrightScriptRecording: 'Playwright 录制脚本',
     scriptList: '脚本列表',
     suiteManagement: '套件管理',
     executionRecords: '执行记录',
