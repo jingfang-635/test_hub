@@ -1,5 +1,7 @@
 # TestHub Docker 本机构建部署指南
 
+> 📌 **零基础？** 请直接看 **[DOCKER傻瓜式教程.md](./DOCKER傻瓜式教程.md)**（Windows 逐步图文版）。
+
 > 适用：公司内网 Windows / Linux / macOS，**无需**逐步安装 Python、Node、MySQL、Redis。  
 > 只需安装 **Docker Desktop**（或 Docker Engine + Compose）。
 
