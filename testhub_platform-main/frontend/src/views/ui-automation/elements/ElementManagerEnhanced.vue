@@ -128,6 +128,14 @@
                   <el-button type="primary" @click="saveElement" :loading="saving" ref="saveButtonRef">
                     {{ $t('uiAutomation.common.save') }}
                   </el-button>
+                  <el-button
+                    v-if="selectedElement.id"
+                    class="detail-delete-btn"
+                    :loading="deleting"
+                    @click="deleteSelectedElement"
+                  >
+                    {{ $t('uiAutomation.common.delete') }}
+                  </el-button>
                 </el-form-item>
               </el-form>
             </div>
@@ -242,21 +250,26 @@
       </template>
     </el-dialog>
 
-    <!-- 右键菜单 -->
-    <ul v-show="showContextMenu" class="context-menu" :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }">
-      <li @click="addContextElement">{{ $t('uiAutomation.element.contextMenu.addElement') }}</li>
-      <!-- 只有在普通页面节点下才显示"新增子页面"选项 -->
-      <li v-if="rightClickedNode && rightClickedNode.type === 'page' && rightClickedNode.id !== 'unassigned'" @click="addSubPage">
-        {{ $t('uiAutomation.element.contextMenu.addSubPage') }}
-      </li>
-      <!-- "未关联页面"节点不显示编辑和删除选项 -->
-      <li v-if="rightClickedNode && rightClickedNode.id !== 'unassigned'" @click="editNode">
-        {{ $t('uiAutomation.element.contextMenu.edit') }}
-      </li>
-      <li v-if="rightClickedNode && rightClickedNode.id !== 'unassigned'" @click="deleteNode">
-        {{ $t('uiAutomation.element.contextMenu.delete') }}
-      </li>
-    </ul>
+    <!-- 右键菜单：挂到 body，避免被侧边栏 overflow 裁切 -->
+    <Teleport to="body">
+      <ul
+        ref="contextMenuRef"
+        v-show="showContextMenu"
+        class="element-context-menu"
+        :style="{ left: contextMenuX + 'px', top: contextMenuY + 'px' }"
+      >
+        <li @click="addContextElement">{{ $t('uiAutomation.element.contextMenu.addElement') }}</li>
+        <li v-if="rightClickedNode && rightClickedNode.type === 'page'" @click="addSubPage">
+          {{ $t('uiAutomation.element.contextMenu.addSubPage') }}
+        </li>
+        <li v-if="rightClickedNode" @click="editNode">
+          {{ $t('uiAutomation.element.contextMenu.edit') }}
+        </li>
+        <li v-if="rightClickedNode" @click="deleteNode">
+          {{ $t('uiAutomation.element.contextMenu.delete') }}
+        </li>
+      </ul>
+    </Teleport>
 
     <!-- 编辑页面对话框 -->
     <el-dialog v-model="showEditPageDialog" :title="$t('uiAutomation.element.editPageTitle')" width="500px" :close-on-click-modal="false">
@@ -369,6 +382,7 @@ const showEditPageDialog = ref(false)
 const showContextMenu = ref(false)
 const contextMenuX = ref(0)
 const contextMenuY = ref(0)
+const contextMenuRef = ref(null)
 const rightClickedNode = ref(null)
 
 // 表单数据
@@ -487,6 +501,7 @@ const editInputRef = ref(null)
 
 // 状态
 const saving = ref(false)
+const deleting = ref(false)
 const validating = ref(false)
 const moving = ref(false) // 拖拽移动锁，防止并发操作
 const generating = ref(false)
@@ -729,10 +744,15 @@ const loadElementTree = async () => {
     console.log('未关联页面的元素:', unassignedElements)
 
     if (unassignedElements.length > 0) {
+      const firstEl = unassignedElements[0]
       const unassignedPage = {
         id: 'unassigned',
         name: '未关联页面',
         type: 'page',
+        // 便于后续“编辑转正”时确定所属项目
+        project_id: isAllProjectsSelected()
+          ? (firstEl.project_id || firstEl.project?.id || null)
+          : selectedProject.value,
         children: unassignedElements.map(element => ({
           ...element,
           type: 'element'
@@ -966,13 +986,30 @@ const onNodeRightClick = (event, data) => {
   rightClickedNode.value = data
   console.log('Set right clicked node:', data)
 
-  // 设置菜单位置
+  // 先按点击位置显示，再根据菜单实际尺寸校正，避免底部/右侧被裁切
   contextMenuX.value = event.clientX
   contextMenuY.value = event.clientY
-
-  // 显示菜单
   showContextMenu.value = true
-  console.log('Show context menu at:', contextMenuX.value, contextMenuY.value)
+
+  nextTick(() => {
+    const menuEl = contextMenuRef.value
+    if (!menuEl) return
+
+    const menuRect = menuEl.getBoundingClientRect()
+    const padding = 8
+    let x = event.clientX
+    let y = event.clientY
+
+    if (x + menuRect.width > window.innerWidth - padding) {
+      x = Math.max(padding, window.innerWidth - menuRect.width - padding)
+    }
+    if (y + menuRect.height > window.innerHeight - padding) {
+      y = Math.max(padding, window.innerHeight - menuRect.height - padding)
+    }
+
+    contextMenuX.value = x
+    contextMenuY.value = y
+  })
 
   // 添加全局点击监听器以隐藏菜单
   const hideMenu = () => {
@@ -1205,6 +1242,36 @@ const deleteElementNode = async (data) => {
       console.error('删除元素失败:', error)
       ElMessage.error(t('uiAutomation.element.messages.deleteFailed'))
     }
+  }
+}
+
+// 详情面板删除当前元素
+const deleteSelectedElement = async () => {
+  if (!selectedElement.value?.id) return
+  try {
+    await ElMessageBox.confirm(
+      t('uiAutomation.element.messages.deleteConfirm', { name: selectedElement.value.name }),
+      t('uiAutomation.element.messages.deleteConfirmTitle'),
+      {
+        type: 'warning',
+        confirmButtonText: t('uiAutomation.common.confirm'),
+        cancelButtonText: t('uiAutomation.common.cancel')
+      }
+    )
+    deleting.value = true
+    const deletedId = selectedElement.value.id
+    await deleteElement(deletedId)
+    ElMessage.success(t('uiAutomation.element.messages.deleteSuccess'))
+    selectedElement.value = null
+    await loadElementTree()
+    treeKey.value += 1
+  } catch (error) {
+    if (error !== 'cancel') {
+      console.error('删除元素失败:', error)
+      ElMessage.error(t('uiAutomation.element.messages.deleteFailed'))
+    }
+  } finally {
+    deleting.value = false
   }
 }
 
@@ -1500,14 +1567,8 @@ const editNode = async () => {
   console.log('Editing node:', rightClickedNode.value)
   console.log('Node type:', rightClickedNode.value.type)
 
-  // 禁止编辑"未关联页面"节点
-  if (rightClickedNode.value.id === 'unassigned') {
-    ElMessage.warning('未关联页面节点不能编辑')
-    return
-  }
-
   if (rightClickedNode.value.type === 'page') {
-    // 编辑页面
+    // 编辑页面（含“未关联页面”虚拟节点：保存时会转为真实分组）
     console.log('Editing page node')
     editPageForm.id = rightClickedNode.value.id
     editPageForm.name = rightClickedNode.value.name
@@ -1617,11 +1678,17 @@ const updatePage = async () => {
   console.log('Updating page with data:', editPageForm)
 
   try {
+    // “未关联页面”是虚拟节点：编辑保存时创建真实分组，并把未关联元素迁入
+    if (editPageForm.id === 'unassigned') {
+      await convertUnassignedPageToGroup()
+      return
+    }
+
     // 构建更新页面的参数，正确处理父页面参数
     const pageData = {
       name: editPageForm.name,
       description: editPageForm.description,
-      project: resolveWriteProjectId(rightClickedNode.value)
+      project_id: resolveWriteProjectId(rightClickedNode.value)
         || rightClickedNode.value?.project_id
         || rightClickedNode.value?.project?.id
         || selectedProject.value
@@ -1648,8 +1715,67 @@ const updatePage = async () => {
     treeKey.value += 1
   } catch (error) {
     console.error('更新页面失败:', error)
-    ElMessage.error(t('uiAutomation.element.messages.pageUpdateFailed'))
+    const detail = error.response?.data
+      ? (typeof error.response.data === 'string'
+        ? error.response.data
+        : (error.response.data.detail || error.response.data.message || JSON.stringify(error.response.data)))
+      : (error.message || '')
+    ElMessage.error(
+      detail
+        ? `${t('uiAutomation.element.messages.pageUpdateFailed')}: ${detail}`
+        : t('uiAutomation.element.messages.pageUpdateFailed')
+    )
   }
+}
+
+// 将“未关联页面”虚拟节点转为真实页面分组，并迁移其中的元素
+const convertUnassignedPageToGroup = async () => {
+  const unassignedNode = treeData.value.find(n => n.id === 'unassigned') || rightClickedNode.value
+  const projectId = ensureWriteProjectSelected(unassignedNode)
+  if (!projectId) return
+
+  const pageData = {
+    name: editPageForm.name,
+    description: editPageForm.description,
+    project: projectId
+  }
+  if (editPageForm.parent_page) {
+    pageData.parent_group = editPageForm.parent_page
+  }
+
+  const createRes = await createElementGroup(pageData)
+  const newGroup = createRes.data
+  let newGroupId = newGroup?.id
+
+  // 兼容旧后端未返回 id 的情况：按名称回查刚创建的分组
+  if (!newGroupId) {
+    const listRes = await getElementGroups({ project: projectId, search: editPageForm.name })
+    const groups = listRes.data?.results || listRes.data || []
+    const matched = groups.find(g => g.name === editPageForm.name)
+    newGroupId = matched?.id
+  }
+
+  if (!newGroupId) {
+    throw new Error('创建页面分组失败：未返回分组 ID')
+  }
+
+  const elementNodes = (unassignedNode?.children || []).filter(c => c.type === 'element')
+  if (elementNodes.length > 0) {
+    await Promise.all(elementNodes.map(el => updateElement(el.id, {
+      group_id: newGroupId,
+      page: editPageForm.name,
+      project_id: el.project_id || el.project?.id || projectId
+    })))
+  }
+
+  ElMessage.success(t('uiAutomation.element.messages.pageUpdateSuccess'))
+  showEditPageDialog.value = false
+
+  await Promise.all([
+    loadPages(),
+    loadElementTree()
+  ])
+  treeKey.value += 1
 }
 </script>
 
@@ -1750,6 +1876,26 @@ const updatePage = async () => {
   color: #f56c6c;
 }
 
+.detail-delete-btn {
+  margin-left: 8px;
+  background-color: #f56c6c;
+  border-color: #f56c6c;
+  color: #fff;
+}
+
+.detail-delete-btn:hover,
+.detail-delete-btn:focus {
+  background-color: #f78989;
+  border-color: #f78989;
+  color: #fff;
+}
+
+.detail-delete-btn:active {
+  background-color: #dd6161;
+  border-color: #dd6161;
+  color: #fff;
+}
+
 .main-content {
   flex: 1;
   overflow: auto;
@@ -1797,8 +1943,11 @@ const updatePage = async () => {
   margin-left: 2ch;
 }
 
-/* 右键菜单样式 */
-.context-menu {
+/* 右键菜单样式（Teleport 到 body，需非 scoped 才能命中） */
+</style>
+
+<style>
+.element-context-menu {
   position: fixed;
   z-index: 9999;
   background: white;
@@ -1811,14 +1960,14 @@ const updatePage = async () => {
   min-width: 120px;
 }
 
-.context-menu li {
+.element-context-menu li {
   padding: 8px 15px;
   cursor: pointer;
   font-size: 14px;
   color: #606266;
 }
 
-.context-menu li:hover {
+.element-context-menu li:hover {
   background-color: #f5f7fa;
   color: #409eff;
 }

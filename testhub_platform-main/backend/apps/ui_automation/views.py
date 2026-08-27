@@ -275,6 +275,7 @@ class LocatorStrategyViewSet(viewsets.ModelViewSet):
 class ElementViewSet(viewsets.ModelViewSet):
     queryset = Element.objects.all()
     permission_classes = [IsAuthenticated]
+    pagination_class = StandardPagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['project', 'locator_strategy', 'element_type', 'validation_status', 'group']
     search_fields = ['name', 'description', 'page', 'component_name']
@@ -475,6 +476,34 @@ class ElementGroupViewSet(viewsets.ModelViewSet):
         return ElementGroup.objects.filter(project__in=accessible_projects).select_related('project',
                                                                                            'parent_group').order_by(
             'order', 'name')
+
+    def perform_update(self, serializer):
+        """分组改名时同步元素 page 字段与用例步骤 page_filter，保证用例详情页面下拉一致。"""
+        old_name = serializer.instance.name
+        project_id = serializer.instance.project_id
+        group_id = serializer.instance.id
+        instance = serializer.save()
+        new_name = instance.name
+        if not old_name or old_name == new_name:
+            return
+
+        # 本分组下的元素
+        Element.objects.filter(group_id=instance.id).update(page=new_name)
+        # 同项目下仍使用旧页面名的元素（兼容仅写了 page、未绑 group 的数据）
+        Element.objects.filter(project_id=project_id, page=old_name).update(page=new_name)
+
+        # 1) 步骤 page_filter 仍为旧分组名
+        TestCaseStep.objects.filter(
+            test_case__project_id=project_id,
+            page_filter=old_name,
+        ).update(page_filter=new_name)
+
+        # 2) 引用了本分组元素的步骤（即使 page_filter 与旧名不一致也强制跟随）
+        element_ids = list(
+            Element.objects.filter(group_id=group_id).values_list('id', flat=True)
+        )
+        if element_ids:
+            TestCaseStep.objects.filter(element_id__in=element_ids).update(page_filter=new_name)
 
     @action(detail=False, methods=['get'])
     def tree(self, request):

@@ -44,6 +44,186 @@ class PlaywrightTestEngine:
         self.context: Optional[BrowserContext] = None
         self.page: Optional[Page] = None
 
+    async def _dismiss_blocking_overlays(self, timeout_ms: int = 2000) -> None:
+        """关闭拦截点击的常见遮罩（如登录弹窗 .popup-mask）。"""
+        if not self.page:
+            return
+        selectors = ('.popup-mask', '.el-overlay', '.modal-backdrop', '.van-overlay')
+        for sel in selectors:
+            try:
+                loc = self.page.locator(sel).first
+                if await loc.count() == 0:
+                    continue
+                if not await loc.is_visible():
+                    continue
+                try:
+                    await loc.wait_for(state='hidden', timeout=timeout_ms)
+                    continue
+                except Exception:
+                    pass
+                try:
+                    await self.page.keyboard.press('Escape')
+                    await loc.wait_for(state='hidden', timeout=800)
+                    continue
+                except Exception:
+                    pass
+                # 仍可见则禁用指针拦截，避免挡住后续业务点击
+                await loc.evaluate(
+                    """el => {
+                        el.style.pointerEvents = 'none';
+                        el.style.display = 'none';
+                    }"""
+                )
+            except Exception:
+                continue
+
+    @staticmethod
+    def _collect_link_target(element_name: str, locator_value: str) -> Optional[str]:
+        """识别收藏相关链接目标：'已收藏' | '收藏商品' | None。"""
+        text = f'{element_name or ""} {locator_value or ""}'
+        if '已收藏' in text:
+            return '已收藏'
+        if '收藏商品' in text:
+            return '收藏商品'
+        return None
+
+    @staticmethod
+    def _is_goods_entry_locator(locator_value: str) -> bool:
+        """是否为商城商品入口（列表点进详情），点击后需确认完成跳转。"""
+        v = (locator_value or '').lower()
+        return 'goods-img' in v or 'goods-list' in v or 'goods-item' in v
+
+    def _is_on_goods_detail(self) -> bool:
+        url = (self.page.url if self.page else '') or ''
+        return '/detail/' in url or '/secdetail/' in url
+
+    async def _wait_for_goods_detail(self, timeout_ms: int) -> bool:
+        """等待进入商品详情（/detail/ 或 /secdetail/），或出现收藏控件。"""
+        import re
+
+        if self._is_on_goods_detail():
+            return True
+        try:
+            await self.page.wait_for_url(
+                re.compile(r'.*/(sec)?detail/\d+'),
+                timeout=max(timeout_ms, 1000),
+            )
+            return True
+        except Exception:
+            pass
+        either = self.page.get_by_role('link', name=re.compile(r'^(收藏商品|已收藏)$'))
+        try:
+            await either.first.wait_for(state='visible', timeout=min(2000, max(timeout_ms, 1000)))
+            return True
+        except Exception:
+            return self._is_on_goods_detail()
+
+    async def _click_goods_entry(
+        self,
+        locator,
+        timeout_ms: int,
+        force_action: bool = False,
+    ) -> Tuple[bool, str]:
+        """
+        点击商品入口并确认进入详情。
+        列表页 .goods-img 点击偶发不触发路由（仍停在 /list），需等待结果并重试。
+        """
+        await self._dismiss_blocking_overlays()
+        await locator.wait_for(state='visible', timeout=timeout_ms)
+        # 搜索结果刚渲染时立刻点可能无效，稍候再点
+        await asyncio.sleep(0.6)
+
+        attempts_desc = []
+        for attempt in range(1, 4):
+            await self._dismiss_blocking_overlays()
+            try:
+                if attempt == 1:
+                    await locator.click(timeout=timeout_ms, force=force_action)
+                    attempts_desc.append('img')
+                elif attempt == 2:
+                    parent = self.page.locator('.goods-img').first
+                    await parent.wait_for(state='visible', timeout=timeout_ms)
+                    await parent.click(timeout=timeout_ms, force=force_action)
+                    attempts_desc.append('goods-img')
+                else:
+                    await locator.evaluate('el => el.click()')
+                    attempts_desc.append('js-click')
+            except Exception as e:
+                attempts_desc.append(f'fail:{e}')
+                await asyncio.sleep(0.3)
+                continue
+
+            nav_timeout = min(max(timeout_ms, 3000), 8000)
+            if await self._wait_for_goods_detail(nav_timeout):
+                return True, (
+                    f'进入商品详情成功（第{attempt}次，方式={"/".join(attempts_desc)}，'
+                    f'URL={self.page.url}）'
+                )
+            await asyncio.sleep(0.4)
+
+        return False, (
+            f'点击商品后未进入详情页（当前URL: {self.page.url}，'
+            f'尝试: {"/".join(attempts_desc)}）'
+        )
+
+    async def _click_collect_link(
+        self,
+        target: str,
+        timeout_ms: int,
+        force_action: bool = False,
+    ) -> Tuple[bool, str]:
+        """
+        幂等处理商品详情收藏开关。
+        详情页可能显示「收藏商品」或「已收藏」，录制脚本硬点其一会因状态不稳定超时。
+        - 目标「已收藏」：若当前已收藏则点击取消；若已是未收藏则跳过。
+        - 目标「收藏商品」：若当前未收藏则点击收藏；若已是已收藏则跳过。
+        """
+        import re
+
+        await self._dismiss_blocking_overlays()
+
+        # 若仍停在列表页（商品点击未跳转），先补点进入详情再等收藏控件
+        if not self._is_on_goods_detail():
+            goods = self.page.locator('.goods-img > img').first
+            try:
+                if await goods.count() > 0 and await goods.is_visible():
+                    ok, detail = await self._click_goods_entry(
+                        goods, timeout_ms, force_action=force_action
+                    )
+                    if not ok:
+                        return False, f'收藏前未能进入详情: {detail}'
+            except Exception as e:
+                logger.warning(f'收藏前补点商品详情失败: {e}')
+
+        either = self.page.get_by_role('link', name=re.compile(r'^(收藏商品|已收藏)$'))
+        try:
+            await either.first.wait_for(state='visible', timeout=timeout_ms)
+        except Exception as e:
+            return False, f'等待收藏控件超时: {e}'
+
+        fav = self.page.get_by_role('link', name='收藏商品')
+        collected = self.page.get_by_role('link', name='已收藏')
+
+        async def _visible(loc) -> bool:
+            try:
+                return (await loc.count()) > 0 and await loc.first.is_visible()
+            except Exception:
+                return False
+
+        if target == '已收藏':
+            if await _visible(collected):
+                await collected.first.click(timeout=timeout_ms, force=force_action)
+                return True, '点击「已收藏」取消收藏'
+            return True, '当前已是未收藏态，跳过点击「已收藏」'
+
+        if target == '收藏商品':
+            if await _visible(fav):
+                await fav.first.click(timeout=timeout_ms, force=force_action)
+                return True, '点击「收藏商品」完成收藏'
+            return True, '当前已是收藏态，跳过点击「收藏商品」'
+
+        return False, f'未知收藏目标: {target}'
+
     async def start(self):
         """启动浏览器"""
         try:
@@ -301,18 +481,32 @@ class PlaywrightTestEngine:
                     locator = self.page.locator(f'xpath={locator_value}')
                 else:
                     locator = self.page.locator(f'xpath={locator_value}').first
+            elif locator_strategy.lower() == 'label':
+                label_sel = locator_value.split(' >> ')[0]
+                locator = self.page.get_by_label(label_sel)
+                if not _has_explicit_index:
+                    locator = locator.first
+            elif locator_strategy.lower() == 'placeholder':
+                ph_sel = locator_value.split(' >> ')[0]
+                locator = self.page.get_by_placeholder(ph_sel)
+                if not _has_explicit_index:
+                    locator = locator.first
+            elif locator_strategy.lower() == 'role':
+                # 支持：link / link[name="收藏商品"] / link[name="登录"] >> nth=1
+                role_sel = locator_value if locator_value.startswith('role=') else f'role={locator_value}'
+                locator = self.page.locator(role_sel)
+                if not _has_explicit_index:
+                    locator = locator.first
             elif locator_strategy.lower() == 'text':
-                locator = self.page.get_by_text(locator_value).first
+                # 支持 "文案" 或 "文案 >> nth=1"
+                text_sel = locator_value if locator_value.startswith('text=') else f'text={locator_value}'
+                locator = self.page.locator(text_sel)
+                if not _has_explicit_index:
+                    locator = locator.first
             elif locator_strategy.lower() == 'name':
                 locator = self.page.locator(f'[name="{locator_value}"]')
                 if not _has_explicit_index:
                     locator = locator.first
-            elif locator_strategy.lower() == 'placeholder':
-                locator = self.page.get_by_placeholder(locator_value).first
-            elif locator_strategy.lower() == 'role':
-                locator = self.page.get_by_role(locator_value).first
-            elif locator_strategy.lower() == 'label':
-                locator = self.page.get_by_label(locator_value).first
             elif locator_strategy.lower() == 'title':
                 locator = self.page.get_by_title(locator_value).first
             elif locator_strategy.lower() == 'test-id':
@@ -629,6 +823,58 @@ class PlaywrightTestEngine:
                         return False, error_log, screenshot_base64
                 else:
                     # 普通元素：正常点击
+                    # 登录弹窗等遮罩会拦截 pointer events，先尝试关闭
+                    await self._dismiss_blocking_overlays()
+
+                    collect_target = self._collect_link_target(element_name, locator_value)
+                    if collect_target:
+                        ok, detail = await self._click_collect_link(
+                            collect_target, timeout_ms, force_action=force_action
+                        )
+                        execution_time = round(time.time() - start_time, 2)
+                        if ok:
+                            log = f"✓ 点击元素 '{element_name}' 成功\n"
+                            log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                            log += f"  - 收藏处理: {detail}\n"
+                            log += f"  - 超时设置: {timeout_ms/1000}秒\n"
+                            log += f"  - 执行时间: {execution_time}秒"
+                            return True, log, None
+                        error_log = f"✗ 操作超时\n  - 元素: '{element_name}'\n"
+                        error_log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                        error_log += f"  - 超时时间: {timeout_ms/1000}秒\n"
+                        error_log += f"  - 错误: {detail}\n"
+                        screenshot_base64 = None
+                        try:
+                            screenshot = await self.page.screenshot()
+                            screenshot_base64 = f"data:image/png;base64,{base64.b64encode(screenshot).decode()}"
+                        except Exception:
+                            pass
+                        return False, error_log, screenshot_base64
+
+                    # 商品列表入口：点击成功不等于已进详情，需确认 URL / 控件
+                    if self._is_goods_entry_locator(locator_value):
+                        ok, detail = await self._click_goods_entry(
+                            locator, timeout_ms, force_action=force_action
+                        )
+                        execution_time = round(time.time() - start_time, 2)
+                        if ok:
+                            log = f"✓ 点击元素 '{element_name}' 成功\n"
+                            log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                            log += f"  - 商品跳转: {detail}\n"
+                            log += f"  - 超时设置: {timeout_ms/1000}秒\n"
+                            log += f"  - 执行时间: {execution_time}秒"
+                            return True, log, None
+                        error_log = f"✗ 点击商品未进入详情\n  - 元素: '{element_name}'\n"
+                        error_log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                        error_log += f"  - 错误: {detail}\n"
+                        screenshot_base64 = None
+                        try:
+                            screenshot = await self.page.screenshot()
+                            screenshot_base64 = f"data:image/png;base64,{base64.b64encode(screenshot).decode()}"
+                        except Exception:
+                            pass
+                        return False, error_log, screenshot_base64
+
                     # 如果启用了强制操作，先等待元素在 DOM 中，不要求可见
                     if force_action:
                         try:

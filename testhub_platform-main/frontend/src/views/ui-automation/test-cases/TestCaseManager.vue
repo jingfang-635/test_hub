@@ -621,7 +621,7 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search, Plus, Edit, Delete, Check, CaretRight, ArrowUp, ArrowDown, Rank, Picture, Warning, View, ZoomIn, Refresh, WarningFilled, MagicStick, VideoCamera
@@ -647,7 +647,10 @@ import {
   getCodegenStatus,
   stopCodegenRecording,
   getCodegenRecordedContent,
-  parseCodegenToCaseSteps
+  parseCodegenToCaseSteps,
+  getElementGroups,
+  getElementGroupTree,
+  getTestCaseDetail
 } from '@/api/ui_automation'
 import { getVariableFunctions } from '@/api/data-factory'
 
@@ -668,6 +671,7 @@ const testCases = ref([])
 const selectedTestCase = ref(null)
 const currentSteps = ref([])
 const availableElements = ref([])
+const availablePageNames = ref([])
 const searchKeyword = ref('')
 const showCreateDialog = ref(false)
 const editingTestCase = ref(null)
@@ -747,12 +751,14 @@ const filteredTestCases = computed(() => {
   )
 })
 
-// 获取所有可用页面（去重）
+// 获取所有可用页面（去重）：合并元素 page 字段与最新分组名
 const distinctPages = computed(() => {
-  const pages = new Set()
+  const pages = new Set(availablePageNames.value.filter(Boolean))
   availableElements.value.forEach(elem => {
     if (elem.page) {
       pages.add(elem.page)
+    } else {
+      pages.add('未关联页面')
     }
   })
   return ['全部页面', ...Array.from(pages)]
@@ -760,23 +766,61 @@ const distinctPages = computed(() => {
 
 // 根据页面筛选元素列表
 const getFilteredElements = (step) => {
-  if (!step.page_filter || step.page_filter === '全部页面') {
-    return availableElements.value
+  const pageFilter = step.page_filter
+  let list
+  if (!pageFilter || pageFilter === '全部页面') {
+    list = [...availableElements.value]
+  } else if (pageFilter === '未关联页面') {
+    list = availableElements.value.filter(elem => !elem.page)
+  } else {
+    // 兼容录制：步骤 page_filter=home，但元素 page 为空、仅 name 前缀为 home_
+    list = availableElements.value.filter(elem => {
+      if (elem.page === pageFilter) return true
+      if (!elem.page && typeof elem.name === 'string' && elem.name.startsWith(`${pageFilter}_`)) return true
+      return false
+    })
+    // 筛选结果为空时回退为全部，避免下拉「无数据」只显示裸 id
+    if (list.length === 0) {
+      list = [...availableElements.value]
+    }
   }
-  return availableElements.value.filter(elem => elem.page === step.page_filter)
+
+  // 已选元素若不在列表中：从缓存补齐，或用步骤上的 element_name 合成选项
+  if (step.element_id) {
+    const selectedId = Number(step.element_id)
+    let selected = list.find(e => e.id === selectedId || e.id === step.element_id)
+    if (!selected) {
+      selected = availableElements.value.find(e => e.id === selectedId || e.id === step.element_id)
+    }
+    if (!selected && (step.element_name || step.element_locator)) {
+      selected = {
+        id: selectedId || step.element_id,
+        name: step.element_name || `元素#${step.element_id}`,
+        locator_value: step.element_locator || '',
+        page: step.page_filter || ''
+      }
+    }
+    if (selected && !list.some(e => e.id === selected.id)) {
+      list = [selected, ...list]
+    }
+  }
+  return list
 }
 
 // 页面筛选变更处理
 const onPageFilterChange = (step) => {
-  const filtered = getFilteredElements(step)
-  const currentElement = availableElements.value.find(e => e.id === step.element_id)
-  if (currentElement && step.page_filter !== '全部页面' && currentElement.page !== step.page_filter) {
-    step.element_id = ''
-  }
-  if (filtered.length === 0 && step.element_id) {
-    const stillValid = filtered.find(e => e.id === step.element_id)
-    if (!stillValid) {
-      step.element_id = ''
+  const pageFilter = step.page_filter
+  const currentElement = availableElements.value.find(e => e.id === step.element_id || e.id === Number(step.element_id))
+  if (currentElement && pageFilter && pageFilter !== '全部页面') {
+    let pageMatched = false
+    if (pageFilter === '未关联页面') {
+      pageMatched = !currentElement.page
+    } else {
+      pageMatched = currentElement.page === pageFilter
+        || (!currentElement.page && typeof currentElement.name === 'string' && currentElement.name.startsWith(`${pageFilter}_`))
+    }
+    if (!pageMatched) {
+      // 不强制清空：允许保留已选元素，避免只剩裸 id
     }
   }
 }
@@ -833,10 +877,98 @@ const loadElements = async () => {
   }
 
   try {
-    const response = await getElements(getProjectQueryParams())
-    availableElements.value = response.data.results || response.data
+    // 下拉需要完整列表；后端默认分页 20，且旧配置可能忽略 page_size，这里翻页拉全
+    const baseParams = {
+      ...getProjectQueryParams(),
+      page_size: 1000
+    }
+    const all = []
+    let page = 1
+    let next = true
+    while (next) {
+      const response = await getElements({ ...baseParams, page })
+      const payload = response.data
+      const batch = payload?.results || (Array.isArray(payload) ? payload : [])
+      all.push(...batch)
+      next = Boolean(payload?.next)
+      page += 1
+      // 防护：异常 next 时避免死循环
+      if (page > 50) break
+    }
+    availableElements.value = all
+    syncStepPageFiltersFromElements()
   } catch (error) {
     console.error('获取元素列表失败:', error)
+  }
+}
+
+/** 用元素当前所属页面刷新步骤中的页面显示，跟随分组改名 */
+const syncStepPageFiltersFromElements = () => {
+  if (!currentSteps.value.length) return
+  currentSteps.value.forEach(step => {
+    if (!step.element_id) return
+    const el = availableElements.value.find(
+      e => e.id === step.element_id || e.id === Number(step.element_id)
+    )
+    if (!el) return
+    const latestPage = el.page || el.group?.name || ''
+    if (latestPage && step.page_filter !== latestPage) {
+      step.page_filter = latestPage
+    }
+  })
+}
+
+const collectGroupNames = (groups, acc = []) => {
+  ;(groups || []).forEach(g => {
+    if (g?.name) acc.push(g.name)
+    if (g?.children?.length) collectGroupNames(g.children, acc)
+  })
+  return acc
+}
+
+const loadPageNames = async () => {
+  if (!projectId.value) {
+    availablePageNames.value = []
+    return
+  }
+  try {
+    const [listRes, treeRes] = await Promise.all([
+      getElementGroups({ ...getProjectQueryParams(), page_size: 1000 }),
+      getElementGroupTree(getProjectQueryParams()).catch(() => null)
+    ])
+    const flat = listRes.data?.results || listRes.data || []
+    const tree = treeRes?.data || []
+    const names = new Set([
+      ...flat.map(g => g.name).filter(Boolean),
+      ...collectGroupNames(tree)
+    ])
+    availablePageNames.value = Array.from(names)
+  } catch (error) {
+    console.error('获取页面分组失败:', error)
+    availablePageNames.value = []
+  }
+}
+
+const refreshSelectedTestCaseSteps = async () => {
+  if (!selectedTestCase.value?.id) return
+  try {
+    const response = await getTestCaseDetail(selectedTestCase.value.id)
+    const latest = response.data
+    if (!latest) return
+    selectedTestCase.value = latest
+    if (latest.steps?.length) {
+      // 保留展开状态
+      const expandedMap = new Map(currentSteps.value.map(s => [s.id, s.expanded]))
+      currentSteps.value = latest.steps.map(step => ({
+        ...step,
+        page_filter: step.page_filter || '',
+        element_id: step.element ?? '',
+        expanded: expandedMap.get(step.id) || false
+      }))
+      syncStepPageFiltersFromElements()
+    }
+  } catch (error) {
+    console.error('刷新用例步骤失败:', error)
   }
 }
 
@@ -847,7 +979,8 @@ const onProjectChange = async () => {
 
   await Promise.all([
     loadTestCases(),
-    loadElements()
+    loadElements(),
+    loadPageNames()
   ])
 }
 
@@ -863,9 +996,10 @@ const selectTestCase = (testCase) => {
     currentSteps.value = testCase.steps.map(step => ({
       ...step,
       page_filter: step.page_filter || '',
-      element_id: step.element || '',
+      element_id: step.element ?? '',
       expanded: false
     }))
+    syncStepPageFiltersFromElements()
   } else {
     currentSteps.value = []
   }
@@ -1638,6 +1772,16 @@ onMounted(async () => {
 
   projectId.value = ALL_PROJECTS
   await onProjectChange()
+})
+
+// 从元素管理改名返回后，刷新分组名/元素 page/步骤 page_filter
+onActivated(async () => {
+  if (!projectId.value) return
+  await Promise.all([
+    loadElements(),
+    loadPageNames(),
+    refreshSelectedTestCaseSteps()
+  ])
 })
 
 onBeforeUnmount(() => {

@@ -79,13 +79,8 @@ frontend/*.log
 frontend/dist/
 # frontend_dist/  # 不再忽略，需要提交到仓库供 Vercel 使用
 
-# Docker
-Dockerfile*
-docker-compose*.yml
-.dockerignore
-nginx.conf
-Makefile
-build-multiplatform.sh
+# Docker 本地覆盖（保留仓库内 docker-compose / Dockerfile）
+docker-compose.override.yml
 
 # ========== 重构升级新增排除项 ==========
 # 忽略统一配置文件（含真实密钥，请勿提交；使用 config.yaml.example 作为模板）

@@ -73,18 +73,19 @@ def parse_recorded(content: str, language: str = 'python') -> dict[str, Any]:
     pages: list[str] = []
 
     goto_re = re.compile(r'''\.goto\(\s*["']([^"']+)["']''')
-    fill_re = re.compile(
-        r'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\([^)]*\))\.fill\(\s*["'](?P<val>[^"']*)["']'''
+    # 定位器参数可能含 nth-child(3) 等括号；动作前可能有 .first / .nth(1) 链
+    _loc = (
+        r'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\((?:[^()"']|"[^"]*"|'[^']*')*\)'''
+        r'''(?:\.(?:first|last|nth\(\s*\d+\s*\)))*)'''
     )
-    click_re = re.compile(
-        r'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\([^)]*\))\.click\('''
-    )
-    select_re = re.compile(
-        r'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\([^)]*\))\.select_option\('''
-    )
+    fill_re = re.compile(_loc + r'''\.fill\(\s*["'](?P<val>[^"']*)["']''')
+    click_re = re.compile(_loc + r'''\.click\(''')
+    select_re = re.compile(_loc + r'''\.select_option\(''')
     expect_re = re.compile(r'''expect\((?P<body>[^)]+)\)''')
     locator_lit_re = re.compile(
-        r'''(?:get_by_role|get_by_label|get_by_text|get_by_placeholder|get_by_test_id|locator|getByRole|getByLabel|getByText|getByPlaceholder|getByTestId)\([^)]*\)'''
+        r'''(?:get_by_role|get_by_label|get_by_text|get_by_placeholder|get_by_test_id|'''
+        r'''locator|getByRole|getByLabel|getByText|getByPlaceholder|getByTestId)'''
+        r'''\((?:[^()"']|"[^"]*"|'[^']*')*\)(?:\.(?:first|last|nth\(\s*\d+\s*\)))*'''
     )
 
     for idx, line in enumerate(lines, start=1):
@@ -1194,13 +1195,33 @@ def _strip_page_prefix(locator: str) -> str:
     return s
 
 
+def _extract_locator_nth_suffix(raw: str) -> str:
+    """从 .nth(1) / .first / .last 链提取 Playwright >> nth= 后缀。"""
+    parts: list[str] = []
+    for m in re.finditer(r'''\.(?:first|last|nth\(\s*(\d+)\s*\))''', raw or '', re.I):
+        token = m.group(0).lower()
+        if token == '.first':
+            parts.append('nth=0')
+        elif token == '.last':
+            parts.append('nth=-1')
+        else:
+            parts.append(f'nth={m.group(1)}')
+    if not parts:
+        return ''
+    return ' >> ' + ' >> '.join(parts)
+
+
 def _parse_playwright_locator(locator: str) -> tuple[str, str]:
     """将 codegen 定位表达式转为 (strategy_name, locator_value)。"""
     raw = _strip_page_prefix(locator or '')
     if not raw:
         return 'css', ''
 
+    nth_suffix = _extract_locator_nth_suffix(raw)
+
     # python: get_by_role("button", name="登录") / js: getByRole('button', { name: '登录' })
+    # 保留 role+name，写入 Playwright role 选择器：button[name="登录"]
+    # （勿降级为 text，否则 aria-label/无障碍名称匹配会丢失）
     role_m = re.search(
         r'''(?:get_by_role|getByRole)\(\s*["']([^"']+)["'](?:[^)]*name\s*[:=]\s*["']([^"']*)["'])?''',
         raw,
@@ -1209,8 +1230,14 @@ def _parse_playwright_locator(locator: str) -> tuple[str, str]:
     if role_m:
         role, name = role_m.group(1), role_m.group(2)
         if name:
-            return 'text', name
-        return 'role', role
+            if '"' in name and "'" not in name:
+                base = f"{role}[name='{name}']"
+            else:
+                safe_name = name.replace('\\', '\\\\').replace('"', '\\"')
+                base = f'{role}[name="{safe_name}"]'
+        else:
+            base = role
+        return 'role', f'{base}{nth_suffix}'
 
     for method, strategy in (
         ('get_by_label|getByLabel', 'label'),
@@ -1221,16 +1248,16 @@ def _parse_playwright_locator(locator: str) -> tuple[str, str]:
     ):
         m = re.search(rf'''(?:{method})\(\s*["']([^"']+)["']''', raw, re.I)
         if m:
-            return strategy, m.group(1)
+            return strategy, f'{m.group(1)}{nth_suffix}'
 
     loc_m = re.search(r'''(?:locator)\(\s*["']([^"']+)["']''', raw, re.I)
     if loc_m:
         val = loc_m.group(1)
         if val.startswith('xpath=') or val.startswith('//') or val.startswith('(//'):
-            return 'xpath', val[6:] if val.startswith('xpath=') else val
+            return 'xpath', f"{val[6:] if val.startswith('xpath=') else val}{nth_suffix}"
         if val.startswith('#'):
-            return 'id', val[1:]
-        return 'css', val
+            return 'id', f'{val[1:]}{nth_suffix}'
+        return 'css', f'{val}{nth_suffix}'
 
     # 回退：整段表达式写入 css，便于人工修正
     return 'css', raw[:500]

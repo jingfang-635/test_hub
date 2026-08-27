@@ -693,7 +693,13 @@ class TestExecutor:
                 elif locator_strategy == 'title':
                     selector = f'[title="{locator_value}"]'
                 elif locator_strategy == 'role':
-                    selector = f'[role="{locator_value}"]'
+                    # 支持：link / link[name="收藏商品"] / role=link[name="收藏商品"]
+                    # 勿降级为 [role="..."] CSS，否则会丢失 name 可访问名称匹配
+                    selector = (
+                        locator_value
+                        if locator_value.startswith('role=')
+                        else f'role={locator_value}'
+                    )
                 elif locator_strategy in ['class', 'class name']:
                     # 空格分隔的多个 class 转成 .class1.class2 形式
                     classes = [c.strip() for c in locator_value.split() if c.strip()]
@@ -910,6 +916,23 @@ class TestExecutor:
                             # 已移除调试面板代码
                         else:
                             # 普通元素：正常点击
+                            # 登录弹窗等遮罩会拦截 pointer events
+                            try:
+                                for _sel in ('.popup-mask', '.el-overlay', '.modal-backdrop'):
+                                    _mask = self.current_page.locator(_sel).first
+                                    if _mask.count() > 0 and _mask.is_visible():
+                                        try:
+                                            _mask.wait_for(state='hidden', timeout=2000)
+                                        except Exception:
+                                            self.current_page.keyboard.press('Escape')
+                                            try:
+                                                _mask.wait_for(state='hidden', timeout=800)
+                                            except Exception:
+                                                _mask.evaluate(
+                                                    "el => { el.style.pointerEvents='none'; el.style.display='none'; }"
+                                                )
+                            except Exception:
+                                pass
                             # 如果刚切换了标签页，增加超时时间并滚动到元素
                             if step_data.get('_just_switched_tab'):
                                 print(f"  ⚠️  刚切换标签页，增加元素等待时间和滚动")
