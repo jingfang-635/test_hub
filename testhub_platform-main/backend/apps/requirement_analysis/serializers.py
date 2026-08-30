@@ -276,7 +276,7 @@ class TestCaseGenerationRequestSerializer(serializers.Serializer):
     use_reviewer_model = serializers.BooleanField(default=True, help_text="是否使用评审模型")
     project = serializers.IntegerField(required=False, allow_null=True, help_text="关联项目ID")
     source_type = serializers.ChoiceField(
-        choices=['manual', 'upload', 'feishu'],
+        choices=['manual', 'upload', 'feishu', 'figma'],
         required=False,
         default='manual',
         help_text="需求来源类型",
@@ -292,6 +292,11 @@ class TestCaseGenerationRequestSerializer(serializers.Serializer):
 class FeishuFetchRequestSerializer(serializers.Serializer):
     """飞书文档拉取请求"""
     url = serializers.CharField(max_length=1000, help_text="飞书文档或 Wiki 链接")
+
+
+class FigmaFetchRequestSerializer(serializers.Serializer):
+    """Figma 设计稿拉取请求"""
+    url = serializers.CharField(max_length=1000, help_text="Figma 设计稿链接")
 
 
 class GenerationConfigSerializer(serializers.ModelSerializer):

@@ -1,205 +1,92 @@
 <template>
-  <div class="generated-testcase-list">
+  <div class="page-container">
     <div class="page-header">
-      <h2>{{ $t('generatedTestCases.title') }}</h2>
+      <h1 class="page-title">{{ $t('generatedTestCases.title') }}</h1>
     </div>
 
-    <div class="filters-section">
-      <div class="filter-card">
-        <div class="filter-group">
-          <label>{{ $t('generatedTestCases.statusFilter') }}</label>
-          <select v-model="selectedStatus" @change="loadTasks" class="filter-select">
-            <option value="">{{ $t('generatedTestCases.allStatus') }}</option>
-            <option value="pending">{{ $t('generatedTestCases.statusPending') }}</option>
-            <option value="generating">{{ $t('generatedTestCases.statusGenerating') }}</option>
-            <option value="reviewing">{{ $t('generatedTestCases.statusReviewing') }}</option>
-            <option value="completed">{{ $t('generatedTestCases.statusCompleted') }}</option>
-            <option value="failed">{{ $t('generatedTestCases.statusFailed') }}</option>
-          </select>
-        </div>
-
-        <div class="filter-actions">
-          <button
-            v-if="selectedTasks.length > 0"
-            class="batch-delete-btn"
-            @click="batchDeleteTasks"
-            :disabled="isDeleting">
-            <span v-if="isDeleting">{{ $t('generatedTestCases.deleting') }}</span>
-            <span v-else>{{ $t('generatedTestCases.batchDelete', { count: selectedTasks.length }) }}</span>
-          </button>
-          <button class="refresh-btn" @click="loadTasks" :disabled="isLoading">
-            <span v-if="isLoading">{{ $t('generatedTestCases.loading') }}</span>
-            <span v-else>{{ $t('generatedTestCases.refresh') }}</span>
-          </button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 统计信息 -->
-    <div class="stats-section" v-if="allStats.total > 0">
-      <div class="stats-card">
-        <div class="stat-item">
-          <span class="stat-number">{{ allStats.total }}</span>
-          <span class="stat-label">{{ $t('generatedTestCases.totalTasks') }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number">{{ allStats.completed }}</span>
-          <span class="stat-label">{{ $t('generatedTestCases.completedCount') }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number">{{ allStats.running }}</span>
-          <span class="stat-label">{{ $t('generatedTestCases.runningCount') }}</span>
-        </div>
-        <div class="stat-item">
-          <span class="stat-number">{{ allStats.failed }}</span>
-          <span class="stat-label">{{ $t('generatedTestCases.failedCount') }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- AI任务列表 -->
-    <div class="testcases-section">
-      <div v-if="isLoading" class="loading-state">
-        <p>{{ $t('generatedTestCases.loadingTasks') }}</p>
-      </div>
-
-      <div v-else-if="tasks.length === 0" class="empty-state">
-        <div class="empty-icon">📝</div>
-        <h3>{{ $t('generatedTestCases.noTasks') }}</h3>
-        <p>{{ $t('generatedTestCases.emptyHint') }}<router-link to="/ai-generation/requirement-analysis">{{ $t('generatedTestCases.aiGeneration') }}</router-link>{{ $t('generatedTestCases.createTask') }}</p>
-      </div>
-
-      <div v-else class="testcases-table">
-        <div class="table-header">
-          <div class="header-cell checkbox-cell">
-            <input
-              type="checkbox"
-              @change="toggleSelectAll"
-              :checked="isAllSelected"
-              class="task-checkbox">
+    <div class="card-container">
+      <el-table
+        :data="tasks"
+        v-loading="isLoading"
+        style="width: 100%"
+        border
+        row-key="task_id"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="50" />
+        <el-table-column :label="$t('generatedTestCases.serialNumber')" width="70" align="center">
+          <template #default="{ $index }">
+            {{ getSerialNumber($index) }}
+          </template>
+        </el-table-column>
+        <el-table-column prop="task_id" :label="$t('generatedTestCases.taskId')" min-width="180" show-overflow-tooltip />
+        <el-table-column :label="$t('generatedTestCases.requirement')" min-width="240" show-overflow-tooltip>
+          <template #default="{ row }">
+            <span class="requirement-name">{{ row.title }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('generatedTestCases.status')" width="110">
+          <template #default="{ row }">
+            <el-tag :type="getStatusTagType(row.status)" size="small">
+              {{ getStatusText(row.status) }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('generatedTestCases.caseCount')" width="100" align="center">
+          <template #default="{ row }">
+            {{ getTestCaseCount(row) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('generatedTestCases.generationTime')" width="180">
+          <template #default="{ row }">
+            {{ formatDateTime(row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('generatedTestCases.actions')" width="280" fixed="right">
+          <template #default="{ row }">
+            <el-button size="small" @click="viewTaskDetail(row)">
+              {{ $t('generatedTestCases.viewDetail') }}
+            </el-button>
+            <el-button
+              v-if="row.status === 'completed'"
+              size="small"
+              type="success"
+              @click="batchAdoptTask(row)"
+            >
+              {{ $t('generatedTestCases.batchAdopt') }}
+            </el-button>
+            <el-button
+              v-if="row.status === 'completed'"
+              size="small"
+              type="danger"
+              @click="batchDiscardTask(row)"
+            >
+              {{ $t('generatedTestCases.batchDiscard') }}
+            </el-button>
+          </template>
+        </el-table-column>
+        <template #empty>
+          <div class="empty-hint">
+            <p class="empty-title">{{ $t('generatedTestCases.noTasks') }}</p>
+            <p>
+              {{ $t('generatedTestCases.emptyHint') }}
+              <router-link to="/ai-generation/requirement-analysis">{{ $t('generatedTestCases.aiGeneration') }}</router-link>
+              {{ $t('generatedTestCases.createTask') }}
+            </p>
           </div>
-          <div class="header-cell serial-cell">{{ $t('generatedTestCases.serialNumber') }}</div>
-          <div class="header-cell task-id-cell">{{ $t('generatedTestCases.taskId') }}</div>
-          <div class="header-cell requirement-name-cell">{{ $t('generatedTestCases.requirement') }}</div>
-          <div class="header-cell status-cell">{{ $t('generatedTestCases.status') }}</div>
-          <div class="header-cell count-cell">{{ $t('generatedTestCases.caseCount') }}</div>
-          <div class="header-cell time-cell">{{ $t('generatedTestCases.generationTime') }}</div>
-          <div class="header-cell action-cell">{{ $t('generatedTestCases.actions') }}</div>
-        </div>
-        
-        <div class="table-body">
-          <div 
-            v-for="(task, index) in tasks" 
-            :key="task.task_id"
-            class="table-row"
-            :class="{ 'selected': isTaskSelected(task.task_id) }">
-            <div class="body-cell checkbox-cell">
-              <input
-                type="checkbox"
-                :checked="isTaskSelected(task.task_id)"
-                @change="toggleTaskSelection(task.task_id)"
-                class="task-checkbox">
-            </div>
-            <div class="body-cell serial-cell">{{ getSerialNumber(index) }}</div>
-            <div class="body-cell task-id-cell">{{ task.task_id }}</div>
-            <div class="body-cell requirement-name-cell">
-              <span class="requirement-name">{{ task.title }}</span>
-            </div>
-            <div class="body-cell status-cell">
-              <span class="status-tag" :class="task.status">
-                {{ getStatusText(task.status) }}
-              </span>
-            </div>
-            <div class="body-cell count-cell">
-              <span class="count-badge">{{ getTestCaseCount(task) }}</span>
-            </div>
-            <div class="body-cell time-cell">{{ formatDateTime(task.created_at) }}</div>
-            <div class="body-cell action-cell">
-              <div class="action-buttons">
-                <button
-                  class="view-detail-btn"
-                  @click="viewTaskDetail(task)">
-                  {{ $t('generatedTestCases.viewDetail') }}
-                </button>
-                <button
-                  v-if="task.status === 'completed'"
-                  class="adopt-btn"
-                  @click="batchAdoptTask(task)">
-                  {{ $t('generatedTestCases.batchAdopt') }}
-                </button>
-                <button
-                  v-if="task.status === 'completed'"
-                  class="discard-btn"
-                  @click="batchDiscardTask(task)">
-                  {{ $t('generatedTestCases.batchDiscard') }}
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
+        </template>
+      </el-table>
 
-    <!-- 分页组件 -->
-    <div v-if="tasks.length > 0" class="pagination-section">
-      <div class="pagination-info">
-        {{ paginationInfo }}
-      </div>
-      
-      <div class="pagination-controls">
-        <!-- 每页条数选择 -->
-        <div class="page-size-selector">
-          <label>{{ $t('generatedTestCases.pageSize') }}</label>
-          <select v-model="pagination.pageSize" @change="onPageSizeChange">
-            <option v-for="size in pagination.pageSizeOptions" :key="size" :value="size">
-              {{ $t('generatedTestCases.pageSizeUnit', { size: size }) }}
-            </option>
-          </select>
-        </div>
-
-        <!-- 分页按钮 -->
-        <div class="pagination-buttons">
-          <button
-            class="page-btn"
-            :disabled="pagination.currentPage <= 1"
-            @click="goToPage(pagination.currentPage - 1)">
-            {{ $t('generatedTestCases.previousPage') }}
-          </button>
-          
-          <!-- 页码显示 -->
-          <div class="page-numbers">
-            <span v-for="page in getVisiblePages()" :key="page" class="page-number">
-              <button 
-                v-if="page !== '...'"
-                class="page-btn"
-                :class="{ active: page === pagination.currentPage }"
-                @click="goToPage(page)">
-                {{ page }}
-              </button>
-              <span v-else class="ellipsis">...</span>
-            </span>
-          </div>
-          
-          <button
-            class="page-btn"
-            :disabled="pagination.currentPage >= totalPages"
-            @click="goToPage(pagination.currentPage + 1)">
-            {{ $t('generatedTestCases.nextPage') }}
-          </button>
-        </div>
-
-        <!-- 页码跳转 -->
-        <div class="page-jumper">
-          <label>{{ $t('generatedTestCases.jumpTo') }}</label>
-          <input
-            v-model="jumpPage"
-            type="number"
-            :min="1"
-            :max="totalPages"
-            @keyup.enter="jumpToPage"
-            :placeholder="$t('generatedTestCases.pageNumber')">
-          <button class="jump-btn" @click="jumpToPage">{{ $t('generatedTestCases.jump') }}</button>
-        </div>
+      <div v-if="pagination.total > 0" class="pagination-container">
+        <el-pagination
+          v-model:current-page="pagination.currentPage"
+          v-model:page-size="pagination.pageSize"
+          :page-sizes="pagination.pageSizeOptions"
+          :total="pagination.total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @current-change="handlePageChange"
+          @size-change="onPageSizeChange"
+        />
       </div>
     </div>
 
@@ -316,10 +203,10 @@
               <div class="form-group">
                 <label>{{ $t('generatedTestCases.priority') }}</label>
                 <select v-model="adoptForm.priority">
-                  <option value="low">{{ $t('generatedTestCases.priorityLow') }}</option>
-                  <option value="medium">{{ $t('generatedTestCases.priorityMedium') }}</option>
-                  <option value="high">{{ $t('generatedTestCases.priorityHigh') }}</option>
-                  <option value="critical">{{ $t('generatedTestCases.priorityCritical') }}</option>
+                  <option value="P0">P0</option>
+                  <option value="P1">P1</option>
+                  <option value="P2">P2</option>
+                  <option value="P3">P3</option>
                 </select>
               </div>
               <div class="form-group">
@@ -389,7 +276,6 @@ export default {
     return {
       isLoading: false,
       tasks: [], // 改为任务列表
-      selectedStatus: '',
       selectedTaskDetail: null,
       selectedTestCaseDetail: null,
       showAdoptModal: false,
@@ -401,7 +287,7 @@ export default {
         title: '',
         description: '',
         project_id: null,
-        priority: 'low', // 修改默认值为"低"
+        priority: 'P2',
         test_type: 'functional',
         status: 'draft',
         preconditions: '',
@@ -416,17 +302,9 @@ export default {
       // 分页相关数据
       pagination: {
         currentPage: 1,
-        pageSize: 10, // 改为默认10条
+        pageSize: 10,
         total: 0,
         pageSizeOptions: [10, 20, 50]
-      },
-      jumpPage: '', // 页码跳转输入
-      // 统计数据
-      allStats: {
-        total: 0,
-        completed: 0,
-        running: 0,
-        failed: 0
       }
     }
   },
@@ -435,29 +313,10 @@ export default {
     // 可用版本列表 - 根据是否选择项目来决定显示哪些版本
     availableVersions() {
       if (this.adoptForm.project_id) {
-        // 如果选择了项目，显示该项目的版本
         return this.projectVersions
       } else {
-        // 如果没有选择项目，显示系统所有版本
         return this.allVersions
       }
-    },
-    
-    // 计算总页数
-    totalPages() {
-      return Math.ceil(this.pagination.total / this.pagination.pageSize)
-    },
-    
-    // 计算分页显示信息
-    paginationInfo() {
-      const start = (this.pagination.currentPage - 1) * this.pagination.pageSize + 1
-      const end = Math.min(this.pagination.currentPage * this.pagination.pageSize, this.pagination.total)
-      return this.$t('generatedTestCases.paginationInfo', { start, end, total: this.pagination.total })
-    },
-    
-    // 是否全选
-    isAllSelected() {
-      return this.tasks.length > 0 && this.selectedTasks.length === this.tasks.length
     }
   },
   
@@ -474,13 +333,8 @@ export default {
         let url = '/requirement-analysis/testcase-generation/'
         const params = new URLSearchParams()
         
-        // 添加分页参数
         params.append('page', String(this.pagination.currentPage))
         params.append('page_size', String(this.pagination.pageSize))
-        
-        if (this.selectedStatus) {
-          params.append('status', this.selectedStatus)
-        }
         
         if (params.toString()) {
           url += '?' + params.toString()
@@ -496,47 +350,22 @@ export default {
           this.pagination.total = this.tasks.length
         }
         
-        // 更新统计数据（统计所有数据，不只是当前页）
-        this.updateStats()
-        
       } catch (error) {
         console.error(this.$t('generatedTestCases.loadTasksFailed'), error)
         this.tasks = []
         this.pagination.total = 0
       } finally {
         this.isLoading = false
-        // 清空选择（因为任务列表已更新）
         this.selectedTasks = []
       }
     },
 
-    // 获取序号
     getSerialNumber(index) {
       return (this.pagination.currentPage - 1) * this.pagination.pageSize + index + 1
     },
 
-    // 切换任务选择
-    toggleTaskSelection(taskId) {
-      const index = this.selectedTasks.indexOf(taskId)
-      if (index > -1) {
-        this.selectedTasks.splice(index, 1)
-      } else {
-        this.selectedTasks.push(taskId)
-      }
-    },
-
-    // 判断任务是否被选中
-    isTaskSelected(taskId) {
-      return this.selectedTasks.includes(taskId)
-    },
-
-    // 切换全选
-    toggleSelectAll() {
-      if (this.isAllSelected) {
-        this.selectedTasks = []
-      } else {
-        this.selectedTasks = this.tasks.map(task => task.task_id)
-      }
+    handleSelectionChange(selection) {
+      this.selectedTasks = selection.map(task => task.task_id)
     },
 
     // 批量删除任务
@@ -585,48 +414,6 @@ export default {
       }
     },
 
-    updateStats() {
-      // 不再使用当前页数据统计，改为调用专门的统计方法
-      this.loadAllStats()
-    },
-
-    // 新增方法：获取所有数据的统计信息
-    async loadAllStats() {
-      try {
-        // 构建统计请求URL
-        let url = '/requirement-analysis/testcase-generation/'
-        const params = new URLSearchParams()
-        
-        // 获取所有数据来进行统计
-        params.append('page_size', '10000') // 设置足够大的页面大小来获取所有数据
-        params.append('page', '1')
-        
-        // 如果有状态筛选，也应用到统计中
-        if (this.selectedStatus) {
-          params.append('status', this.selectedStatus)
-        }
-        
-        url += '?' + params.toString()
-        
-        const response = await api.get(url)
-        const allTasks = response.data.results || response.data || []
-        
-        // 统计各状态的数量
-        this.allStats.total = allTasks.length
-        this.allStats.completed = allTasks.filter(t => t.status === 'completed').length
-        this.allStats.running = allTasks.filter(t => ['pending', 'generating', 'reviewing'].includes(t.status)).length
-        this.allStats.failed = allTasks.filter(t => t.status === 'failed').length
-        
-      } catch (error) {
-        console.error(this.$t('generatedTestCases.loadStatsFailed'), error)
-        // 如果获取统计失败，使用分页信息的总数作为备选
-        this.allStats.total = this.pagination.total || 0
-        this.allStats.completed = 0
-        this.allStats.running = 0
-        this.allStats.failed = 0
-      }
-    },
-
     getStatusText(status) {
       const statusMap = {
         'pending': this.$t('generatedTestCases.statusPending'),
@@ -636,6 +423,17 @@ export default {
         'failed': this.$t('generatedTestCases.statusFailed')
       }
       return statusMap[status] || status
+    },
+
+    getStatusTagType(status) {
+      const typeMap = {
+        pending: 'info',
+        generating: 'warning',
+        reviewing: '',
+        completed: 'success',
+        failed: 'danger'
+      }
+      return typeMap[status] || 'info'
     },
 
     // 获取测试用例条数
@@ -799,7 +597,7 @@ export default {
         title: testCase.title,
         description: testCase.title, // 用标题作为描述的默认值
         project_id: null,
-        priority: 'low', // 设置默认值为"低"
+        priority: 'P2',
         test_type: 'functional',
         status: 'draft',
         preconditions: testCase.precondition || '',
@@ -863,7 +661,7 @@ export default {
           title: this.adoptForm.title,
           description: this.adoptForm.description,
           project_id: this.adoptForm.project_id,
-          priority: this.adoptForm.priority || 'low',
+          priority: this.adoptForm.priority || 'P2',
           test_type: this.adoptForm.test_type,
           status: this.adoptForm.status,
           preconditions: this.adoptForm.preconditions,
@@ -874,7 +672,7 @@ export default {
         
         // 确保优先级有默认值
         if (!submitData.priority) {
-          submitData.priority = 'low'
+          submitData.priority = 'P2'
         }
         
         // 调用API创建测试用例
@@ -938,679 +736,64 @@ export default {
       this.loadTasks()
     },
 
-    // 获取项目名称的辅助方法
-    getProjectName(projectId) {
-      const project = this.projects.find(p => p.id === projectId)
-      return project ? project.name : ''
-    },
-
     // 分页相关方法
     onPageSizeChange() {
       this.pagination.currentPage = 1
       this.loadTasks()
     },
 
-    goToPage(page) {
-      if (page >= 1 && page <= this.totalPages) {
-        this.pagination.currentPage = page
-        this.loadTasks()
-      }
+    handlePageChange() {
+      this.loadTasks()
     },
 
-    jumpToPage() {
-      const page = parseInt(this.jumpPage)
-      if (page >= 1 && page <= this.totalPages) {
-        this.pagination.currentPage = page
-        this.jumpPage = ''
-        this.loadTasks()
-      } else {
-        alert(`请输入 1-${this.totalPages} 之间的页码`)
-      }
-    },
-
-    getVisiblePages() {
-      const current = this.pagination.currentPage
-      const total = this.totalPages
-      const pages = []
-
-      if (total <= 7) {
-        // 总页数少于等于7页，显示所有页码
-        for (let i = 1; i <= total; i++) {
-          pages.push(i)
-        }
-      } else {
-        // 总页数大于7页，智能显示页码
-        if (current <= 4) {
-          // 当前页在前部
-          for (let i = 1; i <= 5; i++) {
-            pages.push(i)
-          }
-          pages.push('...')
-          pages.push(total)
-        } else if (current >= total - 3) {
-          // 当前页在后部
-          pages.push(1)
-          pages.push('...')
-          for (let i = total - 4; i <= total; i++) {
-            pages.push(i)
-          }
-        } else {
-          // 当前页在中部
-          pages.push(1)
-          pages.push('...')
-          for (let i = current - 1; i <= current + 1; i++) {
-            pages.push(i)
-          }
-          pages.push('...')
-          pages.push(total)
-        }
-      }
-
-      return pages
+    // 获取项目名称的辅助方法
+    getProjectName(projectId) {
+      const project = this.projects.find(p => p.id === projectId)
+      return project ? project.name : ''
     }
   }
 }
 </script>
 
 <style scoped>
-.generated-testcase-list {
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 15px; /* 进一步减少底部边距 */
-}
-
-.page-header h2 {
-  font-size: 1.6rem; /* H2标题适合的字体大小 */
-  color: #2c3e50;
-  margin-bottom: 0; /* 移除底部边距 */
-  margin-top: 5px; /* 减少顶部边距 */
-}
-
-.page-header p {
-  color: #666;
-  font-size: 1.1rem;
-}
-
-/* 过滤器部分 */
-.filters-section {
-  margin-bottom: 15px; /* 进一步减少底部边距 */
-}
-
-.filter-card {
-  background: white;
-  border-radius: 12px;
-  padding: 25px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+.pagination-container {
+  margin-top: 20px;
   display: flex;
-  gap: 20px;
-  align-items: end;
-  flex-wrap: wrap;
-}
-
-.filter-group {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  min-width: 150px;
-}
-
-.filter-group label {
-  font-weight: bold;
-  color: #2c3e50;
-  font-size: 0.9rem;
-}
-
-.filter-select {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  background: white;
-  cursor: pointer;
-}
-
-.filter-select:focus {
-  outline: none;
-  border-color: #3498db;
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-}
-
-.filter-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.refresh-btn {
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
-}
-
-.refresh-btn:hover:not(:disabled) {
-  background: #2980b9;
-}
-
-.refresh-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.batch-delete-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
-}
-
-.batch-delete-btn:hover:not(:disabled) {
-  background: #c0392b;
-}
-
-.batch-delete-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
-/* 统计信息 */
-.stats-section {
-  margin-bottom: 15px; /* 进一步减少底部边距 */
-}
-
-.stats-card {
-  background: white;
-  border-radius: 12px;
-  padding: 25px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  display: flex;
-  gap: 40px; /* 调整间距，因为现在有4个项目 */
-  justify-content: center;
-}
-
-.stat-item {
-  text-align: center;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-
-.stat-number {
-  font-size: 2rem;
-  font-weight: bold;
-  color: #3498db;
-}
-
-.stat-label {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-/* 测试用例列表 */
-.testcases-section {
-  background: white;
-  border-radius: 12px;
-  padding: 30px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-}
-
-.loading-state, .empty-state {
-  text-align: center;
-  padding: 60px 20px;
-  color: #666;
-}
-
-.empty-icon {
-  font-size: 4rem;
-  margin-bottom: 20px;
-}
-
-.empty-state h3 {
-  color: #2c3e50;
-  margin-bottom: 10px;
-}
-
-.empty-state a {
-  color: #3498db;
-  text-decoration: none;
-}
-
-.empty-state a:hover {
-  text-decoration: underline;
-}
-
-.testcases-table {
-  border: 1px solid #ddd;
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-.table-header {
-  display: grid;
-  grid-template-columns: 50px 60px 180px 320px 100px 100px 180px 200px;
-  background: #f8f9fa;
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-.table-body .table-row {
-  display: grid;
-  grid-template-columns: 50px 60px 180px 320px 100px 100px 180px 200px;
-  border-bottom: 1px solid #eee;
-  transition: background 0.2s ease;
-}
-
-.table-row:hover {
-  background: #f8f9fa;
-}
-
-.table-row.selected {
-  background: #e3f2fd;
-}
-
-.table-row.selected:hover {
-  background: #bbdefb;
-}
-
-.header-cell {
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-right: 1px solid #eee;
-  word-wrap: break-word;
-  word-break: break-word;
-}
-
-.body-cell {
-  padding: 12px;
-  display: flex;
-  align-items: center;
-  border-right: 1px solid #eee;
-  word-wrap: break-word;
-  word-break: break-word;
-}
-
-.header-cell:last-child,
-.body-cell:last-child {
-  border-right: none;
-}
-
-.checkbox-cell {
-  justify-content: center;
-  width: 50px;
-  flex-shrink: 0;
-}
-
-.serial-cell {
-  justify-content: center;
-  width: 60px;
-  font-weight: 500;
-  color: #7f8c8d;
-  flex-shrink: 0;
-}
-
-.task-checkbox {
-  width: 18px;
-  height: 18px;
-  cursor: pointer;
-  accent-color: #3498db;
-}
-
-/* 任务ID列 */
-.task-id-cell {
-  width: 180px;
-  flex-shrink: 0;
-}
-
-.body-cell.task-id-cell {
-  justify-content: flex-start;
-}
-
-/* 关联需求列 */
-.requirement-name-cell {
-  min-width: 320px;
-  max-width: 320px;
-  flex-shrink: 0;
-}
-
-.body-cell.requirement-name-cell {
-  justify-content: flex-start;
-}
-
-/* 状态列 */
-.status-cell {
-  width: 100px;
-  flex-shrink: 0;
-}
-
-.body-cell.status-cell {
-  justify-content: center;
-}
-
-/* 用例条数列 */
-.count-cell {
-  justify-content: center;
-  width: 100px;
-  flex-shrink: 0;
-}
-
-/* 生成时间列 */
-.time-cell {
-  width: 180px;
-  flex-shrink: 0;
-}
-
-.body-cell.time-cell {
-  justify-content: center;
-}
-
-/* 操作列 */
-.action-cell {
-  min-width: 200px;
-  flex-shrink: 0;
-}
-
-.body-cell.action-cell {
-  justify-content: flex-start;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 5px;
-  flex-wrap: nowrap;
-  align-items: center;
-  margin: 0 auto;
-}
-
-.count-badge {
-  background: #3498db;
-  color: white;
-  padding: 4px 12px;
-  border-radius: 12px;
-  font-size: 0.85rem;
-  font-weight: bold;
-  min-width: 30px;
-  text-align: center;
-  display: inline-block;
+  justify-content: flex-end;
 }
 
 .requirement-name {
   font-weight: 500;
-  color: #2c3e50;
-  line-height: 1.4;
-  word-wrap: break-word;
-  word-break: break-word;
-  white-space: normal;
+  color: var(--th-text-primary);
 }
 
-.requirement-id {
-  color: #666;
-  font-size: 0.8rem;
-  margin-left: 5px;
+.empty-hint {
+  padding: 24px 12px;
+  color: var(--th-text-secondary);
+  line-height: 1.6;
 }
 
-.priority-tag,
-.status-tag {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: bold;
+.empty-title {
+  margin: 0 0 8px;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--th-text-primary);
 }
 
-.priority-tag.p0 {
-  background: #ffebee;
-  color: #d32f2f;
+.empty-hint a {
+  color: var(--th-color-primary);
+  text-decoration: none;
 }
 
-.priority-tag.p1 {
-  background: #fff3e0;
-  color: #f57c00;
+.empty-hint a:hover {
+  text-decoration: underline;
 }
 
-.priority-tag.p2 {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.priority-tag.p3 {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.status-tag.pending {
-  background: #fff3cd;
-  color: #856404;
-}
-
-.status-tag.generating {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.status-tag.reviewing {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.status-tag.completed {
-  background: #d4edda;
-  color: #155724;
-}
-
-.status-tag.failed {
-  background: #f8d7da;
-  color: #721c24;
-}
-
-.view-detail-btn {
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: background 0.3s ease;
-  margin-right: 3px;
-  white-space: nowrap;
-}
-
-.view-detail-btn:hover {
-  background: #2980b9;
-}
-
-.adopt-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: background 0.3s ease;
-  margin-right: 3px;
-  white-space: nowrap;
-}
-
-.adopt-btn:hover {
-  background: #229954;
-}
-
-.discard-btn {
-  background: #e74c3c;
-  color: white;
-  border: none;
-  padding: 6px 10px;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: background 0.3s ease;
-  white-space: nowrap;
-}
-
-.discard-btn:hover {
-  background: #c0392b;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 5px;
-  flex-wrap: nowrap;
-  align-items: center;
-}
-
-.adopted-label {
-  color: #27ae60;
-  font-weight: bold;
-  font-size: 0.8rem;
-  padding: 6px 12px;
-  background: #e8f5e8;
-  border-radius: 4px;
-  border: 1px solid #27ae60;
-}
-
-/* 分页组件样式 */
-.pagination-section {
-  margin-top: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-  padding: 20px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.pagination-info {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.page-size-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-size-selector label {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.page-size-selector select {
-  padding: 6px 10px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
-}
-
-.pagination-buttons {
-  display: flex;
-  align-items: center;
-  gap: 5px;
-}
-
-.page-btn {
-  padding: 8px 12px;
-  border: 1px solid #ddd;
-  background: white;
-  color: #666;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
-}
-
-.page-btn:hover:not(:disabled) {
-  background: #f0f0f0;
-  border-color: #ccc;
-}
-
-.page-btn:disabled {
-  color: #ccc;
-  cursor: not-allowed;
-  background: #f9f9f9;
-}
-
-.page-btn.active {
-  background: #3498db;
-  color: white;
-  border-color: #3498db;
-}
-
-.page-numbers {
-  display: flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.ellipsis {
-  padding: 8px 4px;
-  color: #666;
-}
-
-.page-jumper {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.page-jumper label {
-  color: #666;
-  font-size: 0.9rem;
-}
-
-.page-jumper input {
-  width: 60px;
-  padding: 6px 8px;
-  border: 1px solid #ddd;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  text-align: center;
-}
-
-.jump-btn {
-  padding: 6px 12px;
-  background: #3498db;
-  color: white;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.2s ease;
-}
-
-.jump-btn:hover {
-  background: #2980b9;
-}
-
-/* 测试用例详情弹窗 */
+/* 弹窗 */
 .testcase-detail-modal {
   position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
+  inset: 0;
+  background: rgba(15, 23, 42, 0.45);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1618,8 +801,10 @@ export default {
 }
 
 .modal-content {
-  background: white;
-  border-radius: 12px;
+  background: var(--th-bg-elevated);
+  border-radius: var(--th-radius-lg);
+  border: 1px solid var(--th-border);
+  box-shadow: var(--th-shadow-lg);
   padding: 0;
   max-width: 800px;
   width: 90%;
@@ -1627,60 +812,122 @@ export default {
   overflow-y: auto;
 }
 
+.large-modal {
+  max-width: 900px;
+}
+
 .modal-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  padding: 20px 30px;
-  border-bottom: 1px solid #eee;
+  padding: 18px 24px;
+  border-bottom: 1px solid var(--th-border);
 }
 
 .modal-header h3 {
   margin: 0;
-  color: #2c3e50;
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--th-text-primary);
 }
 
 .close-btn {
   background: none;
   border: none;
-  font-size: 1.5rem;
+  font-size: 1.4rem;
   cursor: pointer;
-  color: #666;
+  color: var(--th-text-secondary);
+  line-height: 1;
+}
+
+.close-btn:hover {
+  color: var(--th-text-primary);
 }
 
 .modal-body {
-  padding: 30px;
+  padding: 24px;
 }
 
 .detail-item {
-  margin-bottom: 20px;
+  margin-bottom: 18px;
 }
 
 .detail-item label {
-  font-weight: bold;
-  color: #2c3e50;
+  font-weight: 600;
+  color: var(--th-text-primary);
   display: block;
-  margin-bottom: 8px;
+  margin-bottom: 6px;
+  font-size: 13px;
 }
 
 .detail-item span,
 .detail-item p {
-  color: #666;
+  color: var(--th-text-regular);
   line-height: 1.6;
+  margin: 0;
 }
 
 .test-steps {
   white-space: pre-line;
   line-height: 1.6;
-  background: #f8f9fa;
-  padding: 15px;
-  border-radius: 6px;
-  border-left: 4px solid #3498db;
+  background: var(--th-bg-muted);
+  padding: 14px;
+  border-radius: var(--th-radius-sm);
+  border-left: 3px solid var(--th-color-primary);
 }
 
-/* 采纳用例弹框样式 */
-.large-modal {
-  max-width: 900px;
+.priority-tag,
+.status-tag {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.priority-tag.p0,
+.priority-tag.critical {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.priority-tag.p1,
+.priority-tag.high {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.priority-tag.p2,
+.priority-tag.medium {
+  background: #eff6ff;
+  color: #2563eb;
+}
+
+.priority-tag.p3,
+.priority-tag.low {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.status-tag.pending {
+  background: #f3f4f6;
+  color: #6b7280;
+}
+
+.status-tag.generating,
+.status-tag.reviewing {
+  background: #fff7ed;
+  color: #ea580c;
+}
+
+.status-tag.completed {
+  background: #f0fdf4;
+  color: #16a34a;
+}
+
+.status-tag.failed {
+  background: #fef2f2;
+  color: #dc2626;
 }
 
 .adopt-form {
@@ -1689,12 +936,8 @@ export default {
 
 .form-row {
   display: flex;
-  gap: 20px;
-  margin-bottom: 20px;
-}
-
-.form-row:last-child {
-  margin-bottom: 0;
+  gap: 16px;
+  margin-bottom: 16px;
 }
 
 .form-group {
@@ -1704,27 +947,29 @@ export default {
 }
 
 .form-group label {
-  font-weight: bold;
-  color: #2c3e50;
-  margin-bottom: 8px;
+  font-weight: 600;
+  color: var(--th-text-primary);
+  margin-bottom: 6px;
+  font-size: 13px;
 }
 
 .form-group input,
 .form-group select,
 .form-group textarea {
-  padding: 10px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 0.9rem;
-  background: white;
+  padding: 8px 12px;
+  border: 1px solid var(--th-border);
+  border-radius: var(--th-radius-sm);
+  font-size: 14px;
+  background: var(--th-bg-elevated);
+  color: var(--th-text-regular);
 }
 
 .form-group input:focus,
 .form-group select:focus,
 .form-group textarea:focus {
   outline: none;
-  border-color: #3498db;
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
+  border-color: var(--th-color-primary);
+  box-shadow: 0 0 0 2px var(--th-color-primary-soft);
 }
 
 .form-group textarea {
@@ -1733,143 +978,70 @@ export default {
 }
 
 .form-hint {
-  color: #666;
-  font-size: 0.8rem;
-  margin-top: 5px;
+  color: var(--th-text-secondary);
+  font-size: 12px;
+  margin-top: 4px;
 }
 
 .required {
-  color: #e74c3c;
-  font-weight: bold;
+  color: #ef4444;
+  font-weight: 600;
 }
 
 .form-actions {
   display: flex;
-  gap: 15px;
+  gap: 12px;
   justify-content: flex-end;
-  margin-top: 30px;
-  padding-top: 20px;
-  border-top: 1px solid #eee;
+  margin-top: 24px;
+  padding-top: 16px;
+  border-top: 1px solid var(--th-border);
 }
 
 .confirm-btn {
-  background: #27ae60;
-  color: white;
+  background: var(--th-accent-green);
+  color: #fff;
   border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
+  padding: 10px 20px;
+  border-radius: var(--th-radius-sm);
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
+  font-size: 14px;
 }
 
 .confirm-btn:hover:not(:disabled) {
-  background: #229954;
+  filter: brightness(0.95);
 }
 
 .confirm-btn:disabled {
-  background: #bdc3c7;
+  background: #c4c9d4;
   cursor: not-allowed;
 }
 
 .cancel-btn {
-  background: #95a5a6;
-  color: white;
+  background: #eef1f7;
+  color: var(--th-text-regular);
   border: none;
-  padding: 12px 24px;
-  border-radius: 6px;
+  padding: 10px 20px;
+  border-radius: var(--th-radius-sm);
   cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
+  font-size: 14px;
 }
 
 .cancel-btn:hover {
-  background: #7f8c8d;
-}
-
-/* 响应式设计 */
-@media (max-width: 1200px) {
-  .table-header,
-  .table-body .table-row {
-    grid-template-columns: 150px 1fr 100px 140px 260px;
-  }
-
-  .action-buttons {
-    flex-direction: row;
-    gap: 2px;
-    align-items: center;
-    flex-wrap: nowrap;
-  }
-
-  .view-detail-btn,
-  .adopt-btn,
-  .discard-btn {
-    margin-right: 0;
-    font-size: 0.65rem;
-    padding: 2px 4px;
-  }
+  background: #e4e8f0;
 }
 
 @media (max-width: 768px) {
-  .filter-card {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .stats-card {
-    flex-wrap: wrap;
-    gap: 20px;
-  }
-
-  .table-header,
-  .table-body .table-row {
-    grid-template-columns: 120px 1fr 80px 120px 240px;
-  }
-  
-  .header-cell,
-  .body-cell {
-    padding: 8px;
-    font-size: 0.8rem;
-  }
-  
-  .action-buttons {
-    flex-direction: column;
-    gap: 2px;
-    align-items: stretch;
-  }
-  
-  .view-detail-btn,
-  .adopt-btn,
-  .discard-btn {
-    font-size: 0.65rem;
-    padding: 2px 4px;
-  }
-  
   .form-row {
     flex-direction: column;
-    gap: 15px;
+    gap: 12px;
   }
-  
+
   .large-modal {
     max-width: 95%;
   }
-  
-  .pagination-section {
-    flex-direction: column;
-    gap: 15px;
-    align-items: flex-start;
-  }
-  
-  .pagination-controls {
-    flex-direction: column;
-    gap: 15px;
-    align-items: flex-start;
-    width: 100%;
-  }
-  
-  .pagination-buttons {
+
+  .pagination-container {
     justify-content: center;
-    width: 100%;
   }
 }
 </style>

@@ -408,6 +408,10 @@ FEISHU_OAUTH_SCOPES = config(
     default='offline_access docx:document:readonly wiki:wiki:readonly',
 )
 
+# Figma REST API (Personal Access Token for design file text extraction)
+FIGMA_ACCESS_TOKEN = config('FIGMA_ACCESS_TOKEN', default='')
+FIGMA_API_BASE = config('FIGMA_API_BASE', default='https://api.figma.com/v1')
+
 # 本地环境确保日志目录存在；Vercel 只读文件系统跳过
 if not IS_VERCEL:
     log_dir = os.path.join(BASE_DIR, 'logs')

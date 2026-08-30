@@ -857,16 +857,12 @@ export default {
 
     mapPriority(priority) {
       const priorityMap = {
-        '最高': 'critical',
-        '高': 'high',
-        '中': 'medium',
-        '低': 'low',
-        'P0': 'critical',
-        'P1': 'high',
-        'P2': 'medium',
-        'P3': 'low'
+        '最高': 'P0', '紧急': 'P0', 'critical': 'P0', 'P0': 'P0',
+        '高': 'P1', 'high': 'P1', 'P1': 'P1',
+        '中': 'P2', 'medium': 'P2', 'P2': 'P2',
+        '低': 'P3', 'low': 'P3', 'P3': 'P3'
       }
-      return priorityMap[priority] || 'medium'
+      return priorityMap[priority] || 'P2'
     },
 
     // 将英文优先级转换为本地化显示

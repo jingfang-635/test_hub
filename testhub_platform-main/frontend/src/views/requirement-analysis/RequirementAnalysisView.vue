@@ -145,11 +145,11 @@
         <button
           type="button"
           class="source-card"
-          :class="{ active: activeSource === 'axure' }"
-          @click="activeSource = 'axure'">
-          <div class="source-card-title">{{ $t('requirementAnalysis.sourceAxure') }}</div>
-          <div class="source-card-icon axure">🎨</div>
-          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceAxureDesc') }}</p>
+          :class="{ active: activeSource === 'figma' }"
+          @click="activeSource = 'figma'">
+          <div class="source-card-title">{{ $t('requirementAnalysis.sourceFigma') }}</div>
+          <div class="source-card-icon figma">🎨</div>
+          <p class="source-card-desc">{{ $t('requirementAnalysis.sourceFigmaDesc') }}</p>
         </button>
         <button
           type="button"
@@ -393,51 +393,81 @@
         </div>
       </section>
 
-      <!-- Axure 解析 -->
-      <section class="section-card axure-panel" v-if="activeSource === 'axure'">
-        <h3 class="section-title">{{ $t('requirementAnalysis.sourceAxure') }}</h3>
+      <!-- Figma 解析 -->
+      <section class="section-card figma-panel" v-if="activeSource === 'figma'">
+        <h3 class="section-title">{{ $t('requirementAnalysis.sourceFigma') }}</h3>
+        <p class="section-desc">{{ $t('requirementAnalysis.figmaHint') }}</p>
 
         <div class="form-group">
-          <label>{{ $t('requirementAnalysis.axureOnlineLink') }}</label>
-          <div class="axure-link-row">
+          <label>{{ $t('requirementAnalysis.figmaOnlineLink') }} <span class="required">*</span></label>
+          <div class="parse-link-row">
             <input
-              v-model="axureForm.url"
+              v-model="figmaForm.url"
               type="text"
               class="form-input"
-              :placeholder="$t('requirementAnalysis.axureLinkPlaceholder')">
+              :placeholder="$t('requirementAnalysis.figmaLinkPlaceholder')">
             <button
               type="button"
-              class="axure-parse-btn"
-              :disabled="!axureForm.url.trim()"
-              @click="parseAxureLink">
-              {{ $t('requirementAnalysis.confirmParse') }}
+              class="parse-btn"
+              :disabled="!figmaForm.url.trim() || figmaForm.parsing || isGenerating"
+              @click="parseFigmaLink">
+              <span v-if="figmaForm.parsing">{{ $t('requirementAnalysis.figmaParsing') }}</span>
+              <span v-else>{{ $t('requirementAnalysis.confirmParse') }}</span>
             </button>
           </div>
         </div>
 
-        <div class="axure-options-row">
-          <label class="axure-radio">
-            <input type="radio" v-model="axureForm.contentMode" value="full">
-            <span>{{ $t('requirementAnalysis.axureFullContent') }}</span>
+        <div class="figma-options-row">
+          <label class="figma-radio">
+            <input type="radio" v-model="figmaForm.contentMode" value="full">
+            <span>{{ $t('requirementAnalysis.figmaFullContent') }}</span>
           </label>
-          <label class="axure-radio">
-            <input type="radio" v-model="axureForm.contentMode" value="incremental">
-            <span>{{ $t('requirementAnalysis.axureIncrementalContent') }}</span>
+          <label class="figma-radio">
+            <input type="radio" v-model="figmaForm.contentMode" value="incremental">
+            <span>{{ $t('requirementAnalysis.figmaIncrementalContent') }}</span>
           </label>
-          <label class="axure-checkbox">
-            <input type="checkbox" v-model="axureForm.useAiStructure">
-            <span>{{ $t('requirementAnalysis.axureUseAiStructure') }}</span>
+          <label class="figma-checkbox">
+            <input type="checkbox" v-model="figmaForm.useAiStructure">
+            <span>{{ $t('requirementAnalysis.figmaUseAiStructure') }}</span>
           </label>
         </div>
 
-        <div class="form-group axure-project-group">
+        <div class="form-group figma-project-group">
           <label>{{ $t('requirementAnalysis.associatedProject') }}</label>
-          <select v-model="axureForm.selectedProject" class="form-select">
+          <select v-model="figmaForm.selectedProject" class="form-select">
             <option value="">{{ $t('requirementAnalysis.selectProject') }}</option>
             <option v-for="project in projects" :key="project.id" :value="project.id">
               {{ project.name }}
             </option>
           </select>
+        </div>
+
+        <div v-if="figmaForm.parsed" class="figma-preview">
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.requirementTitle') }} <span class="required">*</span></label>
+            <input
+              v-model="figmaForm.title"
+              type="text"
+              class="form-input"
+              :placeholder="$t('requirementAnalysis.titlePlaceholder')">
+          </div>
+
+          <div class="form-group">
+            <label>{{ $t('requirementAnalysis.figmaContentPreview') }}</label>
+            <textarea
+              v-model="figmaForm.content"
+              class="form-textarea feishu-content-preview"
+              rows="10"></textarea>
+            <div class="char-count">{{ figmaForm.content.length }} {{ $t('requirementAnalysis.feishuChars') }}</div>
+          </div>
+
+          <button
+            class="generate-manual-btn"
+            @click="generateFromFigma"
+            :disabled="!canGenerateFigma || isGenerating">
+            <span v-if="isGenerating">{{ $t('requirementAnalysis.generating') }}</span>
+            <span v-else>{{ $t('requirementAnalysis.generateButton') }}</span>
+          </button>
         </div>
       </section>
 
@@ -472,7 +502,7 @@
 
         <div class="form-group">
           <label>{{ $t('requirementAnalysis.feishuDocLink') }} <span class="required">*</span></label>
-          <div class="axure-link-row">
+          <div class="parse-link-row">
             <input
               v-model="feishuForm.url"
               type="text"
@@ -480,7 +510,7 @@
               :placeholder="$t('requirementAnalysis.feishuLinkPlaceholder')">
             <button
               type="button"
-              class="axure-parse-btn"
+              class="parse-btn"
               :disabled="!feishuForm.url.trim() || feishuForm.parsing || !feishuOAuth.connected"
               @click="parseFeishuLink">
               <span v-if="feishuForm.parsing">{{ $t('requirementAnalysis.feishuParsing') }}</span>
@@ -628,7 +658,7 @@ export default {
       // 全局输出模式设置
       globalOutputMode: 'stream',  // 默认使用流式输出
 
-      // 需求来源：manual | upload | knowledge | axure | feishu
+      // 需求来源：manual | upload | knowledge | figma | feishu
       activeSource: 'manual',
 
       // 手动输入需求
@@ -651,12 +681,17 @@ export default {
         query: ''
       },
 
-      // Axure 解析表单（UI）
-      axureForm: {
+      // Figma 解析表单
+      figmaForm: {
         url: '',
+        title: '',
+        content: '',
+        sourceUrl: '',
         contentMode: 'full',
         useAiStructure: true,
-        selectedProject: ''
+        selectedProject: '',
+        parsing: false,
+        parsed: false
       },
 
       // 飞书文档表单
@@ -757,6 +792,11 @@ export default {
       return this.feishuForm.parsed &&
              this.feishuForm.title.trim() &&
              this.feishuForm.content.trim()
+    },
+    canGenerateFigma() {
+      return this.figmaForm.parsed &&
+             this.figmaForm.title.trim() &&
+             this.figmaForm.content.trim()
     }
   },
 
@@ -847,9 +887,59 @@ export default {
       }
     },
 
-    parseAxureLink() {
-      if (!this.axureForm.url.trim()) return
-      ElMessage.info(this.$t('requirementAnalysis.featureComingSoon'))
+    async parseFigmaLink() {
+      if (!this.figmaForm.url.trim() || this.figmaForm.parsing || this.isGenerating) return
+      this.figmaForm.parsing = true
+      this.figmaForm.parsed = false
+      try {
+        const response = await api.post('/requirement-analysis/figma/fetch/', {
+          url: this.figmaForm.url.trim()
+        })
+        const data = response.data || {}
+        this.figmaForm.title = data.title || ''
+        this.figmaForm.content = data.content || ''
+        this.figmaForm.sourceUrl = data.source_url || this.figmaForm.url.trim()
+        this.figmaForm.parsed = true
+        ElMessage.success(this.$t('requirementAnalysis.figmaParseSuccess'))
+        // 解析成功后按当前生成配置自动生成用例
+        await this.generateFromFigma()
+      } catch (error) {
+        const payload = error.response?.data || {}
+        const code = payload.code || ''
+        const msg = payload.error || error.message
+        const i18nKey = {
+          not_configured: 'figmaErrorNotConfigured',
+          invalid_url: 'figmaErrorInvalidUrl',
+          unsupported_url: 'figmaErrorUnsupportedUrl',
+          permission_denied: 'figmaErrorPermission',
+          not_found: 'figmaErrorNotFound',
+          empty_content: 'figmaErrorEmpty',
+          auth_failed: 'figmaErrorAuth',
+          content_too_long: 'figmaErrorTooLong',
+          network_error: 'figmaErrorNetwork',
+          figma_server_error: 'figmaErrorNetwork'
+        }[code]
+        ElMessage.error(i18nKey ? this.$t(`requirementAnalysis.${i18nKey}`) : msg)
+      } finally {
+        this.figmaForm.parsing = false
+      }
+    },
+
+    async generateFromFigma() {
+      if (!this.canGenerateFigma) {
+        ElMessage.error(this.$t('requirementAnalysis.fillRequiredInfo'))
+        return
+      }
+      await this.startGeneration(
+        this.figmaForm.title.trim(),
+        this.figmaForm.content,
+        this.figmaForm.selectedProject,
+        this.globalOutputMode,
+        {
+          sourceType: 'figma',
+          sourceUrl: this.figmaForm.sourceUrl || this.figmaForm.url.trim()
+        }
+      )
     },
 
     async loadFeishuOAuthStatus() {
@@ -1330,7 +1420,7 @@ export default {
           use_writer_model: true,
           use_reviewer_model: true,
           output_mode: outputMode,  // 添加输出模式参数
-          source_type: (['manual', 'upload', 'feishu'].includes(sourceMeta.sourceType || this.activeSource)
+          source_type: (['manual', 'upload', 'feishu', 'figma'].includes(sourceMeta.sourceType || this.activeSource)
             ? (sourceMeta.sourceType || this.activeSource)
             : 'manual')
         }
@@ -1744,8 +1834,7 @@ export default {
         if (response.data.already_saved) {
           ElMessage.info(this.$t('requirementAnalysis.alreadySaved'))
         } else {
-          const importedCount = response.data.imported_count || 0
-          ElMessage.success(`测试用例已保存！已导入 ${importedCount} 条测试用例到测试用例管理系统`)
+          ElMessage.success(this.$t('requirementAnalysis.saveToRecordsSuccess'))
         }
 
         // 不跳转，留在当前页面
@@ -2515,7 +2604,7 @@ export default {
   background: linear-gradient(145deg, #f6ffed, #d9f7be);
 }
 
-.source-card-icon.axure {
+.source-card-icon.figma {
   background: linear-gradient(145deg, #fff0f6, #ffd6e7);
 }
 
@@ -2656,22 +2745,28 @@ export default {
   cursor: not-allowed;
 }
 
-/* Axure 解析面板 */
-.axure-panel .section-title {
-  margin-bottom: 20px;
+/* Figma 解析面板 */
+.figma-panel .section-title {
+  margin-bottom: 12px;
 }
 
-.axure-link-row {
+.figma-panel .section-desc {
+  margin: 0 0 16px;
+  font-size: 0.875rem;
+  color: #6b7280;
+}
+
+.parse-link-row {
   display: flex;
   gap: 12px;
   align-items: center;
 }
 
-.axure-link-row .form-input {
+.parse-link-row .form-input {
   flex: 1;
 }
 
-.axure-parse-btn {
+.parse-btn {
   flex-shrink: 0;
   min-width: 96px;
   height: 42px;
@@ -2686,17 +2781,17 @@ export default {
   padding: 0 16px;
 }
 
-.axure-parse-btn:hover:not(:disabled) {
+.parse-btn:hover:not(:disabled) {
   background: #4096ff;
 }
 
-.axure-parse-btn:disabled {
+.parse-btn:disabled {
   background: #d9d9d9;
   color: #fff;
   cursor: not-allowed;
 }
 
-.axure-options-row {
+.figma-options-row {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
@@ -2704,8 +2799,8 @@ export default {
   margin: 4px 0 20px;
 }
 
-.axure-radio,
-.axure-checkbox {
+.figma-radio,
+.figma-checkbox {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -2715,8 +2810,8 @@ export default {
   user-select: none;
 }
 
-.axure-radio input[type="radio"],
-.axure-checkbox input[type="checkbox"] {
+.figma-radio input[type="radio"],
+.figma-checkbox input[type="checkbox"] {
   width: 16px;
   height: 16px;
   margin: 0;
@@ -2724,7 +2819,7 @@ export default {
   cursor: pointer;
 }
 
-.axure-project-group {
+.figma-project-group {
   margin-bottom: 0;
 }
 
@@ -2793,12 +2888,12 @@ export default {
 }
 
 @media (max-width: 768px) {
-  .axure-link-row {
+  .parse-link-row {
     flex-direction: column;
     align-items: stretch;
   }
 
-  .axure-options-row {
+  .figma-options-row {
     gap: 14px;
   }
 }

@@ -80,14 +80,14 @@ cd testhub_platform-main\testhub_platform-main
 ## 第 3 步：改 3 个密码（必做）
 
 ### 3.1 复制配置文件
-
+      
 1. 进入项目文件夹（有 `docker-start.bat` 的那一层）
 2. 在文件夹空白处 **Shift + 右键** → **在此处打开 PowerShell 窗口**（或 cmd）
 3. 输入：
 
 ```cmd
 copy .env.docker.example .env
-```
+``` 
 
 ### 3.2 用记事本打开 .env
 
@@ -157,7 +157,7 @@ docker compose ps
 | testhub-scheduler | 定时任务 |
 
 ---
-
+    
 ## 第 5 步：打开浏览器使用
 
 1. 打开 Chrome / Edge

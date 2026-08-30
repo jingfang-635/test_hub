@@ -314,3 +314,14 @@ export function disconnectFeishuOAuth() {
     method: 'post'
   })
 }
+
+// ==================== Figma 设计稿 ====================
+
+/** 拉取 Figma 设计稿文本需求 */
+export function fetchFigmaDocument(url) {
+  return request({
+    url: '/requirement-analysis/figma/fetch/',
+    method: 'post',
+    data: { url }
+  })
+}

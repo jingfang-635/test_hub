@@ -48,3 +48,8 @@ FEISHU_REDIRECT_URI: http://localhost:3000/ai-generation/requirement-analysis
 # OAuth 直连后端回调成功后的前端跳转（前端中转模式下可与 REDIRECT_URI 相同）
 FEISHU_FRONTEND_REDIRECT: http://localhost:3000/ai-generation/requirement-analysis
 FEISHU_OAUTH_SCOPES: "offline_access docx:document:readonly wiki:wiki:readonly"
+
+# ========== Figma（Personal Access Token，用于解析设计稿文本并生成用例） ==========
+# 在 https://www.figma.com/developers/api#access-tokens 创建，需能访问目标文件
+FIGMA_ACCESS_TOKEN: your_figma_personal_access_token
+FIGMA_API_BASE: https://api.figma.com/v1

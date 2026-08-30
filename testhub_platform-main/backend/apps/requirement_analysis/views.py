@@ -41,13 +41,14 @@ from .serializers import (
     BusinessRequirementSerializer, GeneratedTestCaseSerializer,
     AnalysisTaskSerializer, DocumentUploadSerializer,
     TestCaseGenerationRequestSerializer, LegacyTestCaseGenerationRequestSerializer,
-    TestCaseReviewRequestSerializer, FeishuFetchRequestSerializer,
+    TestCaseReviewRequestSerializer, FeishuFetchRequestSerializer, FigmaFetchRequestSerializer,
     AIModelConfigSerializer, PromptConfigSerializer, TestCaseGenerationTaskSerializer,
     GenerationConfigSerializer, KnowledgeBaseSerializer,
     KnowledgeDocumentSerializer, KnowledgeDocumentUploadSerializer,
     KnowledgeBaseLLMConfigSerializer
 )
 from .feishu_client import FeishuClient, FeishuError
+from .figma_client import FigmaClient, FigmaError
 from .services import RequirementAnalysisService, DocumentProcessor
 
 logger = logging.getLogger(__name__)
@@ -123,9 +124,13 @@ def execute_generation_task(task_id):
                 task.stream_position = 0
                 task.save()
 
+                # 写库节流状态（按时间/增量，避免每个 chunk 打 DB）
+                _stream_save = {'last_t': 0.0, 'last_len': 0}
+                STREAM_SAVE_INTERVAL = 1.0  # 秒
+                STREAM_SAVE_CHARS = 1500
+
                 def save_stream_buffer(content):
                     """同步保存流式内容到数据库"""
-                    task.refresh_from_db()
                     task.stream_buffer = content
                     task.stream_position = len(content)
                     task.last_stream_update = timezone.now()
@@ -135,15 +140,16 @@ def execute_generation_task(task_id):
                 async_save_stream_buffer = sync_to_async(save_stream_buffer)
 
                 async def stream_callback(chunk):
-                    """流式回调：实时保存每个chunk到数据库"""
+                    """流式回调：节流写库，降低生成阶段 DB 压力"""
                     task.stream_buffer += chunk
                     task.stream_position = len(task.stream_buffer)
-                    task.last_stream_update = timezone.now()
-
-                    # 每10个chunk或当chunk较大时保存一次
-                    if task.stream_position % 500 < 20 or len(chunk) > 100:
+                    now = time.monotonic()
+                    grew = task.stream_position - _stream_save['last_len']
+                    if now - _stream_save['last_t'] >= STREAM_SAVE_INTERVAL or grew >= STREAM_SAVE_CHARS:
                         try:
                             await async_save_stream_buffer(task.stream_buffer)
+                            _stream_save['last_t'] = now
+                            _stream_save['last_len'] = task.stream_position
                         except Exception as save_error:
                             logger.warning(f"保存流式内容失败: {save_error}")
 
@@ -159,40 +165,43 @@ def execute_generation_task(task_id):
                 if task.stream_buffer:
                     save_stream_buffer(task.stream_buffer)
 
-                task.refresh_from_db()
                 task.generated_test_cases = generated_cases
                 task.progress = 60
-                task.save()
+                task.save(update_fields=['generated_test_cases', 'progress', 'stream_buffer',
+                                         'stream_position', 'last_stream_update'])
 
                 # 流式评审和改进（根据生成配置决定是否执行）
                 if enable_auto_review and task.reviewer_model_config and task.reviewer_prompt_config:
                     try:
                         task.status = 'reviewing'
                         task.progress = 70
-                        task.save()
+                        task.save(update_fields=['status', 'progress'])
 
                         logger.info(f"开始流式评审任务 {task.task_id}")
 
                         # 评审内容缓存
                         review_buffer = []
+                        _review_save = {'last_t': 0.0, 'last_len': 0}
 
                         def save_review_buffer(content):
                             """同步保存评审内容"""
-                            task.refresh_from_db()
                             task.review_feedback = content
                             task.save(update_fields=['review_feedback'])
 
                         async_save_review = sync_to_async(save_review_buffer)
 
                         async def review_stream_callback(chunk):
-                            """流式评审回调"""
+                            """流式评审回调（节流写库）"""
                             review_buffer.append(chunk)
                             current_length = sum(len(c) for c in review_buffer)
-
-                            if current_length % 100 < 20 or len(chunk) > 50:
+                            now = time.monotonic()
+                            grew = current_length - _review_save['last_len']
+                            if now - _review_save['last_t'] >= STREAM_SAVE_INTERVAL or grew >= STREAM_SAVE_CHARS:
                                 try:
                                     content = ''.join(review_buffer)
                                     await async_save_review(content)
+                                    _review_save['last_t'] = now
+                                    _review_save['last_len'] = current_length
                                 except Exception as save_error:
                                     logger.warning(f"保存评审内容失败: {save_error}")
 
@@ -203,7 +212,6 @@ def execute_generation_task(task_id):
                                 )
                             )
                             if review_buffer:
-                                task.refresh_from_db()
                                 task.review_feedback = ''.join(review_buffer)
                                 task.save(update_fields=['review_feedback'])
                             logger.info(f"任务 {task.task_id} 流式评审完成")
@@ -212,11 +220,12 @@ def execute_generation_task(task_id):
                             task.status = 'revising'
                             task.progress = 85
                             task.final_test_cases = ''
-                            task.save()
+                            task.save(update_fields=['status', 'progress', 'final_test_cases'])
 
                             try:
+                                _final_save = {'last_t': 0.0, 'last_len': 0}
+
                                 def save_final_buffer(content):
-                                    task.refresh_from_db()
                                     task.final_test_cases = content
                                     task.save(update_fields=['final_test_cases'])
 
@@ -225,9 +234,13 @@ def execute_generation_task(task_id):
                                 async def final_callback(chunk):
                                     task.final_test_cases = (task.final_test_cases or '') + chunk
                                     current_length = len(task.final_test_cases)
-                                    if current_length % 100 < 20 or len(chunk) > 50:
+                                    now = time.monotonic()
+                                    grew = current_length - _final_save['last_len']
+                                    if now - _final_save['last_t'] >= STREAM_SAVE_INTERVAL or grew >= STREAM_SAVE_CHARS:
                                         try:
                                             await async_save_final(task.final_test_cases)
+                                            _final_save['last_t'] = now
+                                            _final_save['last_len'] = current_length
                                         except Exception as save_error:
                                             logger.warning(f"保存最终用例失败: {save_error}")
 
@@ -253,8 +266,8 @@ def execute_generation_task(task_id):
                                         revised_cases)
                                     renumbered_cases = AIModelService.renumber_test_cases(
                                         sorted_cases)
-                                    task.refresh_from_db()
                                     task.final_test_cases = renumbered_cases
+                                    task.save(update_fields=['final_test_cases'])
                                     logger.info(
                                         f"任务 {task.task_id} 测试用例改进完成 (revised_cases长度: {len(revised_cases)}, 最终保存长度: {len(task.final_test_cases)})")
                                 else:
@@ -265,55 +278,50 @@ def execute_generation_task(task_id):
                                     f"任务 {task.task_id} 改进测试用例失败: {revise_error}，使用原始用例")
                                 sorted_cases = AIModelService.sort_test_cases_by_id(
                                     generated_cases)
-                                task.refresh_from_db()
                                 task.final_test_cases = AIModelService.renumber_test_cases(
                                     sorted_cases)
-                                task.save()
+                                task.save(update_fields=['final_test_cases'])
 
                         except Exception as inner_error:
                             logger.warning(
                                 f"任务 {task.task_id} 流式评审过程异常: {inner_error}")
-                            task.refresh_from_db()
                             task.review_feedback = f"评审过程出现异常: {str(inner_error)}\n\n建议：测试用例结构完整，可以使用。"
                             sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
                             task.final_test_cases = AIModelService.renumber_test_cases(
                                 sorted_cases)
-                            task.save()
+                            task.save(update_fields=['review_feedback', 'final_test_cases'])
 
                     except Exception as review_error:
                         logger.error(f"流式评审任务 {task.task_id} 失败: {review_error}")
                         sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
-                        task.refresh_from_db()
                         task.final_test_cases = AIModelService.renumber_test_cases(sorted_cases)
                         task.review_feedback = f"评审失败: {str(review_error)}\n\n建议：测试用例结构完整，可以使用。"
-                        task.save()
+                        task.save(update_fields=['final_test_cases', 'review_feedback'])
                 else:
                     sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
                     renumbered_cases = AIModelService.renumber_test_cases(sorted_cases)
-                    task.refresh_from_db()
                     task.final_test_cases = renumbered_cases
                     logger.info(f"任务 {task.task_id} 跳过评审，直接使用生成的测试用例")
-                    task.save()
+                    task.save(update_fields=['final_test_cases'])
 
             else:
                 # 完整模式：原有逻辑
                 task.progress = 30
-                task.save()
+                task.save(update_fields=['progress'])
 
                 generated_cases = loop.run_until_complete(
                     AIModelService.generate_test_cases(task)
                 )
 
-                task.refresh_from_db()
                 task.generated_test_cases = generated_cases
                 task.progress = 60
-                task.save()
+                task.save(update_fields=['generated_test_cases', 'progress'])
 
                 if enable_auto_review and task.reviewer_model_config and task.reviewer_prompt_config:
                     try:
                         task.status = 'reviewing'
                         task.progress = 70
-                        task.save()
+                        task.save(update_fields=['status', 'progress'])
 
                         logger.info(f"开始评审任务 {task.task_id}")
 
@@ -321,19 +329,22 @@ def execute_generation_task(task_id):
                             review_feedback = loop.run_until_complete(
                                 AIModelService.review_test_cases(task, generated_cases)
                             )
-                            task.refresh_from_db()
                             task.review_feedback = review_feedback
+                            task.save(update_fields=['review_feedback'])
                             logger.info(f"任务 {task.task_id} 评审完成")
 
                             logger.info(f"任务 {task.task_id} 开始根据评审意见改进测试用例")
                             task.status = 'revising'
                             task.progress = 85
                             task.final_test_cases = ''
-                            task.save()
+                            task.save(update_fields=['status', 'progress', 'final_test_cases'])
 
                             try:
+                                _final_save_full = {'last_t': 0.0, 'last_len': 0}
+                                STREAM_SAVE_INTERVAL = 1.0
+                                STREAM_SAVE_CHARS = 1500
+
                                 def save_final_buffer_full(content):
-                                    task.refresh_from_db()
                                     task.final_test_cases = content
                                     task.save(update_fields=['final_test_cases'])
 
@@ -342,9 +353,13 @@ def execute_generation_task(task_id):
                                 async def final_callback_full(chunk):
                                     task.final_test_cases = (task.final_test_cases or '') + chunk
                                     current_length = len(task.final_test_cases)
-                                    if current_length % 100 < 20 or len(chunk) > 50:
+                                    now = time.monotonic()
+                                    grew = current_length - _final_save_full['last_len']
+                                    if now - _final_save_full['last_t'] >= STREAM_SAVE_INTERVAL or grew >= STREAM_SAVE_CHARS:
                                         try:
                                             await async_save_final_full(task.final_test_cases)
+                                            _final_save_full['last_t'] = now
+                                            _final_save_full['last_len'] = current_length
                                         except Exception as save_error:
                                             logger.warning(f"保存最终用例失败: {save_error}")
 
@@ -370,8 +385,8 @@ def execute_generation_task(task_id):
                                         revised_cases)
                                     renumbered_cases = AIModelService.renumber_test_cases(
                                         sorted_cases)
-                                    task.refresh_from_db()
                                     task.final_test_cases = renumbered_cases
+                                    task.save(update_fields=['final_test_cases'])
                                     logger.info(
                                         f"任务 {task.task_id} 测试用例改进完成 (revised_cases长度: {len(revised_cases)}, 最终保存长度: {len(task.final_test_cases)})")
                                 else:
@@ -382,37 +397,32 @@ def execute_generation_task(task_id):
                                     f"任务 {task.task_id} 改进测试用例失败: {revise_error}，使用原始用例")
                                 sorted_cases = AIModelService.sort_test_cases_by_id(
                                     generated_cases)
-                                task.refresh_from_db()
                                 task.final_test_cases = AIModelService.renumber_test_cases(
                                     sorted_cases)
-                                task.save()
+                                task.save(update_fields=['final_test_cases'])
 
                         except Exception as inner_error:
                             logger.warning(f"任务 {task.task_id} 评审过程异常: {inner_error}")
-                            task.refresh_from_db()
                             task.review_feedback = f"评审过程出现异常: {str(inner_error)}\n\n建议：测试用例结构完整，可以使用。"
                             sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
                             task.final_test_cases = AIModelService.renumber_test_cases(
                                 sorted_cases)
-                            task.save()
+                            task.save(update_fields=['review_feedback', 'final_test_cases'])
 
                     except Exception as review_error:
                         logger.error(f"评审任务 {task.task_id} 失败: {review_error}")
                         sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
-                        task.refresh_from_db()
                         task.final_test_cases = AIModelService.renumber_test_cases(sorted_cases)
                         task.review_feedback = f"评审失败: {str(review_error)}\n\n建议：测试用例结构完整，可以使用。"
-                        task.save()
+                        task.save(update_fields=['final_test_cases', 'review_feedback'])
                 else:
                     sorted_cases = AIModelService.sort_test_cases_by_id(generated_cases)
                     renumbered_cases = AIModelService.renumber_test_cases(sorted_cases)
-                    task.refresh_from_db()
                     task.final_test_cases = renumbered_cases
                     logger.info(f"任务 {task.task_id} 跳过评审，直接使用生成的测试用例")
-                    task.save()
+                    task.save(update_fields=['final_test_cases'])
 
-            # 完成任务
-            task.refresh_from_db()
+            # 完成任务：勿 refresh，避免冲掉内存中已整理的 final_test_cases
             task.status = 'completed'
             task.progress = 100
             task.completed_at = timezone.now()
@@ -2375,9 +2385,8 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'])
     def save_to_records(self, request, task_id=None):
-        """保存测试用例到AI生成用例记录并导入到测试用例管理系统"""
+        """仅保存到 AI 生成用例记录；入库必须走采纳接口。"""
         try:
-            # DRF会根据lookup_field自动从URL提取task_id并调用get_object()
             task = self.get_object()
 
             if task.status != 'completed':
@@ -2392,92 +2401,20 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 检查是否已经保存过
-            if hasattr(task, 'is_saved_to_records') and task.is_saved_to_records:
+            if getattr(task, 'is_saved_to_records', False):
                 return Response(
                     {'message': '测试用例已经保存到记录中', 'already_saved': True},
                     status=status.HTTP_200_OK
                 )
 
-            # 解析并导入测试用例到测试用例管理系统
-            test_cases = self._parse_test_cases_content(task.final_test_cases)
-
-            if test_cases:
-                try:
-                    from apps.testcases.models import TestCase
-                    from apps.projects.models import Project
-                    from django.db import models
-
-                    # 优先使用任务关联的项目
-                    if task.project:
-                        project = task.project
-                        logger.info(f"使用任务关联的项目: {project.name}")
-                    else:
-                        # 回退到项目选择逻辑
-                        user = task.created_by
-                        accessible_projects = Project.objects.filter(
-                            models.Q(owner=user) | models.Q(members=user)
-                        ).distinct()
-
-                        # 尝试从前端获取项目ID
-                        project_id = request.data.get('project_id')
-
-                        if project_id:
-                            try:
-                                project = accessible_projects.get(id=project_id)
-                            except Project.DoesNotExist:
-                                # 如果指定项目不存在或无权限，使用第一个可访问的项目
-                                project = accessible_projects.first()
-                                if not project:
-                                    # 如果用户没有任何项目，创建默认项目
-                                    project = Project.objects.create(
-                                        name="默认项目",
-                                        owner=user,
-                                        description='系统自动创建的默认项目'
-                                    )
-                        else:
-                            # 没有指定项目，使用第一个可访问的项目
-                            project = accessible_projects.first()
-                            if not project:
-                                # 如果用户没有任何项目，创建默认项目
-                                project = Project.objects.create(
-                                    name="默认项目",
-                                    owner=user,
-                                    description='系统自动创建的默认项目'
-                                )
-
-                    adopted_count = 0
-                    for test_case in test_cases:
-                        TestCase.objects.create(
-                            project=project,
-                            author=task.created_by,
-                            title=test_case.get('scenario', '测试用例'),
-                            description=test_case.get('scenario', ''),
-                            preconditions=test_case.get('precondition', ''),
-                            steps=test_case.get('steps', ''),
-                            expected_result=test_case.get('expected', ''),
-                            priority=self._map_priority(test_case.get('priority', '中')),
-                            test_type='functional',
-                            status='draft'
-                        )
-                        adopted_count += 1
-
-                    logger.info(f"成功导入 {adopted_count} 条测试用例到项目 {project.name}")
-
-                except Exception as import_error:
-                    logger.error(f"导入测试用例失败: {import_error}")
-                    # 即使导入失败，仍然标记为已保存
-
-            # 标记任务为已保存
             task.is_saved_to_records = True
             task.saved_at = timezone.now()
             task.save(update_fields=['is_saved_to_records', 'saved_at'])
 
             return Response({
-                'message': '测试用例已成功保存到AI生成用例记录并导入到测试用例管理系统',
+                'message': '测试用例已保存到AI生成用例记录，请到「AI生成用例」中采纳后才会进入用例库',
                 'task_id': task.task_id,
                 'saved_at': task.saved_at,
-                'imported_count': adopted_count if test_cases else 0
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
@@ -2686,7 +2623,7 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                         preconditions=case_data.get('preconditions', ''),
                         steps=case_data.get('steps', ''),
                         expected_result=case_data.get('expected_result', ''),
-                        priority=case_data.get('priority', 'medium'),
+                        priority=self._map_priority(case_data.get('priority', 'P2')),
                         test_type=case_data.get('test_type', 'functional'),
                         status=case_data.get('status', 'draft')
                     )
@@ -3152,18 +3089,17 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
         return "\n".join(content_lines)
 
     def _map_priority(self, priority_str):
-        """映射优先级"""
+        """映射优先级到 P0/P1/P2/P3"""
+        if not priority_str:
+            return 'P2'
+        key = str(priority_str).strip()
         priority_map = {
-            '最高': 'critical',
-            '高': 'high',
-            '中': 'medium',
-            '低': 'low',
-            'P0': 'critical',
-            'P1': 'high',
-            'P2': 'medium',
-            'P3': 'low'
+            '最高': 'P0', '紧急': 'P0', 'critical': 'P0', 'P0': 'P0',
+            '高': 'P1', 'high': 'P1', 'P1': 'P1',
+            '中': 'P2', 'medium': 'P2', 'P2': 'P2',
+            '低': 'P3', 'low': 'P3', 'P3': 'P3',
         }
-        return priority_map.get(priority_str, 'medium')
+        return priority_map.get(key, 'P2')
 
     @action(detail=False, methods=['get'])
     def statistics(self, request):
@@ -3615,3 +3551,50 @@ class FeishuViewSet(viewsets.ViewSet):
                 {'error': f'飞书连接测试失败: {e}', 'code': 'internal_error', 'ok': False},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
+
+
+class FigmaViewSet(viewsets.ViewSet):
+    """Figma 设计稿：Personal Access Token 拉取文本并用于用例生成。"""
+
+    @action(detail=False, methods=['post'])
+    def fetch(self, request):
+        """根据 Figma 链接提取标题与纯文本需求正文。"""
+        if not request.user or not request.user.is_authenticated:
+            return Response(
+                {'error': '请先登录', 'code': 'login_required'},
+                status=status.HTTP_401_UNAUTHORIZED,
+            )
+
+        serializer = FigmaFetchRequestSerializer(data=request.data)
+        if not serializer.is_valid():
+            return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+
+        try:
+            result = FigmaClient().fetch_requirement(serializer.validated_data['url'])
+            return Response(result, status=status.HTTP_200_OK)
+        except FigmaError as e:
+            return Response(
+                {'error': e.message, 'code': e.code},
+                status=e.status_code,
+            )
+        except Exception as e:
+            logger.exception('Figma 设计稿拉取失败')
+            return Response(
+                {'error': f'Figma 设计稿拉取失败: {e}', 'code': 'internal_error'},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            )
+
+    @action(detail=False, methods=['post'])
+    def test_connection(self, request):
+        """校验 FIGMA_ACCESS_TOKEN 是否已配置（不做网络探测）。"""
+        client = FigmaClient()
+        if not client.access_token:
+            return Response(
+                {
+                    'ok': False,
+                    'error': 'Figma 未配置，请设置 FIGMA_ACCESS_TOKEN',
+                    'code': 'not_configured',
+                },
+                status=status.HTTP_503_SERVICE_UNAVAILABLE,
+            )
+        return Response({'ok': True, 'message': 'FIGMA_ACCESS_TOKEN 已配置'}, status=status.HTTP_200_OK)

@@ -15,6 +15,7 @@ from .views import (
     TestCaseGenerationTaskViewSet,
     ConfigStatusViewSet,
     FeishuViewSet,
+    FigmaViewSet,
     upload_and_analyze,
     analyze_text
 )
@@ -35,6 +36,7 @@ router.register(r'knowledge-llm-config', KnowledgeBaseLLMConfigViewSet, basename
 router.register(r'testcase-generation', TestCaseGenerationTaskViewSet, basename='testcasegenerationtask')
 router.register(r'config', ConfigStatusViewSet, basename='configstatus')
 router.register(r'feishu', FeishuViewSet, basename='feishu')
+router.register(r'figma', FigmaViewSet, basename='figma')
 
 app_name = 'requirement_analysis'
 

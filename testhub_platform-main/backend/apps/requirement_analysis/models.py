@@ -521,6 +521,7 @@ class TestCaseGenerationTask(models.Model):
         ('manual', '手动输入'),
         ('upload', '文档上传'),
         ('feishu', '飞书文档'),
+        ('figma', 'Figma设计稿'),
     ]
 
     task_id = models.CharField(max_length=50, unique=True, verbose_name='任务ID')
@@ -816,10 +817,10 @@ class AIModelService:
         else:
             url = base_url
 
-        # 续写控制
+        # 续写控制：每次续写都会把已生成全文塞回上下文，越续越慢；限制为 1 次
         current_messages = list(messages)  # 浅拷贝
         continuation_count = 0
-        MAX_CONTINUATIONS = 5  # 最大续写次数，防止死循环
+        MAX_CONTINUATIONS = 1  # ponytail: 1 次续写通常够用；要更长输出先抬 max_tokens
 
         while continuation_count <= MAX_CONTINUATIONS:
             data = {
@@ -915,47 +916,39 @@ class AIModelService:
                 raise e
 
     @staticmethod
+    def _effective_max_tokens(config: AIModelConfig) -> int:
+        """生成/评审至少 8192，避免默认 4096 频繁 length 截断触发续写。"""
+        return max(int(config.max_tokens or 0), 8192)
+
+    @staticmethod
+    def _build_writer_user_message(requirement_text: str) -> str:
+        """编写用例的用户提示（控制数量，避免无限输出导致多轮续写）。"""
+        return (
+            f"请分析以下需求文档，设计可执行的测试用例。\n\n"
+            f"【生成指令】\n"
+            f"1. **数量原则**：按复杂度生成适量用例——一般功能 8～20 条，复杂功能不超过 30 条；"
+            f"优先覆盖核心路径、主要异常与关键边界，质量优先于堆砌。\n"
+            f"2. **覆盖策略**：按文档结构抓重点；每个核心功能点给出 1 个正常场景 + 1～2 个异常/边界场景即可。\n"
+            f"3. **拒绝合并**：不要把多个无关验证点塞进一条用例。\n"
+            f"4. **输出顺序**：按用例编号从小到大连续输出，不要跳号或乱序。\n"
+            rf"5. **特殊字符**：表格单元格中的 '|' 请写成 '&#124;'，不要用 '\|'。\n\n"
+            f"【需求文档内容】\n{requirement_text}"
+        )
+
+    @staticmethod
     async def generate_test_cases(task: TestCaseGenerationTask) -> str:
         """生成测试用例"""
         writer_prompt, writer_config, requirement_text = await AIModelService._load_writer_context(task)
 
-        # 构建更明确的用户提示，采用思维链(CoT)引导和细粒度拆分策略
-        user_message = (
-            f"请深入分析以下需求文档，并设计高覆盖率的测试用例。\n\n"
-            f"【生成指令】\n"
-            f"1. **数量原则**：请根据需求内容的实际复杂度，自动决定生成用例的数量。务必覆盖所有功能点、异常场景和边界条件，不设数量上限，应写尽写。\n"
-            f"2. **深度遍历策略**：\n"
-            f"   - 请按文档结构逐章节分析，不要遗漏末尾的功能点。\n"
-            f"   - 对每个功能点，必须设计：1个正常场景 + 2-3个异常/边界场景。\n"
-            f"3. **拒绝合并**：严禁将多个验证点合并在一条用例中。例如'验证输入框'应拆分为'输入为空'、'输入超长'、'输入特殊字符'等独立用例。\n"
-            f"4. **场景扩展库**：\n"
-            f"   - 数据完整性（必填项、默认值、数据类型）\n"
-            f"   - 业务逻辑约束（状态流转、权限控制、重复操作）\n"
-            f"   - 外部接口异常（超时、断网、返回错误）\n"
-            f"   - UI交互体验（提示文案、跳转逻辑、防误触）\n"
-            f"5. **⚠️ 输出顺序要求（必须严格执行）**：\n"
-            f"   - **必须按用例编号从小到大的顺序输出**（如：001, 002, 003...或LOGIN_001, LOGIN_002, LOGIN_003...）\n"
-            f"   - **绝对不能跳号、重复或乱序输出**\n"
-            f"   - **编号必须连续，中间不能有遗漏**\n"
-            f"   - **所有用例必须一次性完整输出，不能中断**\n"
-            rf"6. **⚠️ 特殊字符处理（关键）**：\n"
-            rf"   - **如果在表格内容（如操作步骤、预期结果）中出现管道符 '|'，请使用HTML实体 '&#124;' 代替**。\n"
-            rf"   - **绝对不要使用反斜杠转义（如 '\|'），这会导致输出混乱**。\n"
-            rf"   - 示例：应输入 'a&#124;b' 而不是 'a|b' 或 'a\|b'。\n\n"
-            f"【需求文档内容】\n{requirement_text}"
-        )
-
         messages = [
             {"role": "system", "content": writer_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": AIModelService._build_writer_user_message(requirement_text)}
         ]
 
-        # 所有支持的模型都使用兼容OpenAI的接口
-        # 使用配置的max_tokens，不硬编码限制
         response = await AIModelService.call_openai_compatible_api(
             writer_config,
-            messages
-            # 不再硬编码max_tokens，使用配置文件中的值（如32000）
+            messages,
+            max_tokens=AIModelService._effective_max_tokens(writer_config),
         )
 
         return response['choices'][0]['message']['content']
@@ -984,8 +977,11 @@ class AIModelService:
                 {"role": "user", "content": user_message}
             ]
 
-            # 所有支持的模型都使用兼容OpenAI的接口
-            response = await AIModelService.call_openai_compatible_api(reviewer_config, messages)
+            response = await AIModelService.call_openai_compatible_api(
+                reviewer_config,
+                messages,
+                max_tokens=AIModelService._effective_max_tokens(reviewer_config),
+            )
 
             return response['choices'][0]['message']['content']
         except Exception as e:
@@ -1010,44 +1006,16 @@ class AIModelService:
         """
         writer_prompt, writer_config, requirement_text = await AIModelService._load_writer_context(task)
 
-        # 构建用户提示
-        user_message = (
-            f"请深入分析以下需求文档，并设计高覆盖率的测试用例。\n\n"
-            f"【生成指令】\n"
-            f"1. **数量原则**：请根据需求内容的实际复杂度，自动决定生成用例的数量。务必覆盖所有功能点、异常场景和边界条件，不设数量上限，应写尽写。\n"
-            f"2. **深度遍历策略**：\n"
-            f"   - 请按文档结构逐章节分析，不要遗漏末尾的功能点。\n"
-            f"   - 对每个功能点，必须设计：1个正常场景 + 2-3个异常/边界场景。\n"
-            f"3. **拒绝合并**：严禁将多个验证点合并在一条用例中。例如'验证输入框'应拆分为'输入为空'、'输入超长'、'输入特殊字符'等独立用例。\n"
-            f"4. **场景扩展库**：\n"
-            f"   - 数据完整性（必填项、默认值、数据类型）\n"
-            f"   - 业务逻辑约束（状态流转、权限控制、重复操作）\n"
-            f"   - 外部接口异常（超时、断网、返回错误）\n"
-            f"   - UI交互体验（提示文案、跳转逻辑、防误触）\n"
-            f"5. **⚠️ 输出顺序要求（必须严格执行）**：\n"
-            f"   - **必须按用例编号从小到大的顺序输出**（如：001, 002, 003...或LOGIN_001, LOGIN_002, LOGIN_003...）\n"
-            f"   - **绝对不能跳号、重复或乱序输出**\n"
-            f"   - **编号必须连续，中间不能有遗漏**\n"
-            f"   - **所有用例必须一次性完整输出，不能中断**\n"
-            rf"6. **⚠️ 特殊字符处理（关键）**：\n"
-            rf"   - **如果在表格内容（如操作步骤、预期结果）中出现管道符 '|'，请使用HTML实体 '&#124;' 代替**。\n"
-            rf"   - **绝对不要使用反斜杠转义（如 '\|'），这会导致输出混乱**。\n"
-            rf"   - 示例：应输入 'a&#124;b' 而不是 'a|b' 或 'a\|b'。\n\n"
-            f"【需求文档内容】\n{requirement_text}"
-        )
-
         messages = [
             {"role": "system", "content": writer_prompt},
-            {"role": "user", "content": user_message}
+            {"role": "user", "content": AIModelService._build_writer_user_message(requirement_text)}
         ]
 
-        # 流式调用API，确保正确关闭生成器
-        # 使用配置的max_tokens，不硬编码限制
         generator = AIModelService.call_openai_compatible_api_stream(
             writer_config,
             messages,
-            callback=callback
-            # 不再硬编码max_tokens，使用配置文件中的值（如32000）
+            callback=callback,
+            max_tokens=AIModelService._effective_max_tokens(writer_config),
         )
 
         full_content = ""
@@ -1111,11 +1079,11 @@ class AIModelService:
             {"role": "user", "content": user_message}
         ]
 
-        # 流式调用API，确保正确关闭生成器
         generator = AIModelService.call_openai_compatible_api_stream(
             reviewer_config,
             messages,
-            callback=callback
+            callback=callback,
+            max_tokens=AIModelService._effective_max_tokens(reviewer_config),
         )
 
         full_content = ""
@@ -1182,19 +1150,10 @@ class AIModelService:
             f"   - 未修改的部分不要加粗\n"
             f"   - 原始测试用例中已经存在的用例，如果没有改动就不要加粗\n"
             f"   - 只有根据评审意见新增或修改的部分才需要加粗\n"
-            f"7. **⚠️ 输出顺序要求（必须严格执行）**：\n"
-            f"   - **必须按用例编号从小到大的顺序输出**（如：001, 002, 003...或LOGIN_001, LOGIN_002, LOGIN_003...）\n"
-            f"   - **绝对不能跳号、重复或乱序输出**\n"
-            f"   - **编号必须连续，中间不能有遗漏**\n"
-            f"   - **所有用例必须一次性完整输出，不能中断**\n"
-            f"8. **必须输出完整**：请确保输出所有改进后的测试用例，不要因为篇幅原因省略任何用例，"
-            f"即使是第30条、第40条甚至更多的用例，也必须完整输出。\n"
-            f"9. **测试用例编号规则**：新增的测试用例必须按照原有编号规则继续编号（例如原最后一个用例是TC-003，新增的第一个用例应该是TC-004），"
-            f"绝不能使用'新增'、'用例1'等作为编号，必须是正式的测试用例编号。\n"
-            rf"10. **⚠️ 特殊字符处理（关键）**：\n"
-            rf"   - **如果在表格内容（如操作步骤、预期结果）中出现管道符 '|'，请使用HTML实体 '&#124;' 代替**。\n"
-            rf"   - **绝对不要使用反斜杠转义（如 '\|'），这会导致输出混乱**。\n"
-            rf"   - 示例：应输入 'a&#124;b' 而不是 'a|b' 或 'a\|b'。\n\n"
+            f"7. **输出顺序**：按用例编号从小到大连续输出。\n"
+            f"8. **篇幅控制**：只输出必要改动后的完整用例集，总数仍建议不超过 30 条；不要为凑数新增大量用例。\n"
+            f"9. **编号规则**：新增用例沿用原编号规则顺延（如 TC-003 之后为 TC-004）。\n"
+            rf"10. **特殊字符**：表格中的 '|' 写成 '&#124;'。\n\n"
             f"请直接输出改进后的完整测试用例，不要包含任何说明性文字。"
         )
 
@@ -1203,13 +1162,11 @@ class AIModelService:
             {"role": "user", "content": user_message}
         ]
 
-        # 流式调用API，确保正确关闭生成器
-        # 使用配置的max_tokens，不硬编码限制
         generator = AIModelService.call_openai_compatible_api_stream(
             writer_config,
             messages,
-            callback=callback
-            # 不再硬编码max_tokens，使用配置文件中的值（如32000）
+            callback=callback,
+            max_tokens=AIModelService._effective_max_tokens(writer_config),
         )
 
         full_content = ""
