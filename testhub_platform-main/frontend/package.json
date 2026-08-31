@@ -35,5 +35,14 @@
     "sass": "^1.97.3",
     "sass-embedded": "^1.97.3",
     "vite": "^7.3.1"
+  },
+  "allowScripts": {
+    "esbuild@0.27.2": true,
+    "vue-echarts@6.7.3": true,
+    "tree-sitter@0.21.1": true,
+    "@parcel/watcher@2.5.4": true,
+    "tree-sitter-bash@0.23.3": true,
+    "vue-demi@0.14.10": true,
+    "vue-demi@0.13.11": true
   }
 }

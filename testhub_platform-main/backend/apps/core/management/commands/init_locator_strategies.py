@@ -5,6 +5,58 @@ Django管理命令：初始化定位策略
 from django.core.management.base import BaseCommand
 from apps.ui_automation.models import LocatorStrategy
 
+# 所有支持的定位策略（供管理命令与 AppConfig.ready() 共用，保证「添加元素」下拉有数据）
+DEFAULT_LOCATOR_STRATEGIES = [
+    {
+        'name': 'ID',
+        'description': '通过元素的 id 属性定位，最快速可靠'
+    },
+    {
+        'name': 'CSS',
+        'description': '通过 CSS 选择器定位，灵活强大'
+    },
+    {
+        'name': 'XPath',
+        'description': '通过 XPath 表达式定位，功能最强大'
+    },
+    {
+        'name': 'name',
+        'description': '通过元素的 name 属性定位'
+    },
+    {
+        'name': 'class',
+        'description': '通过元素的 class 属性定位'
+    },
+    {
+        'name': 'tag',
+        'description': '通过 HTML 标签名定位'
+    },
+    {
+        'name': 'text',
+        'description': 'Playwright 专用：通过文本内容定位，推荐用于按钮、链接等'
+    },
+    {
+        'name': 'placeholder',
+        'description': 'Playwright 专用：通过 placeholder 属性定位输入框'
+    },
+    {
+        'name': 'role',
+        'description': 'Playwright 专用：通过 ARIA role 定位，推荐用于可访问性'
+    },
+    {
+        'name': 'label',
+        'description': 'Playwright 专用：通过关联的 label 文本定位表单元素'
+    },
+    {
+        'name': 'title',
+        'description': 'Playwright 专用：通过 title 属性定位'
+    },
+    {
+        'name': 'test-id',
+        'description': 'Playwright 专用：通过 data-testid 属性定位，推荐用于测试'
+    },
+]
+
 
 class Command(BaseCommand):
     help = '初始化UI自动化的元素定位策略'
@@ -12,57 +64,7 @@ class Command(BaseCommand):
     def handle(self, *args, **options):
         self.stdout.write(self.style.SUCCESS('开始初始化定位策略...'))
 
-        # 定义所有支持的定位策略
-        strategies = [
-            {
-                'name': 'ID',
-                'description': '通过元素的 id 属性定位，最快速可靠'
-            },
-            {
-                'name': 'CSS',
-                'description': '通过 CSS 选择器定位，灵活强大'
-            },
-            {
-                'name': 'XPath',
-                'description': '通过 XPath 表达式定位，功能最强大'
-            },
-            {
-                'name': 'name',
-                'description': '通过元素的 name 属性定位'
-            },
-            {
-                'name': 'class',
-                'description': '通过元素的 class 属性定位'
-            },
-            {
-                'name': 'tag',
-                'description': '通过 HTML 标签名定位'
-            },
-            {
-                'name': 'text',
-                'description': 'Playwright 专用：通过文本内容定位，推荐用于按钮、链接等'
-            },
-            {
-                'name': 'placeholder',
-                'description': 'Playwright 专用：通过 placeholder 属性定位输入框'
-            },
-            {
-                'name': 'role',
-                'description': 'Playwright 专用：通过 ARIA role 定位，推荐用于可访问性'
-            },
-            {
-                'name': 'label',
-                'description': 'Playwright 专用：通过关联的 label 文本定位表单元素'
-            },
-            {
-                'name': 'title',
-                'description': 'Playwright 专用：通过 title 属性定位'
-            },
-            {
-                'name': 'test-id',
-                'description': 'Playwright 专用：通过 data-testid 属性定位，推荐用于测试'
-            },
-        ]
+        strategies = DEFAULT_LOCATOR_STRATEGIES
 
         created_count = 0
         updated_count = 0

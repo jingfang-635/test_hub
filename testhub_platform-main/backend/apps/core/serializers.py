@@ -9,6 +9,7 @@ from .models import (
     PerformanceStatistics,
     Skill,
     MCPServer,
+    ModuleSwitch,
 )
 
 
@@ -203,3 +204,34 @@ class MCPServerSerializer(serializers.ModelSerializer):
         if transport in ('sse', 'http') and not (url or '').strip():
             raise serializers.ValidationError({'url': 'sse/http 模式必须填写服务器 URL'})
         return attrs
+
+
+class ModuleSwitchSerializer(serializers.ModelSerializer):
+    """功能模块开关序列化器"""
+
+    location_display = serializers.CharField(
+        source='get_location_display', read_only=True
+    )
+
+    class Meta:
+        model = ModuleSwitch
+        fields = [
+            'id', 'key', 'name', 'description', 'location', 'location_display',
+            'sort_order', 'is_enabled', 'is_builtin',
+            'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'is_builtin', 'location_display']
+
+    def validate_key(self, value):
+        key = (value or '').strip()
+        if not key:
+            raise serializers.ValidationError('模块标识不能为空')
+        if ' ' in key:
+            raise serializers.ValidationError('模块标识不能包含空格，建议使用 kebab-case')
+        return key
+
+    def validate_name(self, value):
+        name = (value or '').strip()
+        if not name:
+            raise serializers.ValidationError('模块名称不能为空')
+        return name

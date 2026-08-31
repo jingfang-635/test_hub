@@ -11,6 +11,7 @@ from .views import (
     PerformanceStatisticsViewSet,
     SkillViewSet,
     MCPServerViewSet,
+    ModuleSwitchViewSet,
 )
 
 router = DefaultRouter()
@@ -20,6 +21,7 @@ router.register(r'request-performance-logs', RequestPerformanceLogViewSet, basen
 router.register(r'performance-statistics', PerformanceStatisticsViewSet, basename='performance-statistics')
 router.register(r'skills', SkillViewSet, basename='skill')
 router.register(r'mcp-servers', MCPServerViewSet, basename='mcp-server')
+router.register(r'module-switches', ModuleSwitchViewSet, basename='module-switch')
 
 urlpatterns = [
     path('', include(router.urls)),

@@ -82,7 +82,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useUserStore } from '@/stores/user'
@@ -100,9 +100,14 @@ const appStore = useAppStore()
 
 const currentLanguage = computed(() => appStore.language)
 
+onMounted(() => {
+  appStore.loadEnabledModules()
+})
+
 const moduleCards = computed(() => [
   {
     key: 'ai',
+    moduleKey: 'ai-generation',
     title: t('home.aiCaseGeneration'),
     desc: t('home.aiCaseGenerationDesc'),
     icon: MagicStick,
@@ -110,6 +115,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'api',
+    moduleKey: 'api-testing',
     title: t('home.apiTesting'),
     desc: t('home.apiTestingDesc'),
     icon: Link,
@@ -117,6 +123,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'ui',
+    moduleKey: 'ui-automation',
     title: t('home.uiAutomation'),
     desc: t('home.uiAutomationDesc'),
     icon: Monitor,
@@ -124,6 +131,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'app',
+    moduleKey: 'app-automation',
     title: 'APP自动化测试',
     desc: '基于Airtest的Android APP自动化测试',
     icon: Cellphone,
@@ -131,6 +139,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'data',
+    moduleKey: 'data-factory',
     title: t('home.dataFactory'),
     desc: t('home.dataFactoryDesc'),
     icon: DataLine,
@@ -138,6 +147,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'ai-intelligent',
+    moduleKey: 'ai-intelligent-mode',
     title: t('home.aiIntelligentMode'),
     desc: t('home.aiIntelligentModeDesc'),
     icon: Cpu,
@@ -145,6 +155,7 @@ const moduleCards = computed(() => [
   },
   {
     key: 'assistant',
+    moduleKey: 'assistant',
     title: t('home.aiEvaluator'),
     desc: t('home.aiEvaluatorDesc'),
     icon: ChatDotRound,
@@ -152,12 +163,13 @@ const moduleCards = computed(() => [
   },
   {
     key: 'config',
+    moduleKey: 'configuration',
     title: t('home.configCenter'),
     desc: t('home.configCenterDesc'),
     icon: Setting,
     iconClass: 'config-icon'
   }
-])
+].filter(card => appStore.isModuleEnabled(card.moduleKey)))
 
 const handleLanguageChange = (lang) => {
   appStore.setLanguage(lang)

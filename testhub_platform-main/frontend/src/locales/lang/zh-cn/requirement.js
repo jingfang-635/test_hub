@@ -241,6 +241,7 @@ export default {
     statusPending: '需求分析中',
     statusGenerating: '用例编写中',
     statusReviewing: '用例评审中',
+    statusRevising: '用例修订中',
     statusCompleted: '已完成',
     statusFailed: '失败',
     statusDraft: '草稿',
@@ -577,8 +578,8 @@ export default {
     // 页面头部
     title: '任务详情',
     taskId: '任务ID',
-    exportBtn: '💾 导出Excel',
-    exporting: '💾 导出中...',
+    exportBtn: '导出Excel',
+    exporting: '导出中...',
 
     // 需求描述折叠卡片
     requirementTitle: '📋 需求描述',
@@ -595,8 +596,8 @@ export default {
     // 批量操作
     selectAll: '全选',
     selectedCount: '已选择 {count} 条用例',
-    batchAdopt: '✅ 一键采纳 ({count})',
-    batchDiscard: '❌ 一键弃用 ({count})',
+    batchAdopt: '一键采纳 ({count})',
+    batchDiscard: '一键弃用 ({count})',
 
     // 表格头部
     tableSelect: '选择',
@@ -609,9 +610,9 @@ export default {
     tableActions: '操作',
 
     // 表格操作按钮
-    viewDetail: '📖 查看详情',
-    adopt: '✅ 采纳',
-    discard: '❌ 弃用',
+    viewDetail: '查看详情',
+    adopt: '采纳',
+    discard: '弃用',
 
     // 空状态
     emptyTitle: '暂无测试用例数据',

@@ -241,6 +241,7 @@ export default {
     statusPending: 'Analyzing',
     statusGenerating: 'Writing',
     statusReviewing: 'Reviewing',
+    statusRevising: 'Revising',
     statusCompleted: 'Completed',
     statusFailed: 'Failed',
     statusDraft: 'Draft',
@@ -577,8 +578,8 @@ export default {
     // Page Header
     title: 'Task Detail',
     taskId: 'Task ID',
-    exportBtn: '💾 Export Excel',
-    exporting: '💾 Exporting...',
+    exportBtn: 'Export Excel',
+    exporting: 'Exporting...',
 
     // Requirement Collapse Card
     requirementTitle: '📋 Requirement Description',
@@ -595,8 +596,8 @@ export default {
     // Batch Operations
     selectAll: 'Select All',
     selectedCount: '{count} test cases selected',
-    batchAdopt: '✅ Batch Adopt ({count})',
-    batchDiscard: '❌ Batch Discard ({count})',
+    batchAdopt: 'Batch Adopt ({count})',
+    batchDiscard: 'Batch Discard ({count})',
 
     // Table Headers
     tableSelect: 'Select',
@@ -609,9 +610,9 @@ export default {
     tableActions: 'Actions',
 
     // Table Action Buttons
-    viewDetail: '📖 View Detail',
-    adopt: '✅ Adopt',
-    discard: '❌ Discard',
+    viewDetail: 'View Detail',
+    adopt: 'Adopt',
+    discard: 'Discard',
 
     // Empty State
     emptyTitle: 'No Test Case Data',

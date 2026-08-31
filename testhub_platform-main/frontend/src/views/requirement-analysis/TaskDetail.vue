@@ -1,22 +1,29 @@
 <template>
-  <div class="task-detail">
+  <div class="page-container task-detail">
     <div class="page-header">
       <div class="header-left">
-        <h2>{{ $t('taskDetail.title') }} <span v-if="task.title">- {{ task.title }}</span></h2>
+        <h2 class="page-title">{{ $t('taskDetail.title') }}<span v-if="task.title" class="title-sub"> - {{ task.title }}</span></h2>
         <div class="task-info">
           <span class="task-id">{{ $t('taskDetail.taskId') }}: {{ taskId }}</span>
-          <span class="task-status" :class="task.status">{{ getStatusText(task.status) }}</span>
+          <el-tag
+            v-if="task.status"
+            :type="getStatusTagType(task.status)"
+            effect="light"
+            size="small"
+          >
+            {{ getStatusText(task.status) }}
+          </el-tag>
         </div>
       </div>
       <div class="header-actions">
-        <button
+        <el-button
           v-if="testCases.length > 0"
-          class="export-btn"
+          type="success"
+          :loading="isExporting"
           @click="exportToExcel"
-          :disabled="isExporting">
-          <span v-if="isExporting">{{ $t('taskDetail.exporting') }}</span>
-          <span v-else>{{ $t('taskDetail.exportBtn') }}</span>
-        </button>
+        >
+          {{ isExporting ? $t('taskDetail.exporting') : $t('taskDetail.exportBtn') }}
+        </el-button>
       </div>
     </div>
 
@@ -51,205 +58,189 @@
 
     <div v-else-if="!task.task_id" class="error-state">
       <h3>{{ $t('taskDetail.taskNotExist') }}</h3>
-      <router-link to="/ai-generation/generated-testcases">{{ $t('taskDetail.backToList') }}</router-link>
+      <el-button type="primary" @click="$router.push('/ai-generation/generated-testcases')">
+        {{ $t('taskDetail.backToList') }}
+      </el-button>
     </div>
 
     <div v-else class="task-content">
-      <!-- 批量操作区域 -->
-      <div class="batch-actions" v-if="testCases.length > 0">
-        <div class="selection-info">
-          <label class="select-all">
-            <input
-              type="checkbox"
-              :checked="isAllSelected"
-              @change="toggleSelectAll">
-            {{ $t('taskDetail.selectAll') }}
-          </label>
-          <span class="selected-count" v-if="selectedCases.length > 0">
-            {{ $t('taskDetail.selectedCount', { count: selectedCases.length }) }}
-          </span>
-        </div>
-        <div class="batch-buttons">
-          <button
-            class="batch-adopt-btn"
-            :disabled="selectedCases.length === 0"
-            @click="batchAdopt">
-            {{ $t('taskDetail.batchAdopt', { count: selectedCases.length }) }}
-          </button>
-          <button
-            class="batch-discard-btn"
-            :disabled="selectedCases.length === 0"
-            @click="batchDiscard">
-            {{ $t('taskDetail.batchDiscard', { count: selectedCases.length }) }}
-          </button>
-        </div>
-      </div>
-
-      <!-- 测试用例列表 -->
-      <div class="testcases-table" v-if="testCases.length > 0">
-        <div class="table-header">
-          <div class="header-cell checkbox-cell">{{ $t('taskDetail.tableSelect') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tableCaseId') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tableScenario') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tablePrecondition') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tableSteps') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tableExpected') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tablePriority') }}</div>
-          <div class="header-cell">{{ $t('taskDetail.tableActions') }}</div>
-        </div>
-        
-        <div class="table-body">
-          <div 
-            v-for="(testCase, index) in paginatedTestCases" 
-            :key="testCase.id || index"
-            class="table-row">
-            <div class="body-cell checkbox-cell">
-              <input 
-                type="checkbox" 
-                :value="testCase"
-                v-model="selectedCases"
-                @change="updateSelectAll">
-            </div>
-            <div class="body-cell">{{ testCase.caseId || `TC${String(index + 1).padStart(3, '0')}` }}</div>
-            <div class="body-cell">{{ testCase.scenario }}</div>
-            <div class="body-cell text-truncate">
-              {{ formatTextForList(testCase.precondition) }}
-            </div>
-            <div class="body-cell text-truncate">
-              {{ formatTextForList(testCase.steps) }}
-            </div>
-            <div class="body-cell text-truncate">
-              {{ formatTextForList(testCase.expected) }}
-            </div>
-            <div class="body-cell">
-              <span class="priority-tag" :class="testCase.priority?.toLowerCase()">{{ testCase.priority || 'P2' }}</span>
-            </div>
-            <div class="body-cell">
-              <div class="action-buttons">
-                <button class="view-btn" @click="viewCaseDetail(testCase, index)">{{ $t('taskDetail.viewDetail') }}</button>
-                <button class="adopt-btn" @click="adoptSingleCase(testCase, index)">{{ $t('taskDetail.adopt') }}</button>
-                <button class="discard-btn" @click="discardSingleCase(testCase, index)">{{ $t('taskDetail.discard') }}</button>
-              </div>
-            </div>
+      <div v-if="testCases.length > 0" class="card-container">
+        <!-- 批量操作区域 -->
+        <div class="batch-actions">
+          <div class="selection-info">
+            <el-checkbox :model-value="isAllSelected" @change="toggleSelectAll">
+              {{ $t('taskDetail.selectAll') }}
+            </el-checkbox>
+            <span class="selected-count" v-if="selectedCases.length > 0">
+              {{ $t('taskDetail.selectedCount', { count: selectedCases.length }) }}
+            </span>
+          </div>
+          <div class="batch-buttons">
+            <el-button type="success" :disabled="selectedCases.length === 0" @click="batchAdopt">
+              {{ $t('taskDetail.batchAdopt', { count: selectedCases.length }) }}
+            </el-button>
+            <el-button type="danger" :disabled="selectedCases.length === 0" @click="batchDiscard">
+              {{ $t('taskDetail.batchDiscard', { count: selectedCases.length }) }}
+            </el-button>
           </div>
         </div>
+
+        <!-- 测试用例列表 -->
+        <div class="testcases-table">
+          <el-table :data="paginatedTestCases">
+            <el-table-column :label="$t('taskDetail.tableSelect')" width="55" align="center">
+              <template #default="{ row }">
+                <el-checkbox
+                  :model-value="selectedCases.includes(row)"
+                  @change="(val) => toggleCaseSelection(row, val)"
+                />
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tableCaseId')" min-width="140" show-overflow-tooltip>
+              <template #default="{ row, $index }">
+                <span class="case-id">{{ row.caseId || `TC${String($index + 1).padStart(3, '0')}` }}</span>
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tableScenario')" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ row.scenario }}</template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tablePrecondition')" min-width="180" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatTextForList(row.precondition) }}</template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tableSteps')" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatTextForList(row.steps) }}</template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tableExpected')" min-width="200" show-overflow-tooltip>
+              <template #default="{ row }">{{ formatTextForList(row.expected) }}</template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tablePriority')" width="90" align="center">
+              <template #default="{ row }">
+                <el-tag :type="getPriorityTagType(row.priority)" effect="light" size="small">
+                  {{ row.priority || 'P2' }}
+                </el-tag>
+              </template>
+            </el-table-column>
+            <el-table-column :label="$t('taskDetail.tableActions')" width="265" fixed="right">
+              <template #default="{ row, $index }">
+                <div class="action-buttons">
+                  <el-button size="small" class="view-btn" @click="viewCaseDetail(row, $index)">{{ $t('taskDetail.viewDetail') }}</el-button>
+                  <el-button size="small" type="success" @click="adoptSingleCase(row, $index)">{{ $t('taskDetail.adopt') }}</el-button>
+                  <el-button size="small" type="danger" @click="discardSingleCase(row, $index)">{{ $t('taskDetail.discard') }}</el-button>
+                </div>
+              </template>
+            </el-table-column>
+          </el-table>
+        </div>
+
+        <!-- 分页 -->
+        <div class="pagination-container">
+          <el-pagination
+            v-model:current-page="currentPage"
+            v-model:page-size="pageSize"
+            :total="testCases.length"
+            :page-sizes="[10, 20, 50]"
+            layout="total, sizes, prev, pager, next"
+            @size-change="handleSizeChange"
+          />
+        </div>
       </div>
 
-      <div v-else class="empty-state">
+      <div v-else class="empty-state card-container">
         <h3>{{ $t('taskDetail.emptyTitle') }}</h3>
         <p>{{ $t('taskDetail.emptyHint') }}</p>
-      </div>
-
-      <!-- 分页 -->
-      <div v-if="testCases.length > 0" class="pagination-section">
-        <div class="pagination-info">
-          {{ $t('taskDetail.paginationInfo', { start: paginationStart, end: paginationEnd, total: testCases.length }) }}
-        </div>
-        <div class="pagination-controls">
-          <div class="page-size-selector">
-            <label>{{ $t('taskDetail.pageSizeLabel') }}</label>
-            <select v-model="pageSize" @change="currentPage = 1">
-              <option value="10">{{ $t('taskDetail.pageSizeOption', { size: 10 }) }}</option>
-              <option value="20">{{ $t('taskDetail.pageSizeOption', { size: 20 }) }}</option>
-              <option value="50">{{ $t('taskDetail.pageSizeOption', { size: 50 }) }}</option>
-            </select>
-          </div>
-          <div class="pagination-buttons">
-            <button :disabled="currentPage <= 1" @click="currentPage--">{{ $t('taskDetail.previousPage') }}</button>
-            <span class="current-page">{{ $t('taskDetail.currentPageInfo', { current: currentPage, total: totalPages }) }}</span>
-            <button :disabled="currentPage >= totalPages" @click="currentPage++">{{ $t('taskDetail.nextPage') }}</button>
-          </div>
-        </div>
       </div>
     </div>
 
     <!-- 用例详情弹窗 -->
-    <div v-if="showCaseDetail" class="case-detail-modal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ isEditing ? $t('taskDetail.modalEditTitle') : $t('taskDetail.modalViewTitle') }}</h3>
-          <button class="close-btn" @click="closeCaseDetail">×</button>
-        </div>
-
-        <!-- 查看模式 -->
-        <div v-if="!isEditing" class="modal-body">
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelCaseId') }}</label>
-            <span>{{ selectedCase.caseId || `TC${String(selectedCaseIndex + 1).padStart(3, '0')}` }}</span>
+    <el-dialog
+      v-model="showCaseDetail"
+      :title="isEditing ? $t('taskDetail.modalEditTitle') : $t('taskDetail.modalViewTitle')"
+      width="800px"
+      class="case-detail-dialog"
+      :close-on-click-modal="false"
+      @close="closeCaseDetail"
+    >
+      <!-- 查看模式 -->
+      <div v-if="!isEditing" class="modal-body">
+        <div class="info-table">
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelCaseId') }}</div>
+            <div class="info-value">{{ selectedCase.caseId || `TC${String(selectedCaseIndex + 1).padStart(3, '0')}` }}</div>
           </div>
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelScenario') }}</label>
-            <p v-html="formatMarkdown(selectedCase.scenario)"></p>
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelScenario') }}</div>
+            <div class="info-value" v-html="formatMarkdown(selectedCase.scenario)"></div>
           </div>
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelPrecondition') }}</label>
-            <p v-html="formatMarkdown(selectedCase.precondition || $t('taskDetail.labelNone'))"></p>
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelPrecondition') }}</div>
+            <div class="info-value" v-html="formatMarkdown(selectedCase.precondition || $t('taskDetail.labelNone'))"></div>
           </div>
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelSteps') }}</label>
-            <p class="test-steps" v-html="formatMarkdown(selectedCase.steps)"></p>
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelSteps') }}</div>
+            <div class="info-value test-steps" v-html="formatMarkdown(selectedCase.steps)"></div>
           </div>
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelExpected') }}</label>
-            <p v-html="formatMarkdown(selectedCase.expected)"></p>
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelExpected') }}</div>
+            <div class="info-value" v-html="formatMarkdown(selectedCase.expected)"></div>
           </div>
-          <div class="detail-item">
-            <label>{{ $t('taskDetail.labelPriority') }}</label>
-            <span class="priority-tag" :class="selectedCase.priority?.toLowerCase()">{{ selectedCase.priority || 'P2' }}</span>
+          <div class="info-row">
+            <div class="info-label">{{ $t('taskDetail.labelPriority') }}</div>
+            <div class="info-value">
+              <el-tag :type="getPriorityTagType(selectedCase.priority)" effect="light" size="small">
+                {{ selectedCase.priority || 'P2' }}
+              </el-tag>
+            </div>
           </div>
-        </div>
-
-        <!-- 编辑模式 -->
-        <div v-else class="modal-body edit-mode">
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelCaseId') }}</label>
-            <span class="readonly-field">{{ editForm.caseId || `TC${String(selectedCaseIndex + 1).padStart(3, '0')}` }}</span>
-          </div>
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelScenario') }}</label>
-            <el-input v-model="editForm.scenario" type="textarea" :rows="2" :placeholder="$t('taskDetail.placeholderScenario')" />
-          </div>
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelPrecondition') }}</label>
-            <el-input v-model="editForm.precondition" type="textarea" :rows="3" :placeholder="$t('taskDetail.placeholderPrecondition')" />
-          </div>
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelSteps') }}</label>
-            <el-input v-model="editForm.steps" type="textarea" :rows="6" :placeholder="$t('taskDetail.placeholderSteps')" />
-          </div>
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelExpected') }}</label>
-            <el-input v-model="editForm.expected" type="textarea" :rows="4" :placeholder="$t('taskDetail.placeholderExpected')" />
-          </div>
-          <div class="form-item">
-            <label>{{ $t('taskDetail.labelPriority') }}</label>
-            <el-select v-model="editForm.priority" :placeholder="$t('taskDetail.placeholderPriority')">
-              <el-option label="P0" value="P0"></el-option>
-              <el-option label="P1" value="P1"></el-option>
-              <el-option label="P2" value="P2"></el-option>
-              <el-option label="P3" value="P3"></el-option>
-            </el-select>
-          </div>
-        </div>
-
-        <!-- 底部操作栏 -->
-        <div class="modal-footer">
-          <template v-if="!isEditing">
-            <button class="action-btn edit-btn" @click="startEdit">
-              <span>{{ $t('taskDetail.btnEdit') }}</span>
-            </button>
-            <button class="action-btn close-btn-footer" @click="closeCaseDetail">{{ $t('taskDetail.btnClose') }}</button>
-          </template>
-          <template v-else>
-            <button class="action-btn save-btn" @click="saveEdit" :disabled="isSaving">
-              <span v-if="isSaving">{{ $t('taskDetail.btnSaveing') }}</span>
-              <span v-else>{{ $t('taskDetail.btnSave') }}</span>
-            </button>
-            <button class="action-btn cancel-btn" @click="cancelEdit" :disabled="isSaving">{{ $t('taskDetail.btnCancel') }}</button>
-          </template>
         </div>
       </div>
-    </div>
+
+      <!-- 编辑模式 -->
+      <div v-else class="modal-body edit-mode">
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelCaseId') }}</label>
+          <span class="readonly-field">{{ editForm.caseId || `TC${String(selectedCaseIndex + 1).padStart(3, '0')}` }}</span>
+        </div>
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelScenario') }}</label>
+          <el-input v-model="editForm.scenario" type="textarea" :rows="2" :placeholder="$t('taskDetail.placeholderScenario')" />
+        </div>
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelPrecondition') }}</label>
+          <el-input v-model="editForm.precondition" type="textarea" :rows="3" :placeholder="$t('taskDetail.placeholderPrecondition')" />
+        </div>
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelSteps') }}</label>
+          <el-input v-model="editForm.steps" type="textarea" :rows="6" :placeholder="$t('taskDetail.placeholderSteps')" />
+        </div>
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelExpected') }}</label>
+          <el-input v-model="editForm.expected" type="textarea" :rows="4" :placeholder="$t('taskDetail.placeholderExpected')" />
+        </div>
+        <div class="form-item">
+          <label>{{ $t('taskDetail.labelPriority') }}</label>
+          <el-select v-model="editForm.priority" :placeholder="$t('taskDetail.placeholderPriority')">
+            <el-option label="P0" value="P0"></el-option>
+            <el-option label="P1" value="P1"></el-option>
+            <el-option label="P2" value="P2"></el-option>
+            <el-option label="P3" value="P3"></el-option>
+          </el-select>
+        </div>
+      </div>
+
+      <!-- 底部操作栏 -->
+      <template #footer>
+        <template v-if="!isEditing">
+          <el-button type="primary" @click="startEdit">{{ $t('taskDetail.btnEdit') }}</el-button>
+          <el-button @click="closeCaseDetail">{{ $t('taskDetail.btnClose') }}</el-button>
+        </template>
+        <template v-else>
+          <el-button type="primary" :loading="isSaving" @click="saveEdit">
+            {{ isSaving ? $t('taskDetail.btnSaveing') : $t('taskDetail.btnSave') }}
+          </el-button>
+          <el-button @click="cancelEdit" :disabled="isSaving">{{ $t('taskDetail.btnCancel') }}</el-button>
+        </template>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -293,22 +284,10 @@ export default {
       return this.testCases.length > 0 && this.selectedCases.length === this.testCases.length
     },
 
-    totalPages() {
-      return Math.ceil(this.testCases.length / this.pageSize)
-    },
-
     paginatedTestCases() {
       const start = (this.currentPage - 1) * this.pageSize
       const end = start + this.pageSize
       return this.testCases.slice(start, end)
-    },
-
-    paginationStart() {
-      return (this.currentPage - 1) * this.pageSize + 1
-    },
-
-    paginationEnd() {
-      return Math.min(this.currentPage * this.pageSize, this.testCases.length)
     }
   },
 
@@ -376,7 +355,8 @@ export default {
       for (let line of lines) {
         const trimmedLine = line.trim()
         if (trimmedLine.includes('|') && !trimmedLine.includes('--------')) {
-          const cells = trimmedLine.split('|').map(cell => cell.trim()).filter(cell => cell)
+          // 保留空单元格位置，避免因删除空单元格导致列错位
+          const cells = trimmedLine.replace(/^\|/, '').replace(/\|$/, '').split('|').map(cell => cell.trim())
           if (cells.length > 1) {
             tableData.push(cells)
             isTableFormat = true
@@ -406,7 +386,7 @@ export default {
             // 优先级匹配，避免误判
             if (cleanHeader === '优先级' || cleanHeader === 'priority' || cleanHeader === 'priority（优先级）' || cleanHeader === '优先级（priority）') {
               testCase.priority = value
-            } else if (cleanHeader === '用例id' || cleanHeader === '编号' || cleanHeader === 'id' || cleanHeader.includes('用例id')) {
+            } else if (cleanHeader === '用例id' || cleanHeader === '用例编号' || cleanHeader === '测试用例编号' || cleanHeader === '编号' || cleanHeader === 'id' || cleanHeader.includes('用例id')) {
               testCase.caseId = value
             } else if (cleanHeader === '测试目标' || cleanHeader === '测试场景' || cleanHeader === '场景' || cleanHeader === '标题' || cleanHeader.includes('测试目标')) {
               testCase.scenario = value
@@ -481,6 +461,31 @@ export default {
       return this.$t('taskDetail.' + statusKey) || status
     },
 
+    getStatusTagType(status) {
+      const typeMap = {
+        pending: 'info',
+        generating: 'warning',
+        reviewing: 'primary',
+        completed: 'success',
+        failed: 'danger'
+      }
+      return typeMap[status] || 'info'
+    },
+
+    getPriorityTagType(priority) {
+      const priorityMap = {
+        'P0': 'danger',
+        'critical': 'danger',
+        'P1': 'warning',
+        'high': 'warning',
+        'P2': 'primary',
+        'medium': 'primary',
+        'P3': 'info',
+        'low': 'info'
+      }
+      return priorityMap[priority] || 'primary'
+    },
+
     // 格式化列表中的文本，将<br>转换为换行
     formatTextForList(text) {
       if (!text) return ''
@@ -506,17 +511,22 @@ export default {
       return formatted
     },
 
-    toggleSelectAll() {
-      if (this.isAllSelected) {
-        this.selectedCases = []
+    toggleSelectAll(val) {
+      this.selectedCases = val ? [...this.testCases] : []
+    },
+
+    toggleCaseSelection(row, val) {
+      if (val) {
+        if (!this.selectedCases.includes(row)) {
+          this.selectedCases.push(row)
+        }
       } else {
-        this.selectedCases = [...this.testCases]
+        this.selectedCases = this.selectedCases.filter(item => item !== row)
       }
     },
 
-    updateSelectAll() {
-      // 这个方法会在单个checkbox变化时触发，用于更新全选状态
-      // Vue的v-model会自动处理selectedCases数组的更新
+    handleSizeChange() {
+      this.currentPage = 1
     },
 
     async batchAdopt() {
@@ -892,17 +902,24 @@ export default {
         // 准备数据
         const worksheetData = []
 
-        // 添加表头
+        // 添加表头（与用例库导出Excel模板保持一致）
         worksheetData.push([
-          this.$t('taskDetail.tableCaseId'),
-          this.$t('taskDetail.tableScenario'),
-          this.$t('taskDetail.tablePrecondition'),
-          this.$t('taskDetail.tableSteps'),
-          this.$t('taskDetail.tableExpected'),
-          this.$t('taskDetail.tablePriority')
+          this.$t('testcase.excelNumber'),
+          this.$t('testcase.excelTitle'),
+          this.$t('testcase.excelPreconditions'),
+          this.$t('testcase.excelSteps'),
+          this.$t('testcase.excelExpectedResult'),
+          this.$t('testcase.excelRemark'),
+          this.$t('testcase.excelPriority'),
+          this.$t('testcase.excelTestType'),
+          this.$t('testcase.excelProject'),
+          this.$t('testcase.excelVersions'),
+          this.$t('testcase.l1'),
+          this.$t('testcase.l2'),
+          this.$t('testcase.l3')
         ])
 
-        // 添加数据行
+        // 添加数据行（无对应数据时留空，保留字段名）
         this.testCases.forEach((testCase, index) => {
           worksheetData.push([
             testCase.caseId || `TC${String(index + 1).padStart(3, '0')}`,
@@ -910,23 +927,25 @@ export default {
             this.formatTextForList(testCase.precondition || ''),
             this.formatTextForList(testCase.steps || ''),
             this.formatTextForList(testCase.expected || ''),
-            testCase.priority || 'P2'
+            '', // 备注：无对应数据
+            testCase.priority || 'P2',
+            '', // 测试类型：无对应数据
+            '', // 关联项目：无对应数据
+            '', // 关联版本：无对应数据
+            '', // L1：无对应数据
+            '', // L2：无对应数据
+            ''  // L3：无对应数据
           ])
         })
 
         // 创建工作表
         const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
 
-        // 设置列宽
-        const colWidths = [
-          { wch: 15 }, // 测试用例编号
-          { wch: 30 }, // 测试场景
-          { wch: 25 }, // 前置条件
-          { wch: 50 }, // 操作步骤（增加宽度）
-          { wch: 40 }, // 预期结果（增加宽度）
-          { wch: 10 }  // 优先级
+        // 设置列宽（与用例库导出Excel模板保持一致）
+        worksheet['!cols'] = [
+          { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 30 }, { wch: 20 },
+          { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
         ]
-        worksheet['!cols'] = colWidths
 
         // 为所有单元格添加自动换行样式
         const range = XLSX.utils.decode_range(worksheet['!ref'])
@@ -965,629 +984,277 @@ export default {
 }
 </script>
 
-<style scoped>
+<style lang="scss" scoped>
 .task-detail {
-  padding: 20px;
-  max-width: 1400px;
-  margin: 0 auto;
+  // 标题副标题
+  .title-sub {
+    margin-left: 8px;
+    font-size: 16px;
+    font-weight: 500;
+    color: var(--th-text-secondary);
+  }
+
+  .header-left {
+    min-width: 0;
+  }
+
+  .task-info {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-top: 8px;
+    flex-wrap: wrap;
+
+    .task-id {
+      font-size: 14px;
+      color: var(--th-text-secondary);
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+  }
 }
 
 /* 需求描述折叠卡片 */
 .requirement-description-card {
   margin-bottom: 20px;
-  background: white;
-  border-radius: 8px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+  background: var(--th-bg-elevated);
+  border: 1px solid var(--th-border);
+  border-radius: var(--th-radius-lg);
+  box-shadow: var(--th-shadow-xs);
   overflow: hidden;
+
+  .collapse-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 15px;
+    font-weight: 500;
+    padding-left: 4px;
+  }
+
+  .title-text {
+    color: var(--th-text-primary);
+    font-weight: 600;
+  }
+
+  .title-hint {
+    font-size: 13px;
+    color: var(--th-text-secondary);
+    font-weight: normal;
+  }
+
+  .requirement-content {
+    padding: 4px 0 16px;
+  }
+
+  .requirement-text {
+    background: var(--th-bg-muted);
+    border-radius: var(--th-radius-sm);
+    padding: 16px;
+    line-height: 1.8;
+    color: var(--th-text-regular);
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+    border-left: 3px solid var(--th-color-primary);
+  }
+
+  .requirement-actions {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+  }
+
+  :deep(.el-collapse) {
+    border: none;
+  }
+
+  :deep(.el-collapse-item__header) {
+    background: transparent;
+    border-bottom: none;
+    padding: 16px 20px;
+    font-size: 15px;
+  }
+
+  :deep(.el-collapse-item__wrap) {
+    border-bottom: none;
+  }
+
+  :deep(.el-collapse-item__content) {
+    padding: 0 20px 16px;
+  }
+
+  // 隐藏默认箭头图标
+  :deep(.el-collapse-item__header .el-icon),
+  :deep(.el-collapse-item__header .el-collapse-item__arrow),
+  :deep(.el-collapse-item__header .el-icon-arrow-right),
+  :deep(.el-collapse-item__header .el-icon-arrow-left) {
+    display: none !important;
+  }
 }
 
-.collapse-title {
+/* 批量操作区域 */
+.batch-actions {
   display: flex;
+  justify-content: space-between;
   align-items: center;
-  gap: 8px;
-  font-size: 15px;
-  font-weight: 500;
-  position: relative;
-  padding-left: 20px;
+  margin-bottom: 16px;
+  flex-wrap: wrap;
+  gap: 12px;
+
+  .selection-info {
+    display: flex;
+    align-items: center;
+    gap: 15px;
+    flex-wrap: wrap;
+
+    .selected-count {
+      color: var(--th-color-primary);
+      font-weight: 500;
+      font-size: 14px;
+    }
+  }
+
+  .batch-buttons {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
 }
 
-/* 隐藏左侧可能存在的Element Plus默认箭头 */
-.collapse-title::before {
-  content: none;
+/* 测试用例表格 */
+.testcases-table {
+  :deep(.el-table) {
+    border-radius: var(--th-radius-md);
+  }
+
+  .case-id {
+    font-family: var(--el-font-family);
+    font-weight: 500;
+    color: var(--th-text-primary);
+  }
+
+  /* 操作按钮：三个按钮保持在同一行 */
+  .action-buttons {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: nowrap;
+  }
+
+  /* 查看详情按钮：浅紫色样式 */
+  .view-btn {
+    --el-button-bg-color: #f0edfd;
+    --el-button-border-color: #ddd6fb;
+    --el-button-text-color: var(--th-color-primary);
+    --el-button-hover-bg-color: #e5e0fa;
+    --el-button-hover-border-color: #c7bcf9;
+    --el-button-hover-text-color: var(--th-color-primary);
+    --el-button-active-bg-color: #ddd6fb;
+    --el-button-active-border-color: #b3a1f0;
+    --el-button-active-text-color: var(--th-color-primary);
+  }
 }
 
-.title-icon {
-  font-size: 18px;
-}
-
-.title-text {
-  color: #303133;
-  font-weight: 600;
-}
-
-.title-hint {
-  font-size: 13px;
-  color: #909399;
-  font-weight: normal;
-}
-
-.requirement-content {
-  padding: 16px 0;
-}
-
-.requirement-text {
-  background: #f5f7fa;
-  border-radius: 6px;
-  padding: 16px;
-  line-height: 1.8;
-  color: #606266;
-  white-space: pre-wrap;
-  word-wrap: break-word;
-  max-height: 400px;
-  overflow-y: auto;
-  font-family: 'Courier New', Courier, monospace;
-  font-size: 14px;
-  border-left: 4px solid #409eff;
-}
-
-.requirement-actions {
-  margin-top: 12px;
+/* 分页 */
+.pagination-container {
+  margin-top: 20px;
   display: flex;
   justify-content: flex-end;
 }
 
-/* 自定义折叠面板样式 */
-.requirement-description-card :deep(.el-collapse) {
-  border: none;
-}
-
-.requirement-description-card :deep(.el-collapse-item__header) {
-  background: #fafafa;
-  border-bottom: 1px solid #e4e7ed;
-  padding: 16px 20px;
-  font-size: 15px;
-}
-
-/* 隐藏Element Plus默认的箭头图标 */
-.requirement-description-card :deep(.el-collapse-item__header .el-icon) {
-  display: none !important;
-}
-
-.requirement-description-card :deep(.el-collapse-item__arrow) {
-  display: none !important;
-}
-
-.requirement-description-card :deep(.el-collapse-item__wrap) {
-  border-bottom: none;
-}
-
-.requirement-description-card :deep(.el-collapse-item__content) {
-  padding: 0 20px 16px;
-}
-
-.page-header {
-  margin-bottom: 20px;
-  padding-bottom: 15px;
-  border-bottom: 1px solid #eee;
-  display: flex;
-  justify-content: space-between;
-  align-items: flex-start;
-}
-
-.header-left {
-  flex: 1;
-}
-
-.page-header h2 {
-  color: #2c3e50;
-  margin: 0 0 10px 0;
-}
-
-.task-info {
-  display: flex;
-  gap: 20px;
-  align-items: center;
-}
-
-.task-id {
-  color: #666;
-  font-family: monospace;
-}
-
-.task-status {
-  padding: 4px 12px;
-  border-radius: 4px;
-  font-size: 0.9rem;
-  font-weight: bold;
-}
-
-.task-status.completed {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.header-actions {
-  display: flex;
-  gap: 10px;
-}
-
-.export-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: background 0.3s ease;
-  white-space: nowrap;
-}
-
-.export-btn:hover:not(:disabled) {
-  background: #229954;
-}
-
-.export-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.batch-actions {
-  background: white;
-  border-radius: 8px;
-  padding: 20px;
-  margin-bottom: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.selection-info {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-
-.select-all {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-}
-
-.selected-count {
-  color: #3498db;
-  font-weight: bold;
-}
-
-.batch-buttons {
-  display: flex;
-  gap: 10px;
-}
-
-.batch-adopt-btn, .batch-discard-btn {
-  padding: 8px 16px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.9rem;
-  transition: all 0.2s ease;
-}
-
-.batch-adopt-btn {
-  background: #27ae60;
-  color: white;
-}
-
-.batch-adopt-btn:hover:not(:disabled) {
-  background: #229954;
-}
-
-.batch-discard-btn {
-  background: #e74c3c;
-  color: white;
-}
-
-.batch-discard-btn:hover:not(:disabled) {
-  background: #c0392b;
-}
-
-.batch-adopt-btn:disabled, .batch-discard-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.testcases-table {
-  background: white;
-  border-radius: 8px;
-  overflow: hidden;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.table-header {
-  display: grid;
-  grid-template-columns: 60px 120px 1fr 1fr 1fr 1fr 80px 150px;
-  background: #f8f9fa;
-  font-weight: bold;
-  color: #2c3e50;
-}
-
-.table-body .table-row {
-  display: grid;
-  grid-template-columns: 60px 120px 1fr 1fr 1fr 1fr 80px 150px;
-  border-bottom: 1px solid #eee;
-  transition: background 0.2s ease;
-}
-
-.table-row:hover {
-  background: #f8f9fa;
-}
-
-.header-cell, .body-cell {
-  padding: 16px 8px;
-  display: flex;
-  align-items: flex-start; /* 改为顶部对齐，避免内容被裁剪 */
-  border-right: 1px solid #eee;
-  word-break: break-word;
-  min-height: 60px;
-}
-
-/* 文本截断样式 */
-.text-truncate {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: pre-wrap;
-  line-height: 1.6;
-  word-break: break-word;
-}
-
-.checkbox-cell {
-  justify-content: center;
-}
-
-.header-cell:last-child, .body-cell:last-child {
-  border-right: none;
-}
-
-.priority-tag {
-  padding: 4px 8px;
-  border-radius: 4px;
-  font-size: 0.8rem;
-  font-weight: bold;
-}
-
-.priority-tag.low {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.priority-tag.p3 {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.priority-tag.medium {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.priority-tag.p2 {
-  background: #e3f2fd;
-  color: #1976d2;
-}
-
-.priority-tag.high {
-  background: #fff3e0;
-  color: #f57c00;
-}
-
-.priority-tag.p1 {
-  background: #fff3e0;
-  color: #f57c00;
-}
-
-.priority-tag.critical {
-  background: #ffebee;
-  color: #d32f2f;
-}
-
-.priority-tag.p0 {
-  background: #ffebee;
-  color: #d32f2f;
-}
-
-.action-buttons {
-  display: flex;
-  gap: 5px;
-  flex-wrap: wrap;
-}
-
-.view-btn, .adopt-btn, .discard-btn {
-  padding: 4px 8px;
-  border: none;
-  border-radius: 4px;
-  cursor: pointer;
-  font-size: 0.8rem;
-  transition: all 0.2s ease;
-}
-
-.view-btn {
-  background: #3498db;
-  color: white;
-}
-
-.view-btn:hover {
-  background: #2980b9;
-}
-
-.adopt-btn {
-  background: #27ae60;
-  color: white;
-}
-
-.adopt-btn:hover {
-  background: #229954;
-}
-
-.discard-btn {
-  background: #e74c3c;
-  color: white;
-}
-
-.discard-btn:hover {
-  background: #c0392b;
-}
-
-.pagination-section {
-  margin-top: 20px;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  background: white;
-  padding: 15px;
-  border-radius: 8px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-}
-
-.pagination-controls {
-  display: flex;
-  align-items: center;
-  gap: 20px;
-}
-
-.page-size-selector {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.pagination-buttons {
-  display: flex;
-  align-items: center;
-  gap: 15px;
-}
-
-.pagination-buttons button {
-  padding: 6px 12px;
-  border: 1px solid #ddd;
-  background: white;
-  cursor: pointer;
-  border-radius: 4px;
-  transition: all 0.2s ease;
-}
-
-.pagination-buttons button:hover:not(:disabled) {
-  background: #f0f0f0;
-}
-
-.pagination-buttons button:disabled {
-  color: #ccc;
-  cursor: not-allowed;
-}
-
-.case-detail-modal {
-  position: fixed;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(0, 0, 0, 0.5);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  z-index: 1000;
-}
-
-.modal-content {
-  background: white;
-  border-radius: 12px;
-  max-width: 800px;
-  width: 90%;
-  max-height: 80vh;
-  overflow-y: auto;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 30px;
-  border-bottom: 1px solid #eee;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #2c3e50;
-}
-
-.close-btn {
-  background: none;
-  border: none;
-  font-size: 1.5rem;
-  cursor: pointer;
-  color: #666;
-}
-
-.modal-body {
-  padding: 30px;
-}
-
-.detail-item {
-  margin-bottom: 20px;
-}
-
-.detail-item label {
-  font-weight: bold;
-  color: #2c3e50;
-  display: block;
-  margin-bottom: 8px;
-}
-
-.detail-item span, .detail-item p {
-  color: #666;
-  line-height: 1.6;
-}
-
-.test-steps {
-  white-space: pre-line;
-  background: #f8f9fa;
-  padding: 15px;
-  border-radius: 6px;
-  border-left: 4px solid #3498db;
-}
-
-.loading-state, .error-state, .empty-state {
+/* 加载 / 错误 / 空状态 */
+.loading-state,
+.error-state,
+.empty-state {
   text-align: center;
   padding: 60px 20px;
-  color: #666;
-}
+  color: var(--th-text-secondary);
 
-.error-state h3, .empty-state h3 {
-  color: #2c3e50;
-  margin-bottom: 10px;
+  h3 {
+    color: var(--th-text-primary);
+    margin-bottom: 10px;
+  }
 }
 
 .error-state a {
-  color: #3498db;
+  color: var(--th-color-primary);
   text-decoration: none;
+
+  &:hover {
+    text-decoration: underline;
+  }
 }
 
-.error-state a:hover {
-  text-decoration: underline;
+/* 用例详情弹窗 */
+.case-detail-dialog {
+  :deep(.el-dialog__header) {
+    border-bottom: 1px solid var(--th-border);
+    padding-bottom: 16px;
+    margin-right: 0;
+  }
+
+  :deep(.el-dialog__title) {
+    font-weight: 600;
+    color: var(--th-text-primary);
+  }
 }
 
-/* 编辑模式样式 */
-.edit-mode {
+/* 详情信息表格（参考项目与版本样式） */
+.info-table {
+  border: 1px solid var(--th-border);
+  border-radius: var(--th-radius-md);
+  overflow: hidden;
+
+  .info-row {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    border-bottom: 1px solid var(--th-border);
+
+    &:last-child {
+      border-bottom: none;
+    }
+  }
+
+  .info-label {
+    padding: 14px 20px;
+    background: var(--th-bg-muted);
+    color: var(--th-text-secondary);
+    font-weight: 500;
+    font-size: 14px;
+    border-right: 1px solid var(--th-border);
+  }
+
+  .info-value {
+    padding: 14px 20px;
+    color: var(--th-text-primary);
+    font-size: 14px;
+    line-height: 1.8;
+    min-width: 0;
+    word-break: break-word;
+
+    &.test-steps {
+      white-space: pre-wrap;
+    }
+  }
+}
+
+.modal-body.edit-mode {
   .form-item {
-    margin-bottom: 20px;
+    margin-bottom: 18px;
+
+    label {
+      display: block;
+      margin-bottom: 8px;
+      font-size: 14px;
+      font-weight: 500;
+      color: var(--th-text-primary);
+    }
   }
-
-  .form-item label {
-    font-weight: bold;
-    color: #2c3e50;
-    display: block;
-    margin-bottom: 8px;
-  }
-
-  .readonly-field {
-    color: #666;
-    padding: 8px 12px;
-    background: #f5f5f5;
-    border-radius: 4px;
-    display: inline-block;
-  }
-}
-
-/* 底部操作栏 */
-.modal-footer {
-  display: flex;
-  justify-content: flex-end;
-  gap: 12px;
-  padding: 20px 30px;
-  border-top: 1px solid #eee;
-  background: #f9f9f9;
-  border-radius: 0 0 12px 12px;
-}
-
-.action-btn {
-  padding: 10px 20px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 14px;
-  font-weight: 500;
-  transition: all 0.3s;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.edit-btn {
-  background: #409eff;
-  color: white;
-}
-
-.edit-btn:hover {
-  background: #66b1ff;
-}
-
-.save-btn {
-  background: #67c23a;
-  color: white;
-}
-
-.save-btn:hover:not(:disabled) {
-  background: #85ce61;
-}
-
-.save-btn:disabled {
-  opacity: 0.6;
-  cursor: not-allowed;
-}
-
-.cancel-btn {
-  background: #909399;
-  color: white;
-}
-
-.cancel-btn:hover:not(:disabled) {
-  background: #a6a9ad;
-}
-
-.close-btn-footer {
-  background: #e4e7ed;
-  color: #606266;
-}
-
-.close-btn-footer:hover {
-  background: #ecf5ff;
-}
-</style>
-
-<style>
-/* 全局样式：隐藏Element Plus折叠面板的默认箭头图标 */
-.requirement-description-card .el-collapse-item__header .el-icon {
-  display: none !important;
-}
-
-.requirement-description-card .el-collapse-item__arrow {
-  display: none !important;
-}
-
-/* 针对Element Plus不同版本的箭头图标 */
-.requirement-description-card .el-collapse-item__header .el-collapse-item__arrow {
-  display: none !important;
-}
-
-.requirement-description-card .el-collapse-item__header .el-icon-arrow-right {
-  display: none !important;
-}
-
-.requirement-description-card .el-collapse-item__header .el-icon-arrow-left {
-  display: none !important;
 }
 </style>

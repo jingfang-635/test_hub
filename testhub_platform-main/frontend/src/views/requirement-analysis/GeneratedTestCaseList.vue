@@ -419,6 +419,7 @@ export default {
         'pending': this.$t('generatedTestCases.statusPending'),
         'generating': this.$t('generatedTestCases.statusGenerating'),
         'reviewing': this.$t('generatedTestCases.statusReviewing'),
+        'revising': this.$t('generatedTestCases.statusRevising'),
         'completed': this.$t('generatedTestCases.statusCompleted'),
         'failed': this.$t('generatedTestCases.statusFailed')
       }
@@ -430,6 +431,7 @@ export default {
         pending: 'info',
         generating: 'warning',
         reviewing: '',
+        revising: 'warning',
         completed: 'success',
         failed: 'danger'
       }
@@ -490,7 +492,7 @@ export default {
     },
 
     viewTaskDetail(task) {
-      if (['pending', 'generating', 'reviewing'].includes(task.status)) {
+      if (['pending', 'generating', 'reviewing', 'revising'].includes(task.status)) {
         ElMessage.info(this.$t('generatedTestCases.generatingWait'))
         return
       }

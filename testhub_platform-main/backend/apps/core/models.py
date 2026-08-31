@@ -273,3 +273,39 @@ class MCPServer(models.Model):
     @property
     def tools_count(self):
         return len(self.tools or [])
+
+
+class ModuleSwitch(models.Model):
+    """功能模块开关 - 控制前端各功能模块（侧边栏菜单 / 首页入口）的启用与隐藏"""
+
+    LOCATION_CHOICES = [
+        ('all', '全局（菜单+首页）'),
+        ('sidebar', '侧边栏菜单'),
+        ('home', '首页入口'),
+    ]
+
+    key = models.CharField(max_length=50, unique=True, verbose_name='模块标识',
+                           help_text='唯一标识，如 ai-generation / api-testing / data-factory')
+    name = models.CharField(max_length=100, verbose_name='模块名称')
+    description = models.CharField(max_length=255, blank=True, verbose_name='模块描述')
+    location = models.CharField(max_length=20, choices=LOCATION_CHOICES, default='all',
+                                verbose_name='显示位置')
+    sort_order = models.IntegerField(default=0, verbose_name='排序')
+    is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
+    is_builtin = models.BooleanField(default=True, verbose_name='是否内置',
+                                     help_text='内置模块不可删除，避免误删导致入口丢失')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'core_module_switches'
+        verbose_name = '功能模块开关'
+        verbose_name_plural = '功能模块开关'
+        ordering = ['sort_order', 'id']
+        indexes = [
+            models.Index(fields=['is_enabled']),
+            models.Index(fields=['location']),
+        ]
+
+    def __str__(self):
+        return f"{self.name} ({self.key})"

@@ -9,6 +9,7 @@ export default {
     aiGeneration: '用例管理',
     apiTesting: '接口测试',
     uiAutomation: 'UI自动化测试',
+    appAutomation: 'APP自动化测试',
     aiIntelligentMode: 'AI 智能模式',
     configuration: '配置中心'
   },
@@ -65,6 +66,7 @@ export default {
     scheduledTaskConfig: '定时任务配置',
     difyConfig: 'AI评测师配置',
     mcpServerConfig: 'MCP服务器配置',
+    moduleSwitchConfig: '功能模块开关',
     // 核心模块
     coreModule: '核心模块',
     performanceStats: '性能统计',

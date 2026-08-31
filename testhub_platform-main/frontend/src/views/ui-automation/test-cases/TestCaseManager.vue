@@ -378,8 +378,10 @@
                     >
                       <div class="error-header">
                         <el-tag type="danger" size="large">
-                          <el-icon><WarningFilled /></el-icon>
-                          {{ error.message || error }}
+                          <span class="error-tag-content">
+                            <el-icon><WarningFilled /></el-icon>
+                            <span class="error-tag-text">{{ error.message || error }}</span>
+                          </span>
                         </el-tag>
                         <span v-if="error.step_number" class="error-step">
                           {{ t('uiAutomation.testCase.step') }} {{ error.step_number }}
@@ -2435,8 +2437,16 @@ const openCreateDialog = () => {
   font-weight: 600;
 }
 
-.error-header .el-icon {
+.error-tag-content {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.error-tag-content :deep(.el-icon) {
   margin-right: 5px;
+  flex-shrink: 0;
+  vertical-align: middle;
 }
 
 .error-step {

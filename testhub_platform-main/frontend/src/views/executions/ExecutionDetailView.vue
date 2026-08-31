@@ -1,34 +1,12 @@
 <template>
   <div class="execution-detail">
-    <!-- 美化的页面头部 -->
-    <div class="page-header-card">
-      <div class="header-content">
-        <div class="title-section">
-          <h1 class="page-title">{{ testPlan.name }}</h1>
-          <el-tag v-if="testPlan.version" type="primary" size="large" class="version-tag">
-            <el-icon><Stamp /></el-icon>
-            {{ testPlan.version }}
-          </el-tag>
-        </div>
-        
-        <!-- 项目信息 -->
-        <div class="project-info">
-          <el-icon class="info-icon"><FolderOpened /></el-icon>
-          <span v-if="testPlan.projects && testPlan.projects.length > 0">
-            {{ testPlan.projects.join(', ') }}
-          </span>
-          <span v-else class="no-data">{{ $t('execution.noProject') }}</span>
-        </div>
-      </div>
-    </div>
-
     <!-- 测试执行区域 -->
     <div v-if="testPlan.test_runs && testPlan.test_runs.length > 0">
       <div v-for="run in testPlan.test_runs" :key="run.id" class="test-run-card">
         <!-- 美化的运行头部 -->
         <div class="run-header">
           <div class="run-title-section">
-            <h2 class="run-title">{{ run.name }}</h2>
+            <h2 class="run-title">{{ testPlan.name }}</h2>
             <el-tag :type="getRunStatusType(run.progress)" size="large" class="run-status-tag">
               {{ getRunStatusText(run.progress) }}
             </el-tag>
@@ -173,6 +151,7 @@
       v-model="historyDialogVisible"
       width="80%">
       <el-table :data="currentCaseHistory" style="width: 100%">
+        <el-table-column prop="version" :label="$t('execution.version')" width="120" />
         <el-table-column prop="status" :label="$t('execution.status')" width="100">
           <template #default="scope">
             <el-tag :type="getStatusType(scope.row.status)">
@@ -199,7 +178,7 @@ import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Delete, Clock, Document, CircleCheck, CircleClose,
-  WarningFilled, QuestionFilled, Stamp, FolderOpened
+  WarningFilled, QuestionFilled
 } from '@element-plus/icons-vue'
 import axios from 'axios'
 
@@ -413,62 +392,6 @@ onMounted(() => {
   min-height: 100vh;
 }
 
-/* 美化的页面头部 */
-.page-header-card {
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border-radius: 16px;
-  padding: 32px;
-  margin-bottom: 24px;
-  box-shadow: 0 8px 24px rgba(102, 126, 234, 0.25);
-  color: white;
-}
-
-.header-content {
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
-}
-
-.title-section {
-  display: flex;
-  align-items: center;
-  gap: 16px;
-}
-
-.page-title {
-  margin: 0;
-  font-size: 28px;
-  font-weight: 600;
-  color: white;
-}
-
-.version-tag {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: rgba(255, 255, 255, 0.2);
-  border: 1px solid rgba(255, 255, 255, 0.3);
-  color: white;
-  backdrop-filter: blur(10px);
-}
-
-.project-info {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  font-size: 14px;
-  color: rgba(255, 255, 255, 0.9);
-}
-
-.info-icon {
-  font-size: 18px;
-}
-
-.no-data {
-  color: rgba(255, 255, 255, 0.6);
-  font-style: italic;
-}
-
 /* 测试运行卡片 */
 .test-run-card {
   background: white;
@@ -600,6 +523,6 @@ onMounted(() => {
 .pagination-container {
   margin-top: 20px;
   display: flex;
-  justify-content: center;
+  justify-content: flex-end;
 }
 </style>

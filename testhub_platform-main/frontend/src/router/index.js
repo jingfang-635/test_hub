@@ -457,6 +457,11 @@ const routes = [
             component: () => import('@/views/configuration/MCPServerConfig.vue')
           },
           {
+            path: 'module-switch',
+            name: 'ConfigModuleSwitch',
+            component: () => import('@/views/configuration/ModuleSwitchConfig.vue')
+          },
+          {
             path: 'performance-stats',
             name: 'ConfigPerformanceStats',
             component: () => import('@/views/configuration/AdminEmbed.vue'),

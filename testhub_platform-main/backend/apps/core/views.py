@@ -21,6 +21,7 @@ from .models import (
     PerformanceStatistics,
     Skill,
     MCPServer,
+    ModuleSwitch,
 )
 from .serializers import (
     UnifiedNotificationConfigSerializer,
@@ -29,10 +30,25 @@ from .serializers import (
     PerformanceStatisticsSerializer,
     SkillSerializer,
     MCPServerSerializer,
+    ModuleSwitchSerializer,
 )
 from .skill_parser import parse_skill_markdown
 
 logger = logging.getLogger(__name__)
+
+
+def _parse_bool(value, default=False):
+    """将 'false' / 'true' / 0 / 1 / 布尔等安全解析为布尔值。
+
+    Python 内置 bool('false') 会返回 True，故需显式处理字符串。
+    """
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, (int, float)):
+        return value != 0
+    return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
 
 
 class UnifiedNotificationConfigViewSet(viewsets.ModelViewSet):
@@ -359,3 +375,82 @@ class MCPServerViewSet(viewsets.ModelViewSet):
             'total': len(results),
             'tools': tools,
         })
+
+
+class ModuleSwitchViewSet(viewsets.ModelViewSet):
+    """功能模块开关视图集 - 控制前端各功能模块（侧边栏菜单 / 首页入口）的启用与隐藏"""
+    queryset = ModuleSwitch.objects.all()
+    serializer_class = ModuleSwitchSerializer
+    permission_classes = [IsAuthenticated]
+    pagination_class = None  # 菜单开关是小型配置列表，关闭分页避免漏读新建记录
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['location', 'is_enabled', 'is_builtin']
+    search_fields = ['key', 'name', 'description']
+    ordering_fields = ['sort_order', 'name', 'created_at', 'updated_at']
+    ordering = ['sort_order', 'id']
+
+    def perform_create(self, serializer):
+        # 新增模块默认非内置，可由用户自行删除
+        serializer.save(is_builtin=False)
+
+    def perform_destroy(self, instance):
+        if instance.is_builtin:
+            # 内置模块禁止删除，避免误删导致前端入口丢失
+            from rest_framework.exceptions import PermissionDenied
+            raise PermissionDenied('内置模块不可删除，请通过「是否启用」控制其显示')
+        instance.delete()
+
+    @action(detail=True, methods=['post'])
+    def toggle(self, request, pk=None):
+        """启用 / 禁用模块"""
+        switch = self.get_object()
+        if 'is_enabled' in request.data:
+            switch.is_enabled = _parse_bool(request.data.get('is_enabled'), default=switch.is_enabled)
+        else:
+            switch.is_enabled = not switch.is_enabled
+        switch.save(update_fields=['is_enabled', 'updated_at'])
+        return Response(self.get_serializer(switch).data)
+
+    @action(detail=False, methods=['get'])
+    def enabled(self, request):
+        """返回已启用 / 已禁用开关的 key 列表（供前端侧边栏 / 首页过滤）
+
+        采用「默认启用 + 显式禁用」模型：未出现在 disabled 中的 key 视为启用。
+        """
+        enabled = list(
+            ModuleSwitch.objects.filter(is_enabled=True)
+            .values_list('key', flat=True)
+        )
+        disabled = list(
+            ModuleSwitch.objects.filter(is_enabled=False)
+            .values_list('key', flat=True)
+        )
+        return Response({'enabled': enabled, 'disabled': disabled})
+
+    @action(detail=False, methods=['post'], url_path='toggle_by_key')
+    def toggle_by_key(self, request):
+        """按 key 切换开关状态（不存在则自动创建）。
+
+        用于配置页中尚未落库的菜单项（如新增路由），避免必须先创建再来切换。
+        """
+        key = (request.data.get('key') or '').strip()
+        if not key:
+            return Response({'detail': 'key 不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        is_enabled = _parse_bool(request.data.get('is_enabled'), default=True)
+        name = (request.data.get('name') or '').strip() or key
+        location = request.data.get('location') or 'sidebar'
+        switch, created = ModuleSwitch.objects.update_or_create(
+            key=key,
+            defaults={
+                'name': name,
+                'description': request.data.get('description') or '',
+                'location': location,
+                'sort_order': request.data.get('sort_order') or 0,
+                'is_enabled': is_enabled,
+                'is_builtin': True,
+            },
+        )
+        return Response(
+            self.get_serializer(switch).data,
+            status=status.HTTP_201_CREATED if created else status.HTTP_200_OK,
+        )

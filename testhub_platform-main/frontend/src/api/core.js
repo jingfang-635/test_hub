@@ -281,3 +281,69 @@ export function addMCPPreset(key) {
     timeout: 60000
   })
 }
+
+// ==================== 功能模块开关 ====================
+
+export async function getModuleSwitches(params) {
+  const res = await request({
+    url: '/core/module-switches/',
+    method: 'get',
+    params
+  })
+  return res.data
+}
+
+export function getModuleSwitchDetail(id) {
+  return request({
+    url: `/core/module-switches/${id}/`,
+    method: 'get'
+  })
+}
+
+export function createModuleSwitch(data) {
+  return request({
+    url: '/core/module-switches/',
+    method: 'post',
+    data
+  })
+}
+
+export function updateModuleSwitch(id, data) {
+  return request({
+    url: `/core/module-switches/${id}/`,
+    method: 'put',
+    data
+  })
+}
+
+export function deleteModuleSwitch(id) {
+  return request({
+    url: `/core/module-switches/${id}/`,
+    method: 'delete'
+  })
+}
+
+export function toggleModuleSwitch(id, isEnabled) {
+  return request({
+    url: `/core/module-switches/${id}/toggle/`,
+    method: 'post',
+    data: { is_enabled: isEnabled }
+  })
+}
+
+export async function getEnabledModuleSwitches() {
+  const res = await request({
+    url: '/core/module-switches/enabled/',
+    method: 'get'
+  })
+  return res.data
+}
+
+// 按 key 切换开关状态（不存在则自动创建），用于尚未落库的菜单项
+export function toggleModuleSwitchByKey(key, isEnabled, extra = {}) {
+  return request({
+    url: '/core/module-switches/toggle_by_key/',
+    method: 'post',
+    data: { key, is_enabled: isEnabled, ...extra }
+  })
+}

@@ -10,7 +10,7 @@ from django.utils.html import format_html, mark_safe
 from apps.core.models import (
     UnifiedNotificationConfig, NotificationTemplate,
     RequestPerformanceLog, PerformanceStatistics, Skill,
-    MCPServer,
+    MCPServer, ModuleSwitch,
 )
 
 logger = logging.getLogger(__name__)
@@ -538,4 +538,18 @@ class MCPServerAdmin(admin.ModelAdmin):
     list_filter = ('transport', 'is_enabled', 'connection_status')
     search_fields = ('name', 'description')
     readonly_fields = ('connection_status', 'tools', 'last_error', 'last_tested_at', 'created_at', 'updated_at')
+
+
+@admin.register(ModuleSwitch)
+class ModuleSwitchAdmin(admin.ModelAdmin):
+    list_display = ('name', 'key', 'location_display', 'sort_order', 'is_enabled', 'is_builtin', 'updated_at')
+    list_filter = ('location', 'is_enabled', 'is_builtin')
+    search_fields = ('key', 'name', 'description')
+    list_editable = ('is_enabled',)
+    readonly_fields = ('created_at', 'updated_at', 'is_builtin')
+
+    def location_display(self, obj):
+        return obj.get_location_display()
+    location_display.short_description = '显示位置'
+    location_display.admin_order_field = 'location'
 

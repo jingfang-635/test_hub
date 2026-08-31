@@ -4,7 +4,6 @@
       <!-- 侧边栏 -->
       <el-aside :width="sidebarWidth">
         <div class="logo" @click="router.push('/home')">
-          <img :src="logoHomePng" alt="TestHub" class="logo-img" />
           <span class="logo-text">testhub</span>
         </div>
         <el-menu
@@ -13,203 +12,203 @@
           class="side-menu"
         >
           <!-- AI用例生成模块菜单 -->
-          <template v-if="currentModule === 'ai-generation'">
-            <el-sub-menu index="requirement">
+          <template v-if="currentModule === 'ai-generation' && appStore.isModuleEnabled('ai-generation')">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/ai-generation/requirement-analysis', '/ai-generation/generated-testcases'])" index="requirement">
               <template #title>
                 <el-icon><MagicStick /></el-icon>
                 <span>{{ $t('menu.intelligentCaseGeneration') }}</span>
               </template>
-              <el-menu-item index="/ai-generation/requirement-analysis">{{ $t('menu.aiCaseGeneration') }}</el-menu-item>
-              <el-menu-item index="/ai-generation/generated-testcases">{{ $t('menu.aiGeneratedTestcases') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/requirement-analysis')" index="/ai-generation/requirement-analysis">{{ $t('menu.aiCaseGeneration') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/generated-testcases')" index="/ai-generation/generated-testcases">{{ $t('menu.aiGeneratedTestcases') }}</el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/ai-generation/projects">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/projects')" index="/ai-generation/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-generation/testcases">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/testcases')" index="/ai-generation/testcases">
               <el-icon><Document /></el-icon>
               <span>{{ $t('menu.testCases') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-generation/knowledge-base">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/knowledge-base')" index="/ai-generation/knowledge-base">
               <el-icon><Collection /></el-icon>
               <span>{{ $t('menu.knowledgeBaseManage') }}</span>
             </el-menu-item>
-            <el-sub-menu index="reviews">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/ai-generation/reviews', '/ai-generation/review-templates'])" index="reviews">
               <template #title>
                 <el-icon><Check /></el-icon>
                 <span>{{ $t('menu.reviewManagement') }}</span>
               </template>
-              <el-menu-item index="/ai-generation/reviews">{{ $t('menu.reviewList') }}</el-menu-item>
-              <el-menu-item index="/ai-generation/review-templates">{{ $t('menu.reviewTemplates') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/reviews')" index="/ai-generation/reviews">{{ $t('menu.reviewList') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/review-templates')" index="/ai-generation/review-templates">{{ $t('menu.reviewTemplates') }}</el-menu-item>
             </el-sub-menu>
 
-            <el-menu-item index="/ai-generation/executions">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/executions')" index="/ai-generation/executions">
               <el-icon><VideoPlay /></el-icon>
               <span>{{ $t('menu.testPlan') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-generation/reports">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-generation/reports')" index="/ai-generation/reports">
               <el-icon><DataAnalysis /></el-icon>
               <span>{{ $t('menu.testReport') }}</span>
             </el-menu-item>
           </template>
 
           <!-- 接口测试模块菜单 -->
-          <template v-else-if="currentModule === 'api-testing'">
-            <el-menu-item index="/api-testing/dashboard">
+          <template v-else-if="currentModule === 'api-testing' && appStore.isModuleEnabled('api-testing')">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/dashboard')" index="/api-testing/dashboard">
               <el-icon><Odometer /></el-icon>
               <span>{{ $t('menu.dashboard') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/projects">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/projects')" index="/api-testing/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/interfaces">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/interfaces')" index="/api-testing/interfaces">
               <el-icon><Link /></el-icon>
               <span>{{ $t('menu.interfaceManagement') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/automation">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/automation')" index="/api-testing/automation">
               <el-icon><VideoPlay /></el-icon>
               <span>{{ $t('menu.automationTesting') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/history">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/history')" index="/api-testing/history">
               <el-icon><Timer /></el-icon>
               <span>{{ $t('menu.requestHistory') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/environments">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/environments')" index="/api-testing/environments">
               <el-icon><Setting /></el-icon>
               <span>{{ $t('menu.environmentManagement') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/reports">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/reports')" index="/api-testing/reports">
               <el-icon><DataAnalysis /></el-icon>
               <span>{{ $t('menu.testReport') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/scheduled-tasks">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/scheduled-tasks')" index="/api-testing/scheduled-tasks">
               <el-icon><AlarmClock /></el-icon>
               <span>{{ $t('menu.scheduledTasks') }}</span>
             </el-menu-item>
-            <el-menu-item index="/api-testing/notification-logs">
+            <el-menu-item v-if="appStore.isMenuEnabled('/api-testing/notification-logs')" index="/api-testing/notification-logs">
               <el-icon><Bell /></el-icon>
               <span>{{ $t('menu.notificationList') }}</span>
             </el-menu-item>
           </template>
 
           <!-- UI自动化测试模块菜单 -->
-          <template v-else-if="currentModule === 'ui-automation'">
-            <el-menu-item index="/ui-automation/dashboard">
+          <template v-else-if="currentModule === 'ui-automation' && appStore.isModuleEnabled('ui-automation')">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/dashboard')" index="/ui-automation/dashboard">
               <el-icon><Odometer /></el-icon>
               <span>{{ $t('menu.dashboard') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/projects">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/projects')" index="/ui-automation/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/elements-enhanced">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/elements-enhanced')" index="/ui-automation/elements-enhanced">
               <el-icon><Aim /></el-icon>
               <span>{{ $t('menu.elementManagement') }}</span>
             </el-menu-item>
-            <el-sub-menu index="ui-cases-scripts">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/ui-automation/test-cases', '/ui-automation/scripts-enhanced', '/ui-automation/playwright-recording', '/ui-automation/scripts'])" index="ui-cases-scripts">
               <template #title>
                 <el-icon><Document /></el-icon>
                 <span>{{ $t('menu.casesAndScripts') }}</span>
               </template>
-              <el-menu-item index="/ui-automation/test-cases">{{ $t('menu.caseManagement') }}</el-menu-item>
-              <el-menu-item index="/ui-automation/scripts-enhanced">{{ $t('menu.scriptGeneration') }}</el-menu-item>
-              <el-menu-item index="/ui-automation/playwright-recording">{{ $t('menu.playwrightScriptRecording') }}</el-menu-item>
-              <el-menu-item index="/ui-automation/scripts">{{ $t('menu.scriptList') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/test-cases')" index="/ui-automation/test-cases">{{ $t('menu.caseManagement') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/scripts-enhanced')" index="/ui-automation/scripts-enhanced">{{ $t('menu.scriptGeneration') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/playwright-recording')" index="/ui-automation/playwright-recording">{{ $t('menu.playwrightScriptRecording') }}</el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/scripts')" index="/ui-automation/scripts">{{ $t('menu.scriptList') }}</el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/ui-automation/suites">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/suites')" index="/ui-automation/suites">
               <el-icon><Collection /></el-icon>
               <span>{{ $t('menu.suiteManagement') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/executions">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/executions')" index="/ui-automation/executions">
               <el-icon><VideoPlay /></el-icon>
               <span>{{ $t('menu.executionRecords') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/reports">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/reports')" index="/ui-automation/reports">
               <el-icon><DataAnalysis /></el-icon>
               <span>{{ $t('menu.testReport') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/scheduled-tasks">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/scheduled-tasks')" index="/ui-automation/scheduled-tasks">
               <el-icon><AlarmClock /></el-icon>
               <span>{{ $t('menu.scheduledTasks') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ui-automation/notification-logs">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/notification-logs')" index="/ui-automation/notification-logs">
               <el-icon><Bell /></el-icon>
               <span>{{ $t('menu.notificationList') }}</span>
             </el-menu-item>
           </template>
 
           <!-- APP自动化测试模块菜单 -->
-          <template v-else-if="currentModule === 'app-automation'">
-            <el-menu-item index="/app-automation/dashboard">
+          <template v-else-if="currentModule === 'app-automation' && appStore.isModuleEnabled('app-automation')">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/dashboard')" index="/app-automation/dashboard">
               <el-icon><Odometer /></el-icon>
               <span>数据看板</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/projects">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/projects')" index="/app-automation/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/devices">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/devices')" index="/app-automation/devices">
               <el-icon><Cellphone /></el-icon>
               <span>设备管理</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/packages">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/packages')" index="/app-automation/packages">
               <el-icon><Collection /></el-icon>
               <span>包名管理</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/elements">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/elements')" index="/app-automation/elements">
               <el-icon><Aim /></el-icon>
               <span>元素管理</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/scene-builder">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/scene-builder')" index="/app-automation/scene-builder">
               <el-icon><Connection /></el-icon>
               <span>用例编排</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/test-cases">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/test-cases')" index="/app-automation/test-cases">
               <el-icon><Document /></el-icon>
               <span>测试用例</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/test-suites">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/test-suites')" index="/app-automation/test-suites">
               <el-icon><FolderOpened /></el-icon>
               <span>测试套件</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/executions">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/executions')" index="/app-automation/executions">
               <el-icon><VideoPlay /></el-icon>
               <span>执行记录</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/reports">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/reports')" index="/app-automation/reports">
               <el-icon><DataAnalysis /></el-icon>
               <span>测试报告</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/scheduled-tasks">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/scheduled-tasks')" index="/app-automation/scheduled-tasks">
               <el-icon><AlarmClock /></el-icon>
               <span>定时任务</span>
             </el-menu-item>
-            <el-menu-item index="/app-automation/notification-logs">
+            <el-menu-item v-if="appStore.isMenuEnabled('/app-automation/notification-logs')" index="/app-automation/notification-logs">
               <el-icon><Bell /></el-icon>
               <span>通知列表</span>
             </el-menu-item>
           </template>
 
           <!-- AI 智能模式模块菜单 -->
-          <template v-else-if="currentModule === 'ai-intelligent-mode'">
-            <el-menu-item index="/ai-intelligent-mode/projects">
+          <template v-else-if="currentModule === 'ai-intelligent-mode' && appStore.isModuleEnabled('ai-intelligent-mode')">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/projects')" index="/ai-intelligent-mode/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-intelligent-mode/testing">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/testing')" index="/ai-intelligent-mode/testing">
               <el-icon><VideoPlay /></el-icon>
               <span>{{ $t('menu.aiIntelligentTesting') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-intelligent-mode/cases">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/cases')" index="/ai-intelligent-mode/cases">
               <el-icon><Document /></el-icon>
               <span>{{ $t('menu.aiCaseManagement') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-intelligent-mode/execution-records">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/execution-records')" index="/ai-intelligent-mode/execution-records">
               <el-icon><Timer /></el-icon>
               <span>{{ $t('menu.aiExecutionRecords') }}</span>
             </el-menu-item>
-            <el-menu-item index="/ai-intelligent-mode/exploration">
+            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/exploration')" index="/ai-intelligent-mode/exploration">
               <el-icon><Compass /></el-icon>
               <span>AI探索测试</span>
             </el-menu-item>
@@ -217,75 +216,79 @@
           </template>
 
           <!-- 配置中心模块菜单 -->
-          <template v-else-if="currentModule === 'configuration'">
-            <el-sub-menu index="ai-case-generation">
+          <template v-else-if="currentModule === 'configuration' && appStore.isModuleEnabled('configuration')">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/ai-model', '/configuration/prompt-config', '/configuration/generation-config'])" index="ai-case-generation">
               <template #title>
                 <el-icon><MagicStick /></el-icon>
                 <span>{{ $t('menu.aiCaseGenerationConfig') }}</span>
               </template>
-              <el-menu-item index="/configuration/ai-model">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ai-model')" index="/configuration/ai-model">
                 <el-icon><Cpu /></el-icon>
                 <span>{{ $t('menu.aiModelConfig') }}</span>
               </el-menu-item>
-              <el-menu-item index="/configuration/prompt-config">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/prompt-config')" index="/configuration/prompt-config">
                 <el-icon><Edit /></el-icon>
                 <span>{{ $t('menu.promptConfig') }}</span>
               </el-menu-item>
-              <el-menu-item index="/configuration/generation-config">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/generation-config')" index="/configuration/generation-config">
                 <el-icon><Setting /></el-icon>
                 <span>{{ $t('menu.generationConfig') }}</span>
               </el-menu-item>
             </el-sub-menu>
-            <el-menu-item index="/configuration/knowledge-llm">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/knowledge-llm')" index="/configuration/knowledge-llm">
               <el-icon><Connection /></el-icon>
               <span>{{ $t('menu.knowledgeBaseConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/projects">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/projects')" index="/configuration/projects">
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/ui-env">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ui-env')" index="/configuration/ui-env">
               <el-icon><Monitor /></el-icon>
               <span>{{ $t('menu.uiEnvConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/app-env">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/app-env')" index="/configuration/app-env">
               <el-icon><Cellphone /></el-icon>
               <span>APP环境配置</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/ai-mode">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ai-mode')" index="/configuration/ai-mode">
               <el-icon><MagicStick /></el-icon>
               <span>{{ $t('menu.aiModeConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/skills">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/skills')" index="/configuration/skills">
               <el-icon><Collection /></el-icon>
               <span>{{ $t('menu.skillsConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/scheduled-task">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/scheduled-task')" index="/configuration/scheduled-task">
               <el-icon><Timer /></el-icon>
               <span>{{ $t('menu.scheduledTaskConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/dify">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/dify')" index="/configuration/dify">
               <el-icon><ChatDotRound /></el-icon>
               <span>{{ $t('menu.difyConfig') }}</span>
             </el-menu-item>
-            <el-menu-item index="/configuration/mcp-server">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/mcp-server')" index="/configuration/mcp-server">
               <el-icon><Connection /></el-icon>
               <span>{{ $t('menu.mcpServerConfig') }}</span>
             </el-menu-item>
-            <el-sub-menu index="core-module">
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/module-switch')" index="/configuration/module-switch">
+              <el-icon><Switch /></el-icon>
+              <span>{{ $t('menu.moduleSwitchConfig') }}</span>
+            </el-menu-item>
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/performance-stats', '/configuration/request-performance-log', '/configuration/notification-template'])" index="core-module">
               <template #title>
                 <el-icon><DataAnalysis /></el-icon>
                 <span>{{ $t('menu.coreModule') }}</span>
               </template>
-              <el-menu-item index="/configuration/performance-stats">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/performance-stats')" index="/configuration/performance-stats">
                 <el-icon><TrendCharts /></el-icon>
                 <span>{{ $t('menu.performanceStats') }}</span>
               </el-menu-item>
-              <el-menu-item index="/configuration/request-performance-log">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/request-performance-log')" index="/configuration/request-performance-log">
                 <el-icon><Document /></el-icon>
                 <span>{{ $t('menu.requestPerformanceLog') }}</span>
               </el-menu-item>
-              <el-menu-item index="/configuration/notification-template">
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/notification-template')" index="/configuration/notification-template">
                 <el-icon><Bell /></el-icon>
                 <span>{{ $t('menu.notificationTemplate') }}</span>
               </el-menu-item>
@@ -371,7 +374,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
@@ -381,9 +384,8 @@ import {
   Monitor, Folder, Document, Check, Collection, VideoPlay,
   DataAnalysis, ChatDotRound, Link, MagicStick,
   Odometer, Timer, Setting, AlarmClock, Bell, Aim, Edit, Cpu, Cellphone, Connection, FolderOpened, Compass,
-  TrendCharts, Moon, Sunny, UserFilled
+  TrendCharts, Moon, Sunny, UserFilled, Switch
 } from '@element-plus/icons-vue'
-import logoHomePng from '@/assets/images/logo_home.png'
 
 const router = useRouter()
 const route = useRoute()
@@ -392,6 +394,11 @@ const appStore = useAppStore()
 const { t } = useI18n()
 
 const sidebarWidth = 'var(--th-sidebar-width)'
+
+// 加载已启用模块（控制菜单显示）
+onMounted(() => {
+  appStore.loadEnabledModules()
+})
 
 const handleLanguageChange = (lang) => {
   appStore.setLanguage(lang)
@@ -503,6 +510,7 @@ const breadcrumbTitle = computed(() => {
     '/configuration/scheduled-task': t('menu.scheduledTaskConfig'),
     '/configuration/dify': t('menu.difyConfig'),
     '/configuration/mcp-server': t('menu.mcpServerConfig'),
+    '/configuration/module-switch': t('menu.moduleSwitchConfig'),
     
     '/profile': t('nav.profile')
   }
@@ -537,21 +545,13 @@ const handleCommand = (command) => {
   height: var(--th-header-height);
   display: flex;
   align-items: center;
-  gap: 10px;
+  justify-content: center;
   padding: 0 20px;
   background: transparent;
   border-bottom: 1px solid var(--th-border);
   flex-shrink: 0;
   cursor: pointer;
   user-select: none;
-
-  .logo-img {
-    width: 32px;
-    height: 32px;
-    object-fit: contain;
-    border-radius: 50%;
-    flex-shrink: 0;
-  }
 
   .logo-text {
     font-size: 18px;

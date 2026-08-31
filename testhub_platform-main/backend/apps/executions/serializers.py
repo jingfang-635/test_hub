@@ -5,10 +5,18 @@ from apps.users.serializers import UserSimpleSerializer
 
 class TestRunCaseHistorySerializer(serializers.ModelSerializer):
     executed_by = UserSimpleSerializer(read_only=True)
-    
+    version = serializers.SerializerMethodField()
+
     class Meta:
         model = TestRunCaseHistory
-        fields = ('id', 'status', 'actual_result', 'comments', 'executed_by', 'executed_at')
+        fields = ('id', 'status', 'actual_result', 'comments', 'version', 'executed_by', 'executed_at')
+
+    def get_version(self, obj):
+        # 历史记录显示测试计划关联的版本，兼容历史数据未存版本的情况
+        plan = obj.run_case.test_run.test_plan if obj.run_case and obj.run_case.test_run else None
+        if plan and plan.version:
+            return plan.version.name
+        return obj.version.name if obj.version else None
 
 class TestRunCaseSimpleSerializer(serializers.ModelSerializer):
     testcase = serializers.StringRelatedField()

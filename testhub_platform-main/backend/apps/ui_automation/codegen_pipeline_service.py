@@ -1300,6 +1300,32 @@ def _element_type_for_action(action: str) -> str:
     return 'BUTTON'
 
 
+def _resolve_page_group(project, page_name: str):
+    """按页面名查找或创建该项目的「页面」分组（ElementGroup），返回 ElementGroup 或 None。
+
+    元素管理页的「页面」节点即 ElementGroup，元素通过 group_id 关联到页面。
+    解析时自动给元素绑定对应页面分组，使其在元素管理页显示在对应页面下，而非「未关联页面」。
+    """
+    from .models import ElementGroup
+
+    name = (page_name or '').strip()
+    if not name:
+        return None
+    # 优先复用该项目下同名顶层分组，避免重复建组
+    group = ElementGroup.objects.filter(
+        project=project,
+        name=name,
+        parent_group__isnull=True,
+    ).first()
+    if group:
+        return group
+    return ElementGroup.objects.create(
+        project=project,
+        name=name,
+        order=0,
+    )
+
+
 def _get_or_create_element_from_locator(
     *,
     project,
@@ -1332,6 +1358,15 @@ def _get_or_create_element_from_locator(
         locator_value=locator_value[:500],
     ).first()
     if existing:
+        # 兼容修复：历史解析创建但未绑定页面分组的元素，补绑其对应页面分组
+        if not existing.group_id:
+            target_page = existing.page or page_name
+            group = _resolve_page_group(project, target_page)
+            if group:
+                existing.group = group
+                if not existing.page:
+                    existing.page = group.name
+                existing.save(update_fields=['group', 'page'])
         cache[key] = existing
         return existing, False
 
@@ -1343,6 +1378,9 @@ def _get_or_create_element_from_locator(
         name = f'{base_name}_{n}'[:200]
         n += 1
 
+    # 解析页面分组，使元素归属于对应页面，而非「未关联页面」
+    page_group = _resolve_page_group(project, page_name)
+
     element = Element.objects.create(
         project=project,
         name=name,
@@ -1351,6 +1389,7 @@ def _get_or_create_element_from_locator(
         locator_strategy=strategy,
         locator_value=locator_value[:500],
         page=(page_name or '')[:200],
+        group=page_group,
         created_by=user,
         validation_status='UNKNOWN',
     )

@@ -282,14 +282,15 @@ class TestRunCaseViewSet(viewsets.ModelViewSet):
         if not new_status:
             return Response({'error': 'Status is required'}, status=status.HTTP_400_BAD_REQUEST)
         
-        # 创建历史记录
+        # 创建历史记录（记录当前执行所属版本）
         TestRunCaseHistory.objects.create(
             run_case=run_case,
             status=new_status,
             actual_result=actual_result,
             comments=comments,
             executed_by=request.user,
-            executed_at=timezone.now()
+            executed_at=timezone.now(),
+            version=run_case.test_run.version
         )
         
         # 更新执行用例状态

@@ -18,95 +18,96 @@
       </div>
     </div>
 
-    <div class="filter-bar">
-      <el-form :inline="true">
-        <el-form-item :label="$t('execution.project')">
-          <el-select v-model="filters.project" :placeholder="$t('execution.selectProject')" clearable style="width: 200px">
-            <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item :label="$t('execution.status')">
-          <el-select v-model="filters.is_active" :placeholder="$t('execution.selectStatus')" clearable style="width: 120px">
-            <el-option :label="$t('execution.filterActive')" :value="true"></el-option>
-            <el-option :label="$t('execution.filterClosed')" :value="false"></el-option>
-          </el-select>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="applyFilters">{{ $t('common.search') }}</el-button>
-          <el-button @click="resetFilters">{{ $t('common.reset') }}</el-button>
-        </el-form-item>
-      </el-form>
-    </div>
+    <div class="list-card">
+      <div class="filter-bar">
+        <el-form :inline="true">
+          <el-form-item>
+            <el-select v-model="filters.project" :placeholder="$t('execution.selectProject')" clearable style="width: 200px" @change="applyFilters">
+              <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-select v-model="filters.is_active" :placeholder="$t('execution.selectStatus')" clearable style="width: 140px" @change="applyFilters">
+              <el-option :label="$t('execution.filterActive')" :value="true"></el-option>
+              <el-option :label="$t('execution.filterClosed')" :value="false"></el-option>
+            </el-select>
+          </el-form-item>
+          <el-form-item>
+            <el-button @click="resetFilters">{{ $t('common.reset') }}</el-button>
+          </el-form-item>
+        </el-form>
+      </div>
 
-    <el-table
-      :data="testPlans"
-      style="width: 100%"
-      v-loading="loading"
-      @selection-change="handleSelectionChange">
-      <el-table-column type="selection" width="55" />
-      <el-table-column
-        type="index"
-        :label="$t('execution.serialNumber')"
-        width="80"
-        :index="getSerialNumber" />
-      <el-table-column prop="name" :label="$t('execution.planName')" min-width="200">
-        <template #default="scope">
-          <el-link type="primary" @click="viewPlan(scope.row.id)">
-            {{ scope.row.name }}
-          </el-link>
-        </template>
-      </el-table-column>
-      <el-table-column prop="projects" :label="$t('execution.projects')" width="200">
-        <template #default="scope">
-          <span v-if="scope.row.projects && scope.row.projects.length > 0">
-            {{ scope.row.projects.join(', ') }}
-          </span>
-          <span v-else>{{ $t('execution.noData') }}</span>
-        </template>
-      </el-table-column>
-      <el-table-column prop="version" :label="$t('execution.version')" width="120"></el-table-column>
-      <el-table-column prop="creator.username" :label="$t('execution.creator')" width="120"></el-table-column>
-      <el-table-column :label="$t('execution.status')" width="100">
-        <template #default="scope">
-          <el-tag :type="scope.row.is_active ? 'success' : 'info'">
-            {{ scope.row.is_active ? $t('execution.active') : $t('execution.closed') }}
-          </el-tag>
-        </template>
-      </el-table-column>
-      <el-table-column prop="created_at" :label="$t('execution.createdAt')" width="180">
-        <template #default="scope">
-          {{ formatDate(scope.row.created_at) }}
-        </template>
-      </el-table-column>
-      <el-table-column :label="$t('execution.actions')" width="300" fixed="right">
-        <template #default="scope">
-          <el-button size="small" type="success" @click="openAssignTestcases(scope.row)">
-            {{ $t('execution.assignCases') }}
-          </el-button>
-          <el-button size="small" type="primary" @click="viewPlan(scope.row.id)">
-            {{ $t('execution.viewExecution') }}
-          </el-button>
-          <el-button size="small" type="warning" @click="editPlan(scope.row)">
-            {{ $t('common.edit') }}
-          </el-button>
-          <el-button size="small" type="danger" @click="deletePlan(scope.row)">
-            {{ $t('common.delete') }}
-          </el-button>
-        </template>
-      </el-table-column>
-    </el-table>
+      <el-table
+        class="execution-table"
+        :data="testPlans"
+        style="width: 100%"
+        v-loading="loading"
+        @selection-change="handleSelectionChange">
+        <el-table-column
+          type="index"
+          :label="$t('execution.serialNumber')"
+          width="80"
+          :index="getSerialNumber" />
+        <el-table-column prop="name" :label="$t('execution.planName')" min-width="200">
+          <template #default="scope">
+            <el-link type="primary" @click="viewPlan(scope.row.id)">
+              {{ scope.row.name }}
+            </el-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="projects" :label="$t('execution.projects')" width="200">
+          <template #default="scope">
+            <span v-if="scope.row.projects && scope.row.projects.length > 0">
+              {{ scope.row.projects.join(', ') }}
+            </span>
+            <span v-else>{{ $t('execution.noData') }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column prop="version" :label="$t('execution.version')" width="120"></el-table-column>
+        <el-table-column prop="creator.username" :label="$t('execution.creator')" width="120"></el-table-column>
+        <el-table-column :label="$t('execution.status')" width="100">
+          <template #default="scope">
+            <el-tag class="status-tag" :type="scope.row.is_active ? 'success' : 'info'">
+              {{ scope.row.is_active ? $t('execution.active') : $t('execution.closed') }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="created_at" :label="$t('execution.createdAt')" width="180">
+          <template #default="scope">
+            {{ formatDate(scope.row.created_at) }}
+          </template>
+        </el-table-column>
+        <el-table-column :label="$t('execution.actions')" width="300" fixed="right">
+          <template #default="scope">
+            <el-button size="small" type="success" @click="openAssignTestcases(scope.row)">
+              {{ $t('execution.assignCases') }}
+            </el-button>
+            <el-button size="small" type="primary" @click="viewPlan(scope.row.id)">
+              {{ $t('execution.viewExecution') }}
+            </el-button>
+            <el-button size="small" type="warning" @click="editPlan(scope.row)">
+              {{ $t('common.edit') }}
+            </el-button>
+            <el-button size="small" type="danger" @click="deletePlan(scope.row)">
+              {{ $t('common.delete') }}
+            </el-button>
+          </template>
+        </el-table-column>
+      </el-table>
 
-    <div class="pagination">
-      <el-pagination
-        v-model:current-page="currentPage"
-        v-model:page-size="pageSize"
-        :page-sizes="[10, 20, 50, 100]"
-        :small="false"
-        :total="total"
-        layout="total, sizes, prev, pager, next, jumper"
-        @size-change="handleSizeChange"
-        @current-change="handleCurrentChange"
-      />
+      <div class="pagination">
+        <el-pagination
+          v-model:current-page="currentPage"
+          v-model:page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :small="false"
+          :total="total"
+          layout="total, sizes, prev, pager, next, jumper"
+          @size-change="handleSizeChange"
+          @current-change="handleCurrentChange"
+        />
+      </div>
     </div>
 
     <!-- 创建测试计划对话框 -->
@@ -218,7 +219,8 @@
         v-loading="loadingTestcases"
         row-key="id"
         max-height="400"
-        @selection-change="handleTestcaseSelectionChange">
+        @selection-change="handleTestcaseSelectionChange"
+        @select-all="handleTestcaseSelectAll">
         <el-table-column type="selection" width="48" reserve-selection />
         <el-table-column :label="$t('execution.caseNumber')" width="70" align="center">
           <template #default="{ $index }">
@@ -354,6 +356,8 @@ const isDeleting = ref(false)
 const isTestcaseSelectorOpen = ref(false)
 const testcaseTableRef = ref()
 const tempSelectedTestcases = ref([])
+// 记录弹窗打开时已分配的用例，用于「重置」恢复初始勾选状态
+const initialAssignedTestcases = ref([])
 const syncingTestcaseSelection = ref(false)
 const assigning = ref(false)
 const assigningPlanId = ref(null)
@@ -448,7 +452,8 @@ const fetchTestPlans = async () => {
     }
     // 过滤掉空值
     Object.keys(params).forEach(key => {
-      if (params[key] === null || params[key] === '') {
+      const value = params[key]
+      if (value === null || value === '' || value === undefined) {
         delete params[key]
       }
     })
@@ -594,7 +599,7 @@ const syncTestcaseTableSelection = async () => {
   syncingTestcaseSelection.value = true
   table.clearSelection()
   const selectedIds = new Set(tempSelectedTestcases.value.map(item => item.id))
-  filteredTestcases.value.forEach(row => {
+  filteredSelectorTestcases.value.forEach(row => {
     if (selectedIds.has(row.id)) {
       table.toggleRowSelection(row, true)
     }
@@ -624,6 +629,7 @@ const openAssignTestcases = async (plan) => {
     Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
     Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
     tempSelectedTestcases.value = filteredTestcases.value.filter(item => assignedIds.has(item.id))
+    initialAssignedTestcases.value = tempSelectedTestcases.value.slice()
 
     isTestcaseSelectorOpen.value = true
     await syncTestcaseTableSelection()
@@ -645,6 +651,9 @@ const resetTestcaseFilters = () => {
   Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
   Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
   testcasePage.value = 1
+  // 清除筛选后恢复为弹窗打开时已分配的用例，并刷新列表与勾选显示
+  tempSelectedTestcases.value = initialAssignedTestcases.value.slice()
+  syncTestcaseTableSelection()
 }
 
 const handleTestcaseSelectionChange = (selection) => {
@@ -659,6 +668,31 @@ const handleTestcaseSelectionChange = (selection) => {
     }
   })
   tempSelectedTestcases.value = merged
+}
+
+const handleTestcaseSelectAll = () => {
+  if (syncingTestcaseSelection.value) return
+  const table = testcaseTableRef.value
+  // Element Plus 表头全选只作用于当前页，并且会先 emit selection-change 再 emit select-all，
+  // 导致 tempSelectedTestcases 已被当前页的取消勾选影响，无法据此判断方向。
+  // 这里读取 store.isAllSelected：点击后为 true 表示「全选」，false 表示「取消全选」。
+  const isSelecting = table?.store?.states?.isAllSelected?.value === true
+  const allIds = new Set(filteredSelectorTestcases.value.map(item => item.id))
+
+  if (isSelecting) {
+    // 勾选筛选出的所有用例（跨页，去重合并）
+    const merged = [...tempSelectedTestcases.value]
+    filteredSelectorTestcases.value.forEach(item => {
+      if (!merged.some(existing => existing.id === item.id)) {
+        merged.push(item)
+      }
+    })
+    tempSelectedTestcases.value = merged
+  } else {
+    // 取消勾选所有筛选出的用例
+    tempSelectedTestcases.value = tempSelectedTestcases.value.filter(item => !allIds.has(item.id))
+  }
+  syncTestcaseTableSelection()
 }
 
 const handleTestcaseSizeChange = () => {
@@ -982,11 +1016,77 @@ onMounted(() => {
   gap: 10px;
 }
 
+.list-card {
+  background: #ffffff;
+  border: 1px solid #e4e9f2;
+  border-radius: 14px;
+  padding: 20px;
+  box-shadow: 0 2px 8px rgba(31, 45, 92, 0.04);
+}
+
 .filter-bar {
   margin-bottom: 20px;
-  padding: 16px;
-  background: #f8f9fa;
-  border-radius: 4px;
+  padding: 14px 16px;
+  border-radius: 10px;
+}
+
+.filter-bar :deep(.el-form-item) {
+  margin-bottom: 0;
+}
+
+.filter-bar :deep(.el-input__wrapper),
+.filter-bar :deep(.el-select__wrapper) {
+  background: #ffffff;
+  border-radius: 18px;
+  box-shadow: 0 0 0 1px #d6e0f0 inset;
+}
+
+.filter-bar :deep(.el-input__wrapper.is-focus),
+.filter-bar :deep(.el-select__wrapper.is-focused) {
+  box-shadow: 0 0 0 1px #7ea6f0 inset;
+}
+
+.filter-bar :deep(.el-button) {
+  border-radius: 18px;
+}
+
+/* 表格：卡片式圆角、浅蓝表头、白色行 */
+.execution-table {
+  border-radius: 10px;
+  overflow: hidden;
+}
+
+.execution-table :deep(.el-table__inner-wrapper::before) {
+  display: none;
+}
+
+.execution-table :deep(th.el-table__cell) {
+  background-color: #eef2fa;
+  color: #4a5568;
+  font-weight: 600;
+  border-bottom: 1px solid #e0e6f0;
+}
+
+.execution-table :deep(.el-table__header th) {
+  background-color: #eef2fa;
+}
+
+.execution-table :deep(.el-table__row) {
+  background-color: #ffffff;
+}
+
+.execution-table :deep(.el-table__row:hover > td.el-table__cell) {
+  background-color: #f5f8fd;
+}
+
+.execution-table :deep(td.el-table__cell) {
+  border-bottom: 1px solid #eef1f6;
+}
+
+/* 状态标签：圆角描边风格 */
+.execution-table :deep(.status-tag) {
+  border-radius: 14px;
+  padding: 0 12px;
 }
 
 .pagination {

@@ -133,6 +133,9 @@ class Element(models.Model):
     is_enabled = models.BooleanField(default=True, verbose_name='是否启用')
     force_action = models.BooleanField(default=False, verbose_name='强制操作', help_text='对visibility:hidden的元素使用force选项')
 
+    # 排序字段（与数据库 ui_elements.order 列保持一致）
+    order = models.IntegerField(default=0, verbose_name='排序')
+
     # 统计信息
     usage_count = models.IntegerField(default=0, verbose_name='使用次数', help_text='在脚本中被引用的次数')
     last_validated = models.DateTimeField(null=True, blank=True, verbose_name='最后验证时间')

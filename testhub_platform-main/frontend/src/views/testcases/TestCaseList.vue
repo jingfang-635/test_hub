@@ -740,6 +740,11 @@ onMounted(() => {
 
   :deep(.el-tree-node__content) {
     height: 32px;
+    min-width: 0;
+  }
+
+  :deep(.el-tree) {
+    overflow: hidden;
   }
 
   // 树节点选中高亮（点击其他地方不消失）
@@ -843,9 +848,12 @@ onMounted(() => {
   align-items: center;
   gap: 8px;
   flex: 1;
+  min-width: 0;
+  width: 100%;
 
   .node-label {
     flex: 1;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -859,10 +867,14 @@ onMounted(() => {
   .node-count {
     color: #909399;
     font-size: 12px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 
   .node-priority {
     font-size: 12px;
+    flex-shrink: 0;
+    white-space: nowrap;
   }
 }
 

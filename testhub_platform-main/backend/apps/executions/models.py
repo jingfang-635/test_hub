@@ -112,6 +112,7 @@ class TestRunCase(models.Model):
 class TestRunCaseHistory(models.Model):
     """测试执行历史"""
     run_case = models.ForeignKey(TestRunCase, on_delete=models.CASCADE, related_name='history', verbose_name='执行用例')
+    version = models.ForeignKey(Version, on_delete=models.CASCADE, null=True, blank=True, related_name='run_case_histories', verbose_name='关联版本')
     status = models.CharField(max_length=20, choices=TestRunCase.STATUS_CHOICES, verbose_name='执行状态')
     actual_result = models.TextField(blank=True, verbose_name='实际结果')
     comments = models.TextField(blank=True, verbose_name='备注')

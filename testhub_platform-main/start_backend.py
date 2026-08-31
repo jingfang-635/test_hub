@@ -55,6 +55,9 @@ def main() -> None:
             sys.path.insert(0, path_str)
     os.chdir(ROOT)
     os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'backend.settings')
+    # browser-use 会尝试读取/创建系统级配置目录（~/.config/browseruse），
+    # 在受限沙箱/无该目录权限的环境下会失败，这里重定向到项目内目录。
+    os.environ.setdefault('BROWSER_USE_CONFIG_DIR', str(ROOT / '.browseruse'))
 
     try:
         import uvicorn

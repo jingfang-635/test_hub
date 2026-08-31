@@ -9,6 +9,7 @@ export default {
     aiGeneration: 'Case Management',
     apiTesting: 'API Testing',
     uiAutomation: 'UI Automation Testing',
+    appAutomation: 'APP Automation Testing',
     aiIntelligentMode: 'AI Intelligent Mode',
     configuration: 'Configuration Center'
   },
@@ -65,6 +66,7 @@ export default {
     scheduledTaskConfig: 'Scheduled Task Configuration',
     difyConfig: 'Dify Configuration',
     mcpServerConfig: 'MCP Server Configuration',
+    moduleSwitchConfig: 'Module Switches',
     // Core Module
     coreModule: 'Core Module',
     performanceStats: 'Performance Statistics',
