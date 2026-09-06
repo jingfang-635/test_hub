@@ -88,6 +88,9 @@ config.yaml
 # 忽略 AI 探索截图运行时文件，但保留 .gitkeep
 media/exploration_screenshots/*
 !media/exploration_screenshots/.gitkeep
+# 忽略 UI 自动化项目登录态（cookies/storage_state）
+media/ui-automation/auth/*
+!media/ui-automation/auth/.gitkeep
 # 忽略知识库文档上传文件，但保留 .gitkeep
 media/knowledge_docs/*
 !media/knowledge_docs/.gitkeep

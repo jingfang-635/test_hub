@@ -1,4 +1,4 @@
-"""AI探索测试 WebSocket Consumer（实时投屏）"""
+"""UI 自动化 WebSocket Consumer（探索投屏 / 元素拾取投屏）"""
 import logging
 
 from channels.generic.websocket import AsyncJsonWebsocketConsumer
@@ -47,3 +47,35 @@ class UIExplorationConsumer(AsyncJsonWebsocketConsumer):
             })
         except Exception:
             pass
+
+
+class ElementPickerConsumer(AsyncJsonWebsocketConsumer):
+    """元素拾取实时投屏：ws/ui-automation/element-picker/<session_id>/"""
+
+    async def connect(self):
+        try:
+            self.session_id = self.scope['url_route']['kwargs']['session_id']
+            self.group_name = f'ui_element_picker_{self.session_id}'
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.accept()
+            logger.info('元素拾取 WS 已连接: session_id=%s', self.session_id)
+        except Exception as e:
+            logger.error('元素拾取 WS 连接失败: %s', e)
+            await self.close()
+
+    async def disconnect(self, close_code):
+        try:
+            if hasattr(self, 'group_name'):
+                await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        except Exception:
+            pass
+
+    async def screenshot_update(self, event):
+        try:
+            await self.send_json({
+                'type': 'screenshot',
+                'image': event.get('image', ''),
+                'page_url': event.get('page_url', ''),
+            })
+        except Exception as e:
+            logger.error('拾取投屏推送失败: %s', e)

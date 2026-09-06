@@ -27,6 +27,7 @@ from .views import (
 from .views_config import EnvironmentConfigViewSet, AIIntelligentModeConfigViewSet
 from .views_exploration import AIExplorationTaskViewSet, AIExplorationStepViewSet
 from .views_codegen import PlaywrightCodegenViewSet
+from .views_element_picker import ElementPickerViewSet
 
 router = DefaultRouter()
 router.register(r'dashboard', UiDashboardViewSet, basename='dashboard')
@@ -52,6 +53,7 @@ router.register(r'operation-records', OperationRecordViewSet)
 router.register(r'ai-exploration-tasks', AIExplorationTaskViewSet, basename='ai-exploration-tasks')
 router.register(r'ai-exploration-steps', AIExplorationStepViewSet, basename='ai-exploration-steps')
 router.register(r'codegen', PlaywrightCodegenViewSet, basename='playwright-codegen')
+router.register(r'element-picker', ElementPickerViewSet, basename='element-picker')
 
 
 # Configuration Center APIs

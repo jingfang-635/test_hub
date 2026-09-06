@@ -40,13 +40,21 @@ class UiProjectSerializer(serializers.ModelSerializer):
 class UiProjectCreateSerializer(serializers.ModelSerializer):
     class Meta:
         model = UiProject
-        fields = ('name', 'description', 'status', 'base_url', 'start_date', 'end_date', 'owner', 'members')
+        fields = (
+            'name', 'description', 'status',
+            'login_username', 'login_password',
+            'start_date', 'end_date', 'owner', 'members',
+        )
 
 
 class UiProjectUpdateSerializer(serializers.ModelSerializer):
     class Meta:
         model = UiProject
-        fields = ('name', 'description', 'status', 'base_url', 'start_date', 'end_date', 'members')
+        fields = (
+            'name', 'description', 'status',
+            'login_username', 'login_password',
+            'start_date', 'end_date', 'members',
+        )
 
 
 class LocatorStrategySerializer(serializers.ModelSerializer):
@@ -62,11 +70,16 @@ class ElementSerializer(serializers.ModelSerializer):
     project_id = serializers.IntegerField(write_only=True)
     group_id = serializers.IntegerField(write_only=True, required=False, allow_null=True)
     locator_strategy_id = serializers.IntegerField()  # 显式定义，支持读写
+    screenshot = serializers.SerializerMethodField()
 
     class Meta:
         model = Element
         fields = '__all__'
         read_only_fields = ('created_at', 'updated_at', 'created_by')
+
+    def get_screenshot(self, obj):
+        from .codegen_pipeline_service import _element_screenshot_url
+        return _element_screenshot_url(obj)
 
     def validate_project_id(self, value):
         """验证项目ID是否有效"""
@@ -323,6 +336,7 @@ class ElementEnhancedSerializer(serializers.ModelSerializer):
     children_elements = serializers.SerializerMethodField()
     all_locators = serializers.SerializerMethodField()
     usage_scripts = serializers.SerializerMethodField()
+    screenshot = serializers.SerializerMethodField()
 
     # Write-only fields for foreign keys
     project_id = serializers.IntegerField(write_only=True)
@@ -334,6 +348,10 @@ class ElementEnhancedSerializer(serializers.ModelSerializer):
         model = Element
         fields = '__all__'
         read_only_fields = ('created_at', 'updated_at', 'created_by', 'usage_count', 'last_validated')
+
+    def get_screenshot(self, obj):
+        from .codegen_pipeline_service import _element_screenshot_url
+        return _element_screenshot_url(obj)
 
     def get_parent_element(self, obj):
         """获取父元素信息"""
@@ -541,13 +559,34 @@ class TestCaseStepSerializer(serializers.ModelSerializer):
     """测试用例步骤序列化器"""
     element_name = serializers.CharField(source='element.name', read_only=True)
     element_locator = serializers.CharField(source='element.locator_value', read_only=True)
+    element_locator_strategy = serializers.SerializerMethodField()
+    element_backup_locators = serializers.SerializerMethodField()
+    element_screenshot = serializers.SerializerMethodField()
 
     class Meta:
         model = TestCaseStep
         fields = [
-            'id', 'step_number', 'action_type', 'page_filter', 'element', 'element_name', 'element_locator',
-            'input_value', 'wait_time', 'assert_type', 'assert_value', 'description', 'created_at'
+            'id', 'step_number', 'action_type', 'page_filter', 'element', 'element_name',
+            'element_locator', 'element_locator_strategy', 'element_backup_locators',
+            'element_screenshot', 'input_value', 'wait_time', 'assert_type', 'assert_value',
+            'description', 'created_at',
         ]
+
+    def get_element_locator_strategy(self, obj):
+        if obj.element and obj.element.locator_strategy_id:
+            return obj.element.locator_strategy.name
+        return ''
+
+    def get_element_backup_locators(self, obj):
+        if obj.element:
+            return obj.element.backup_locators or []
+        return []
+
+    def get_element_screenshot(self, obj):
+        if not obj.element:
+            return ''
+        from .codegen_pipeline_service import _element_screenshot_url
+        return _element_screenshot_url(obj.element)
 
 
 class TestCaseSerializer(serializers.ModelSerializer):

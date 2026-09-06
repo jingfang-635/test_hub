@@ -51,7 +51,7 @@ class TestCaseListSerializer(serializers.ModelSerializer):
         model = TestCase
         fields = [
             'id', 'title', 'description', 'preconditions', 'steps', 'expected_result',
-            'priority', 'test_type', 'l1', 'l2', 'l3',
+            'priority', 'test_type', 'case_type', 'l1', 'l2', 'l3',
             'author', 'assignee', 'project', 'versions', 'tags', 'created_at', 'updated_at'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
@@ -81,7 +81,7 @@ class TestCaseCreateSerializer(serializers.ModelSerializer):
         model = TestCase
         fields = [
             'title', 'description', 'preconditions', 'steps', 'expected_result',
-            'priority', 'test_type', 'l1', 'l2', 'l3', 'tags', 'project_id', 'version_ids'
+            'priority', 'test_type', 'case_type', 'l1', 'l2', 'l3', 'tags', 'project_id', 'version_ids'
         ]
 
     def validate_title(self, value):
@@ -133,7 +133,7 @@ class TestCaseUpdateSerializer(serializers.ModelSerializer):
         model = TestCase
         fields = [
             'title', 'description', 'preconditions', 'steps', 'expected_result',
-            'priority', 'test_type', 'l1', 'l2', 'l3', 'tags', 'project_id', 'version_ids'
+            'priority', 'test_type', 'case_type', 'l1', 'l2', 'l3', 'tags', 'project_id', 'version_ids'
         ]
 
     def validate_title(self, value):

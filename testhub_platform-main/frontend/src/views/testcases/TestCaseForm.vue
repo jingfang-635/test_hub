@@ -49,7 +49,7 @@
         </el-form-item>
 
         <el-row :gutter="20">
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item :label="$t('testcase.project')" prop="project_id">
               <el-select
                 v-model="form.project_id"
@@ -67,7 +67,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item :label="$t('testcase.priority')" prop="priority">
               <el-select v-model="form.priority" :placeholder="$t('testcase.selectPriority')">
                 <el-option :label="$t('testcase.p0')" value="P0" />
@@ -77,7 +77,7 @@
               </el-select>
             </el-form-item>
           </el-col>
-          <el-col :span="8">
+          <el-col :span="6">
             <el-form-item :label="$t('testcase.testType')" prop="test_type">
               <el-select v-model="form.test_type" :placeholder="$t('testcase.selectTestType')">
                 <el-option :label="$t('testcase.functional')" value="functional" />
@@ -86,6 +86,15 @@
                 <el-option :label="$t('testcase.ui')" value="ui" />
                 <el-option :label="$t('testcase.performance')" value="performance" />
                 <el-option :label="$t('testcase.security')" value="security" />
+              </el-select>
+            </el-form-item>
+          </el-col>
+          <el-col :span="6">
+            <el-form-item :label="$t('testcase.caseType')" prop="case_type">
+              <el-select v-model="form.case_type" :placeholder="$t('testcase.selectCaseType')">
+                <el-option :label="$t('testcase.caseTypeManual')" value="manual" />
+                <el-option :label="$t('testcase.caseTypeUi')" value="ui" />
+                <el-option :label="$t('testcase.caseTypeApi')" value="api" />
               </el-select>
             </el-form-item>
           </el-col>
@@ -163,6 +172,7 @@ const form = reactive({
   priority: 'P2',
   test_type: 'functional',
   preconditions: '',
+  case_type: 'manual',
   steps: '',
   expected_result: '',
   l1: '',
@@ -191,6 +201,9 @@ const rules = {
   ],
   test_type: [
     { required: true, message: computed(() => t('testcase.testTypeRequired')), trigger: 'change' }
+  ],
+  case_type: [
+    { required: true, message: computed(() => t('testcase.caseTypeRequired')), trigger: 'change' }
   ],
   version_ids: [
     { required: true, type: 'array', message: computed(() => t('testcase.versionsRequired')), trigger: 'change' }

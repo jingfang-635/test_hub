@@ -25,6 +25,14 @@ export default {
     priority: '优先级',
     status: '状态',
     testType: '测试类型',
+    caseType: '用例类型',
+    tabBasic: '基础信息',
+    tabUi: 'UI自动化',
+    tabApi: '接口自动化',
+    tabEmpty: '暂无内容',
+    goEdit: '去编辑',
+    aiGenerateSteps: 'AI生成步骤',
+    aiGenerateStepsTodo: 'AI生成步骤功能开发中',
     preconditions: '前置条件',
     steps: '操作步骤',
     expectedResult: '预期结果',
@@ -54,6 +62,11 @@ export default {
     active: '激活',
     deprecated: '废弃',
 
+    // Case types
+    caseTypeManual: '手工',
+    caseTypeUi: 'UI',
+    caseTypeApi: '接口',
+
     // Test types
     functional: '功能测试',
     integration: '集成测试',
@@ -70,12 +83,14 @@ export default {
     selectProject: '请选择项目',
     selectPriority: '请选择优先级',
     selectTestType: '请选择测试类型',
+    selectCaseType: '请选择用例类型',
     selectStatus: '请选择状态',
     selectVersions: '请选择版本（可多选）',
     preconditionsPlaceholder: '请输入前置条件',
     stepsPlaceholder: '请输入详细的操作步骤，如：\n1. 打开登录页面\n2. 输入用户名和密码\n3. 点击登录按钮\n4. 验证登录结果',
     expectedResultPlaceholder: '请输入整体预期结果',
     priorityFilter: '优先级筛选',
+    caseTypeFilter: '用例类型筛选',
     statusFilter: '状态筛选',
 
     // Messages
@@ -133,6 +148,7 @@ export default {
     projectRequired: '请选择归属项目',
     priorityRequired: '请选择优先级',
     testTypeRequired: '请选择测试类型',
+    caseTypeRequired: '请选择用例类型',
     versionsRequired: '请选择关联版本',
     l1Required: '请输入L1',
     l2Required: '请输入L2',
@@ -151,6 +167,7 @@ export default {
     excelPriority: '优先级',
     excelStatus: '状态',
     excelTestType: '测试类型',
+    excelCaseType: '用例类型',
     excelAuthor: '作者',
     excelCreatedAt: '创建时间',
     excelSheetName: '测试用例',

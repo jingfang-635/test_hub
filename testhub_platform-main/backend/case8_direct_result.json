@@ -1,0 +1,117 @@
+{
+  "success": true,
+  "steps": [
+    {
+      "step_number": 1,
+      "action_type": "navigateUrl",
+      "description": "跳转到 http://mall.lemonban.com:3344/",
+      "success": true,
+      "log": "✓ 跳转URL成功\n  - 目标URL: http://mall.lemonban.com:3344/\n  - 页面标题: L-mall4商城\n  - 执行时间: 0.74秒"
+    },
+    {
+      "step_number": 2,
+      "action_type": "click",
+      "description": "点击 recorded_登录",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_登录' 成功\n  - 定位器: role=link[name=\"登录\"]\n  - 超时设置: 5.0秒\n  - 执行时间: 0.13秒"
+    },
+    {
+      "step_number": 3,
+      "action_type": "click",
+      "description": "点击 recorded_请输入手机号_用户名",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_请输入手机号_用户名' 成功\n  - 定位器: role=textbox[name=\"请输入手机号/用户名\"]\n  - 超时设置: 5.0秒\n  - 执行时间: 2.91秒"
+    },
+    {
+      "step_number": 4,
+      "action_type": "fill",
+      "description": "输入到 recorded_请输入手机号_用户名",
+      "success": true,
+      "log": "✓ 在元素 'recorded_请输入手机号_用户名' 中输入文本成功\n  - 定位器: role=textbox[name=\"请输入手机号/用户名\"]\n  - 输入内容: '15183871603'\n  - 超时设置: 5.0秒\n  - 执行时间: 0.01秒"
+    },
+    {
+      "step_number": 5,
+      "action_type": "click",
+      "description": "点击 recorded_请输入密码",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_请输入密码' 成功\n  - 定位器: role=textbox[name=\"请输入密码\"]\n  - 超时设置: 5.0秒\n  - 执行时间: 0.06秒"
+    },
+    {
+      "step_number": 6,
+      "action_type": "fill",
+      "description": "输入到 recorded_请输入密码",
+      "success": true,
+      "log": "✓ 在元素 'recorded_请输入密码' 中输入文本成功\n  - 定位器: role=textbox[name=\"请输入密码\"]\n  - 输入内容: '123456'\n  - 超时设置: 5.0秒\n  - 执行时间: 0.01秒"
+    },
+    {
+      "step_number": 7,
+      "action_type": "click",
+      "description": "点击 recorded_登录_1",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_登录_1' 成功\n  - 定位器: role=link[name=\"登录\"] >> nth=1\n  - 超时设置: 5.0秒\n  - 执行时间: 0.04秒"
+    },
+    {
+      "step_number": 8,
+      "action_type": "wait",
+      "description": "登录后等待页面稳定",
+      "success": true,
+      "log": "✓ 固定等待 2.0 秒完成 - 耗时 1.99秒"
+    },
+    {
+      "step_number": 9,
+      "action_type": "click",
+      "description": "点击 recorded_请输入商品名称",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_请输入商品名称' 成功\n  - 定位器: role=textbox[name=\"请输入商品名称\"]\n  - 超时设置: 5.0秒\n  - 执行时间: 0.04秒"
+    },
+    {
+      "step_number": 10,
+      "action_type": "fill",
+      "description": "输入到 recorded_请输入商品名称",
+      "success": true,
+      "log": "✓ 在元素 'recorded_请输入商品名称' 中输入文本成功\n  - 定位器: role=textbox[name=\"请输入商品名称\"]\n  - 输入内容: '裙子'\n  - 超时设置: 5.0秒\n  - 执行时间: 0.01秒"
+    },
+    {
+      "step_number": 11,
+      "action_type": "click",
+      "description": "点击 recorded_搜索",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_搜索' 成功\n  - 定位器: role=button[name=\"搜索\"]\n  - 超时设置: 5.0秒\n  - 执行时间: 0.03秒"
+    },
+    {
+      "step_number": 12,
+      "action_type": "click",
+      "description": "点击 recorded_goods_img_img",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_goods_img_img' 成功\n  - 定位器: CSS=.goods-img > img\n  - 商品跳转: 进入商品详情成功（第1次，方式=img，URL=http://mall.lemonban.com:3344/detail/30）\n  - 超时设置: 5.0秒\n  - 执行时间: 0.86秒"
+    },
+    {
+      "step_number": 13,
+      "action_type": "wait",
+      "description": "进入商品详情后等待收藏控件",
+      "success": true,
+      "log": "✓ 固定等待 1.5 秒完成 - 耗时 1.51秒"
+    },
+    {
+      "step_number": 14,
+      "action_type": "click",
+      "description": "点击 recorded_已收藏",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_已收藏' 成功\n  - 定位器: role=link[name=\"已收藏\"]\n  - 收藏处理: 点击「已收藏」取消收藏\n  - 超时设置: 5.0秒\n  - 执行时间: 0.05秒"
+    },
+    {
+      "step_number": 15,
+      "action_type": "click",
+      "description": "点击 recorded_已收藏",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_已收藏' 成功\n  - 定位器: role=link[name=\"已收藏\"]\n  - 收藏处理: 点击「已收藏」取消收藏\n  - 超时设置: 5.0秒\n  - 执行时间: 0.07秒"
+    },
+    {
+      "step_number": 16,
+      "action_type": "click",
+      "description": "点击 recorded_收藏商品",
+      "success": true,
+      "log": "✓ 点击元素 'recorded_收藏商品' 成功\n  - 定位器: role=link[name=\"收藏商品\"]\n  - 收藏处理: 点击「收藏商品」完成收藏\n  - 超时设置: 10.0秒\n  - 执行时间: 0.08秒"
+    }
+  ]
+}

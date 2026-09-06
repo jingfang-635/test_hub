@@ -2,7 +2,7 @@ import { defineConfig } from 'vite'
 import vue from '@vitejs/plugin-vue'
 import { resolve } from 'path'
 
-const BACKEND_TARGET = 'http://127.0.0.1:8001'
+const BACKEND_TARGET = 'http://127.0.0.1:8000'
 
 export default defineConfig({
   plugins: [vue()],
@@ -30,7 +30,7 @@ export default defineConfig({
     target: 'es2022',
   },
   server: {
-    port: 3002,
+    port: 3000,
     host: '0.0.0.0',
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',

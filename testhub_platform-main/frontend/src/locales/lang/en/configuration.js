@@ -270,8 +270,6 @@ export default {
     content: 'SKILL.md Content',
     contentPlaceholder: 'Skill instructions in Markdown',
     enabled: 'Enabled',
-    fileMeta: '{count} files',
-    fileMetaWithFolders: '{count} files ({folders})',
     emptyTitle: 'No skills yet',
     emptyDescription: 'Click "Add Skill" or "Import MD" to get started',
     messages: {

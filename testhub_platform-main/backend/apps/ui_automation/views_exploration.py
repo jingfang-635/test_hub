@@ -24,6 +24,7 @@ def _serialize_task(task):
         'data_content': task.data_content,
         'intent_content': task.intent_content,
         'repo_content': task.repo_content,
+        'ai_model_id': task.ai_model_config_id,
         'status': task.status,
         'logs': task.logs,
         'start_time': task.start_time.isoformat() if task.start_time else None,
@@ -81,8 +82,18 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
         data_content = request.data.get('data_content', '')
         intent_content = request.data.get('intent_content', '')
         repo_content = request.data.get('repo_content', '')
+        ai_model_id = request.data.get('ai_model_id')
         if not start_url:
             return Response({'error': '起始URL不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 查找AI模型配置
+        ai_model_config = None
+        if ai_model_id:
+            try:
+                from apps.requirement_analysis.models import AIModelConfig
+                ai_model_config = AIModelConfig.objects.get(id=ai_model_id)
+            except AIModelConfig.DoesNotExist:
+                pass
 
         task = AIExplorationTask.objects.create(
             name=name,
@@ -92,6 +103,7 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
             data_content=data_content,
             intent_content=intent_content,
             repo_content=repo_content,
+            ai_model_config=ai_model_config,
             status='pending',
             created_by=request.user,
         )

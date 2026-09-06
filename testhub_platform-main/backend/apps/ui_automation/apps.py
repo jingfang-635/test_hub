@@ -14,13 +14,11 @@ class UiAutomationConfig(AppConfig):
             from apps.ui_automation.models import LocatorStrategy
             from apps.core.management.commands.init_locator_strategies import DEFAULT_LOCATOR_STRATEGIES
 
-            if not LocatorStrategy.objects.exists():
-                LocatorStrategy.objects.bulk_create(
-                    [
-                        LocatorStrategy(name=item['name'], description=item['description'])
-                        for item in DEFAULT_LOCATOR_STRATEGIES
-                    ],
-                    ignore_conflicts=True,
+            # 按 name 幂等写入，避免多进程/重复启动产生重复策略（下拉会显示两遍）
+            for item in DEFAULT_LOCATOR_STRATEGIES:
+                LocatorStrategy.objects.get_or_create(
+                    name=item['name'],
+                    defaults={'description': item['description']},
                 )
         except Exception:
             # 数据库表尚未就绪（例如首次 migrate 阶段），待迁移完成后正常启动时再初始化

@@ -47,7 +47,7 @@
             <el-tag :type="getStatusType(row.status)">{{ getStatusText(row.status) }}</el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="base_url" :label="$t('uiAutomation.project.baseUrl')" min-width="200" show-overflow-tooltip />
+        <el-table-column prop="login_username" :label="$t('uiAutomation.project.loginUsername')" width="120" show-overflow-tooltip />
         <el-table-column prop="owner.username" :label="$t('uiAutomation.project.owner')" width="100" />
         <el-table-column prop="created_at" :label="$t('uiAutomation.common.createTime')" width="180" :formatter="formatDate" />
         <el-table-column prop="updated_at" :label="$t('uiAutomation.common.updateTime')" width="180" :formatter="formatDate" />
@@ -83,8 +83,8 @@
     </div>
     
     <!-- 创建项目对话框 -->
-    <el-dialog v-model="showCreateDialog" :title="$t('uiAutomation.project.createProject')" width="500px" :close-on-click-modal="false">
-      <el-form ref="createFormRef" :model="createForm" :rules="formRules" label-width="80px">
+    <el-dialog v-model="showCreateDialog" :title="$t('uiAutomation.project.createProject')" width="520px" :close-on-click-modal="false">
+      <el-form ref="createFormRef" :model="createForm" :rules="formRules" label-width="90px">
         <el-form-item :label="$t('uiAutomation.project.projectName')" prop="name">
           <el-input v-model="createForm.name" :placeholder="$t('uiAutomation.project.rules.nameRequired')" />
         </el-form-item>
@@ -98,8 +98,17 @@
             <el-option :label="$t('uiAutomation.status.completed')" value="COMPLETED" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="$t('uiAutomation.project.baseUrl')" prop="base_url">
-          <el-input v-model="createForm.base_url" :placeholder="$t('uiAutomation.project.rules.baseUrlRequired')" />
+        <el-form-item :label="$t('uiAutomation.project.loginUsername')" prop="login_username">
+          <el-input v-model="createForm.login_username" :placeholder="$t('uiAutomation.project.loginUsernamePlaceholder')" clearable />
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.project.loginPassword')" prop="login_password">
+          <el-input
+            v-model="createForm.login_password"
+            type="password"
+            show-password
+            :placeholder="$t('uiAutomation.project.loginPasswordPlaceholder')"
+            clearable
+          />
         </el-form-item>
         <el-form-item :label="$t('uiAutomation.project.startDate')" prop="start_date">
           <el-date-picker v-model="createForm.start_date" type="date" :placeholder="$t('uiAutomation.project.selectDate')" />
@@ -117,8 +126,8 @@
     </el-dialog>
     
     <!-- 编辑项目对话框 -->
-    <el-dialog v-model="showEditDialog" :title="$t('uiAutomation.project.editProject')" width="500px" :close-on-click-modal="false">
-      <el-form ref="editFormRef" :model="editForm" :rules="formRules" label-width="80px">
+    <el-dialog v-model="showEditDialog" :title="$t('uiAutomation.project.editProject')" width="520px" :close-on-click-modal="false">
+      <el-form ref="editFormRef" :model="editForm" :rules="formRules" label-width="90px">
         <el-form-item :label="$t('uiAutomation.project.projectName')" prop="name">
           <el-input v-model="editForm.name" :placeholder="$t('uiAutomation.project.rules.nameRequired')" />
         </el-form-item>
@@ -132,8 +141,17 @@
             <el-option :label="$t('uiAutomation.status.completed')" value="COMPLETED" />
           </el-select>
         </el-form-item>
-        <el-form-item :label="$t('uiAutomation.project.baseUrl')" prop="base_url">
-          <el-input v-model="editForm.base_url" :placeholder="$t('uiAutomation.project.rules.baseUrlRequired')" />
+        <el-form-item :label="$t('uiAutomation.project.loginUsername')" prop="login_username">
+          <el-input v-model="editForm.login_username" :placeholder="$t('uiAutomation.project.loginUsernamePlaceholder')" clearable />
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.project.loginPassword')" prop="login_password">
+          <el-input
+            v-model="editForm.login_password"
+            type="password"
+            show-password
+            :placeholder="$t('uiAutomation.project.loginPasswordPlaceholder')"
+            clearable
+          />
         </el-form-item>
         <el-form-item :label="$t('uiAutomation.project.startDate')" prop="start_date">
           <el-date-picker v-model="editForm.start_date" type="date" :placeholder="$t('uiAutomation.project.selectDate')" />
@@ -161,7 +179,12 @@
               {{ getStatusText(currentProjectDetail.status) }}
             </el-tag>
           </el-descriptions-item>
-          <el-descriptions-item :label="$t('uiAutomation.project.baseUrl')">{{ currentProjectDetail.base_url }}</el-descriptions-item>
+          <el-descriptions-item :label="$t('uiAutomation.project.loginUsername')">
+            {{ currentProjectDetail.login_username || $t('uiAutomation.project.notSet') }}
+          </el-descriptions-item>
+          <el-descriptions-item :label="$t('uiAutomation.project.loginPassword')">
+            {{ currentProjectDetail.login_password ? $t('uiAutomation.project.passwordSet') : $t('uiAutomation.project.notSet') }}
+          </el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.project.owner')">{{ currentProjectDetail.owner?.username || $t('uiAutomation.project.none') }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.project.startDate')">{{ currentProjectDetail.start_date ? formatDate(null, null, currentProjectDetail.start_date) : $t('uiAutomation.project.notSet') }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.project.endDate')">{{ currentProjectDetail.end_date ? formatDate(null, null, currentProjectDetail.end_date) : $t('uiAutomation.project.notSet') }}</el-descriptions-item>
@@ -215,7 +238,8 @@ const createForm = reactive({
   name: '',
   description: '',
   status: 'IN_PROGRESS',
-  base_url: '',
+  login_username: '',
+  login_password: '',
   start_date: null,
   end_date: null
 })
@@ -224,7 +248,8 @@ const editForm = reactive({
   name: '',
   description: '',
   status: 'IN_PROGRESS',
-  base_url: '',
+  login_username: '',
+  login_password: '',
   start_date: null,
   end_date: null
 })
@@ -234,10 +259,6 @@ const formRules = computed(() => ({
   name: [
     { required: true, message: t('uiAutomation.project.rules.nameRequired'), trigger: 'blur' },
     { min: 2, max: 200, message: t('uiAutomation.project.rules.nameLength'), trigger: 'blur' }
-  ],
-  base_url: [
-    { required: true, message: t('uiAutomation.project.rules.baseUrlRequired'), trigger: 'blur' },
-    { type: 'url', message: t('uiAutomation.project.rules.baseUrlInvalid'), trigger: 'blur' }
   ]
 }))
 
@@ -351,7 +372,8 @@ const editProject = (project) => {
     name: project.name,
     description: project.description,
     status: project.status,
-    base_url: project.base_url,
+    login_username: project.login_username || '',
+    login_password: project.login_password || '',
     start_date: project.start_date ? new Date(project.start_date) : null,
     end_date: project.end_date ? new Date(project.end_date) : null
   })
@@ -416,7 +438,7 @@ const handleCreate = async () => {
     
     // 重置表单
     Object.keys(createForm).forEach(key => {
-      createForm[key] = ''
+      createForm[key] = key === 'start_date' || key === 'end_date' ? null : ''
     })
     createForm.status = 'IN_PROGRESS'
     

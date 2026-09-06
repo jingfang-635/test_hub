@@ -59,6 +59,13 @@
             </el-select>
           </el-col>
           <el-col :span="3">
+            <el-select v-model="caseTypeFilter" :placeholder="$t('testcase.caseTypeFilter')" clearable @change="handleFilter">
+              <el-option :label="$t('testcase.caseTypeManual')" value="manual" />
+              <el-option :label="$t('testcase.caseTypeUi')" value="ui" />
+              <el-option :label="$t('testcase.caseTypeApi')" value="api" />
+            </el-select>
+          </el-col>
+          <el-col :span="3">
             <el-button @click="resetFilters">{{ $t('common.reset') }}</el-button>
           </el-col>
         </el-row>
@@ -134,6 +141,9 @@
                 <el-table-column prop="test_type" :label="$t('testcase.testType')" width="110">
                   <template #default="{ row }">{{ getTypeText(row.test_type) }}</template>
                 </el-table-column>
+                <el-table-column prop="case_type" :label="$t('testcase.caseType')" width="90">
+                  <template #default="{ row }">{{ getCaseTypeText(row.case_type) }}</template>
+                </el-table-column>
                 <el-table-column prop="project.name" :label="$t('testcase.relatedProject')" width="140">
                   <template #default="{ row }">{{ row.project?.name || '-' }}</template>
                 </el-table-column>
@@ -182,33 +192,52 @@
               </div>
             </div>
             <div class="detail-body">
-              <el-descriptions :column="2" border size="small">
-                <el-descriptions-item :label="$t('testcase.preconditions')" :span="2">
-                  <div class="html-content" v-html="selectedCase.preconditions || $t('testcase.none')"></div>
-                </el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.steps')" :span="2">
-                  <div class="html-content" v-html="selectedCase.steps || $t('testcase.none')"></div>
-                </el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.expectedResult')" :span="2">
-                  <div class="html-content" v-html="selectedCase.expected_result || $t('testcase.none')"></div>
-                </el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.caseRemark')" :span="2">{{ selectedCase.description || $t('testcase.noDescription') }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.priority')" :span="2">
-                  <el-tag :class="`priority-tag ${selectedCase.priority}`">{{ getPriorityText(selectedCase.priority) }}</el-tag>
-                </el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.testType')" :span="2">{{ getTypeText(selectedCase.test_type) }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.relatedProject')" :span="2">{{ selectedCase.project?.name || $t('testcase.noProject') }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.relatedVersions')" :span="2">
-                  <span v-if="selectedCase.versions && selectedCase.versions.length">
-                    {{ selectedCase.versions.map(v => v.name).join('、') }}
-                  </span>
-                  <span v-else class="no-version">{{ $t('testcase.noVersion') }}</span>
-                </el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.l1')" :span="2">{{ selectedCase.l1 || $t('testcase.none') }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.l2')" :span="2">{{ selectedCase.l2 || $t('testcase.none') }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.l3')" :span="2">{{ selectedCase.l3 || $t('testcase.none') }}</el-descriptions-item>
-                <el-descriptions-item :label="$t('testcase.createdAt')" :span="2">{{ formatDate(selectedCase.created_at) }}</el-descriptions-item>
-              </el-descriptions>
+              <el-tabs v-model="detailActiveTab">
+                <el-tab-pane :label="$t('testcase.tabBasic')" name="basic">
+                  <el-descriptions :column="2" border size="small">
+                    <el-descriptions-item :label="$t('testcase.preconditions')" :span="2">
+                      <div class="html-content" v-html="selectedCase.preconditions || $t('testcase.none')"></div>
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.steps')" :span="2">
+                      <div class="html-content" v-html="selectedCase.steps || $t('testcase.none')"></div>
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.expectedResult')" :span="2">
+                      <div class="html-content" v-html="selectedCase.expected_result || $t('testcase.none')"></div>
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.caseRemark')" :span="2">{{ selectedCase.description || $t('testcase.noDescription') }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.priority')" :span="2">
+                      <el-tag :class="`priority-tag ${selectedCase.priority}`">{{ getPriorityText(selectedCase.priority) }}</el-tag>
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.testType')" :span="2">{{ getTypeText(selectedCase.test_type) }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.caseType')" :span="2">{{ getCaseTypeText(selectedCase.case_type) }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.relatedProject')" :span="2">{{ selectedCase.project?.name || $t('testcase.noProject') }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.relatedVersions')" :span="2">
+                      <span v-if="selectedCase.versions && selectedCase.versions.length">
+                        {{ selectedCase.versions.map(v => v.name).join('、') }}
+                      </span>
+                      <span v-else class="no-version">{{ $t('testcase.noVersion') }}</span>
+                    </el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.l1')" :span="2">{{ selectedCase.l1 || $t('testcase.none') }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.l2')" :span="2">{{ selectedCase.l2 || $t('testcase.none') }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.l3')" :span="2">{{ selectedCase.l3 || $t('testcase.none') }}</el-descriptions-item>
+                    <el-descriptions-item :label="$t('testcase.createdAt')" :span="2">{{ formatDate(selectedCase.created_at) }}</el-descriptions-item>
+                  </el-descriptions>
+                </el-tab-pane>
+                <el-tab-pane :label="$t('testcase.tabUi')" name="ui">
+                  <div class="tab-actions">
+                    <el-button type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.goEdit') }}</el-button>
+                    <el-button @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                  </div>
+                  <el-empty :description="$t('testcase.tabEmpty')" />
+                </el-tab-pane>
+                <el-tab-pane :label="$t('testcase.tabApi')" name="api">
+                  <div class="tab-actions">
+                    <el-button type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.goEdit') }}</el-button>
+                    <el-button @click="handleAiGenerateSteps('api')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                  </div>
+                  <el-empty :description="$t('testcase.tabEmpty')" />
+                </el-tab-pane>
+              </el-tabs>
             </div>
           </template>
 
@@ -237,7 +266,9 @@ const projects = ref([])
 const searchText = ref('')
 const projectFilter = ref('')
 const priorityFilter = ref('')
+const caseTypeFilter = ref('')
 const selectedCase = ref(null)
+const detailActiveTab = ref('basic')
 // 右侧视图：'list' 列表 | 'detail' 单条详情
 const viewMode = ref('list')
 const listCases = ref([])
@@ -282,7 +313,8 @@ const fetchTestCases = async () => {
           page_size: pageSize,
           search: searchText.value,
           project: projectFilter.value,
-          priority: priorityFilter.value
+          priority: priorityFilter.value,
+          case_type: caseTypeFilter.value,
         }
       })
       const results = response.data.results || []
@@ -385,6 +417,7 @@ const handleNodeClick = (data) => {
   allProjectsActive.value = false
   if (data.isCase) {
     selectedCase.value = data.case
+    detailActiveTab.value = 'basic'
     viewMode.value = 'detail'
   } else {
     listCases.value = collectCases(data)
@@ -403,6 +436,7 @@ const showAllCases = () => {
   projectFilter.value = ''
   priorityFilter.value = ''
   allProjectsActive.value = true
+  caseTypeFilter.value = ''
   // 取消树节点高亮
   treeRef.value && treeRef.value.setCurrentKey(null)
   fetchTestCases()
@@ -411,6 +445,7 @@ const showAllCases = () => {
 // 从列表点击某条用例 -> 进入详情
 const viewCaseDetail = (row) => {
   selectedCase.value = row
+  detailActiveTab.value = 'basic'
   viewMode.value = 'detail'
 }
 
@@ -422,6 +457,10 @@ const backToList = () => {
 
 const editTestCase = (testcase) => {
   router.push(`/ai-generation/testcases/${testcase.id}/edit`)
+}
+
+const handleAiGenerateSteps = () => {
+  ElMessage.info(t('testcase.aiGenerateStepsTodo'))
 }
 
 const deleteTestCase = async (testcase) => {
@@ -467,6 +506,15 @@ const getTypeText = (type) => {
   return textMap[type] || '-'
 }
 
+const getCaseTypeText = (type) => {
+  const textMap = {
+    manual: t('testcase.caseTypeManual'),
+    ui: t('testcase.caseTypeUi'),
+    api: t('testcase.caseTypeApi')
+  }
+  return textMap[type] || '-'
+}
+
 const formatDate = (dateString) => {
   return dayjs(dateString).format('YYYY-MM-DD HH:mm')
 }
@@ -492,7 +540,7 @@ const exportToExcel = async () => {
 
     const workbook = XLSX.utils.book_new()
     const worksheetData = [
-      [t('testcase.excelNumber'), t('testcase.excelTitle'), t('testcase.excelPreconditions'), t('testcase.excelSteps'), t('testcase.excelExpectedResult'), t('testcase.excelRemark'), t('testcase.excelPriority'), t('testcase.excelTestType'), t('testcase.excelProject'), t('testcase.excelVersions'), t('testcase.l1'), t('testcase.l2'), t('testcase.l3')]
+      [t('testcase.excelNumber'), t('testcase.excelTitle'), t('testcase.excelPreconditions'), t('testcase.excelSteps'), t('testcase.excelExpectedResult'), t('testcase.excelRemark'), t('testcase.excelPriority'), t('testcase.excelTestType'), t('testcase.excelCaseType'), t('testcase.excelProject'), t('testcase.excelVersions'), t('testcase.l1'), t('testcase.l2'), t('testcase.l3')]
     ]
 
     testCasesToExport.forEach((testcase) => {
@@ -509,6 +557,7 @@ const exportToExcel = async () => {
         testcase.description || '',
         getPriorityText(testcase.priority),
         getTypeText(testcase.test_type),
+        getCaseTypeText(testcase.case_type),
         testcase.project?.name || '',
         versions,
         testcase.l1 || '',
@@ -520,7 +569,7 @@ const exportToExcel = async () => {
     const worksheet = XLSX.utils.aoa_to_sheet(worksheetData)
     worksheet['!cols'] = [
       { wch: 12 }, { wch: 30 }, { wch: 30 }, { wch: 40 }, { wch: 30 }, { wch: 20 },
-      { wch: 10 }, { wch: 15 }, { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
+      { wch: 10 }, { wch: 15 }, { wch: 10 }, { wch: 20 }, { wch: 25 }, { wch: 15 }, { wch: 15 }, { wch: 15 }
     ]
 
     XLSX.utils.book_append_sheet(workbook, worksheet, t('testcase.excelSheetName'))
@@ -545,6 +594,7 @@ const HEADER_FIELD_MAP = {
   '关联版本': 'versions', '版本': 'versions', 'Related Versions': 'versions',
   '优先级': 'priority', 'Priority': 'priority',
   '测试类型': 'test_type', 'Test Type': 'test_type',
+  '用例类型': 'case_type', 'Case Type': 'case_type',
   '前置条件': 'preconditions', 'Preconditions': 'preconditions',
   '操作步骤': 'steps', '步骤': 'steps', 'Steps': 'steps',
   '预期结果': 'expected_result', 'Expected Result': 'expected_result',
@@ -606,6 +656,7 @@ const handleImportFile = async (event) => {
         test_type: getVal('test_type'),
         preconditions: getVal('preconditions'),
         steps: getVal('steps'),
+        case_type: getVal('case_type'),
         expected_result: getVal('expected_result'),
         l1: getVal('l1'),
         l2: getVal('l2'),
@@ -925,6 +976,17 @@ onMounted(() => {
 
   :deep(.el-descriptions) {
     background: #fff;
+  }
+}
+
+.tab-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 8px 0;
+
+  .el-button--primary {
+    box-shadow: none;
   }
 }
 

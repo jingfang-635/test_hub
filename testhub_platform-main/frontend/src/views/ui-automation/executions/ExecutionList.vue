@@ -154,6 +154,15 @@
           <el-descriptions-item :label="$t('uiAutomation.execution.caseName')">{{ currentExecution.test_case_name }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.execution.statusFilter')">
             <el-tag :type="getStatusType(currentExecution.status)">{{ getStatusText(currentExecution.status) }}</el-tag>
+            <el-tag
+              v-if="hasHealedSteps(currentExecution)"
+              type="warning"
+              size="small"
+              effect="light"
+              style="margin-left: 8px"
+            >
+              {{ $t('uiAutomation.execution.healedViaAi') }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.execution.browserFilter')">{{ getBrowserText(currentExecution.browser) }}</el-descriptions-item>
           <el-descriptions-item :label="$t('uiAutomation.execution.executor')">{{ currentExecution.created_by_name }}</el-descriptions-item>
@@ -170,11 +179,22 @@
               <div v-if="currentExecution.execution_logs">
                 <div v-for="(step, index) in parseExecutionLogs(currentExecution.execution_logs)" :key="index" class="log-item">
                   <div class="log-header">
-                    <el-tag :type="step.success ? 'success' : 'danger'" size="small">
+                    <el-tag :type="step.healed ? 'warning' : (step.success ? 'success' : 'danger')" size="small">
                       {{ $t('uiAutomation.execution.step') }} {{ step.step_number }}
+                    </el-tag>
+                    <el-tag v-if="step.healed" type="warning" size="small" effect="plain" style="margin-left: 6px">
+                      {{ $t('uiAutomation.execution.aiHealedStep') }}
                     </el-tag>
                     <span class="log-action">{{ getActionText(step.action_type) }}</span>
                     <span class="log-desc">{{ step.description }}</span>
+                  </div>
+                  <div v-if="step.healed && step.healing_reason" class="log-heal">
+                    <div class="log-heal-label">{{ $t('uiAutomation.execution.aiFailureReason') }}</div>
+                    <pre class="heal-message">{{ step.healing_reason }}</pre>
+                    <div v-if="step.healed_locator" class="log-heal-locator">
+                      {{ $t('uiAutomation.execution.aiTempLocator') }}：
+                      {{ step.healed_locator.strategy }}={{ step.healed_locator.value }}
+                    </div>
                   </div>
                   <div v-if="step.error" class="log-error">
                     <el-icon><WarningFilled /></el-icon>
@@ -434,6 +454,12 @@ const parseExecutionLogs = (logs) => {
     console.error('解析执行日志失败:', e)
     return []
   }
+}
+
+const hasHealedSteps = (execution) => {
+  if (!execution || execution.status !== 'passed') return false
+  const steps = parseExecutionLogs(execution.execution_logs)
+  return Array.isArray(steps) && steps.some((s) => s && s.healed)
 }
 
 // 加载项目列表
@@ -704,6 +730,37 @@ onMounted(async () => {
         .log-desc {
           color: #909399;
           font-size: 14px;
+        }
+      }
+
+      .log-heal {
+        margin-top: 8px;
+        padding: 8px 12px;
+        border-radius: 4px;
+        background: #fdf6ec;
+        border: 1px solid #f5dab1;
+
+        .log-heal-label {
+          font-size: 12px;
+          font-weight: 600;
+          color: #b88230;
+          margin-bottom: 4px;
+        }
+
+        .heal-message {
+          margin: 0;
+          font-size: 13px;
+          color: #8a6d3b;
+          white-space: pre-wrap;
+          word-break: break-word;
+          font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+        }
+
+        .log-heal-locator {
+          margin-top: 6px;
+          font-size: 12px;
+          color: #909399;
+          word-break: break-all;
         }
       }
 

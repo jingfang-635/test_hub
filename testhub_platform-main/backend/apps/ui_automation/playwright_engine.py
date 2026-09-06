@@ -224,8 +224,8 @@ class PlaywrightTestEngine:
 
         return False, f'未知收藏目标: {target}'
 
-    async def start(self):
-        """启动浏览器"""
+    async def start(self, storage_state: str | None = None):
+        """启动浏览器。storage_state 为已保存的登录态 JSON 路径（可选）。"""
         try:
             self.playwright = await async_playwright().start()
 
@@ -250,16 +250,27 @@ class PlaywrightTestEngine:
                 ]
             )
 
-            # 创建浏览器上下文
-            self.context = await self.browser.new_context(
-                viewport={'width': 1920, 'height': 1080},
-                user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
-            )
+            context_kwargs = {
+                'viewport': {'width': 1920, 'height': 1080},
+                'user_agent': (
+                    'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) '
+                    'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
+                ),
+            }
+            if storage_state:
+                context_kwargs['storage_state'] = storage_state
+
+            self.context = await self.browser.new_context(**context_kwargs)
 
             # 创建页面
             self.page = await self.context.new_page()
 
-            logger.info(f"浏览器启动成功: {self.browser_type}, headless={self.headless}")
+            logger.info(
+                "浏览器启动成功: %s, headless=%s, storage_state=%s",
+                self.browser_type,
+                self.headless,
+                bool(storage_state),
+            )
 
         except Exception as e:
             logger.error(f"启动浏览器失败: {str(e)}")
@@ -279,6 +290,281 @@ class PlaywrightTestEngine:
             logger.info("浏览器已关闭")
         except Exception as e:
             logger.error(f"关闭浏览器失败: {str(e)}")
+
+    def _build_locator(self, locator_strategy: str, locator_value: str):
+        """按策略构造 Playwright locator（不做 wait）。"""
+        strategy = (locator_strategy or 'css').lower()
+        value = locator_value or ''
+
+        _has_explicit_index = False
+        if any(x in value for x in [
+            '>> nth=', ':nth-child(', ':nth-of-type(', ':first-child', ':last-child', '>> first', '>> last'
+        ]):
+            _has_explicit_index = True
+
+        if strategy == 'id':
+            locator = self.page.locator(f'#{value}')
+            return locator if _has_explicit_index else locator.first
+        if strategy in ['class', 'class name']:
+            classes = [c.strip() for c in value.split() if c.strip()]
+            locator = self.page.locator('.' + '.'.join(classes)) if classes else self.page.locator(value)
+            return locator if _has_explicit_index else locator.first
+        if strategy in ['css', 'css selector']:
+            if any(keyword in value.lower() for keyword in ['dropdown', 'el-select', ':has(', 'li']):
+                if 'visible=true' not in value:
+                    return self.page.locator(f"{value} >> visible=true").first
+                return self.page.locator(value).first
+            locator = self.page.locator(value)
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'xpath':
+            if any(keyword in value.lower() for keyword in ['dropdown', 'el-select', ':has(', 'li']):
+                if 'visible=true' not in value:
+                    return self.page.locator(f"xpath={value} >> visible=true").first
+                return self.page.locator(f"xpath={value}").first
+            if '[' in value and ']' in value:
+                return self.page.locator(f'xpath={value}')
+            return self.page.locator(f'xpath={value}').first
+        if strategy == 'label':
+            locator = self.page.get_by_label(value.split(' >> ')[0])
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'placeholder':
+            locator = self.page.get_by_placeholder(value.split(' >> ')[0])
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'role':
+            role_sel = value if value.startswith('role=') else f'role={value}'
+            locator = self.page.locator(role_sel)
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'text':
+            text_sel = value if value.startswith('text=') else f'text={value}'
+            locator = self.page.locator(text_sel)
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'name':
+            locator = self.page.locator(f'[name="{value}"]')
+            return locator if _has_explicit_index else locator.first
+        if strategy == 'title':
+            return self.page.get_by_title(value).first
+        if strategy == 'test-id':
+            locator = self.page.get_by_test_id(value)
+            return locator if _has_explicit_index else locator.first
+        locator = self.page.locator(value)
+        return locator if _has_explicit_index else locator.first
+
+    @staticmethod
+    def _is_junk_locator(strategy: str, value: str) -> bool:
+        """过滤 Playwright Inspector 遮罩等无效定位器。"""
+        v = (value or '').lower()
+        s = (strategy or '').lower()
+        if 'x-pw-glass' in v or 'playwright-inspector' in v:
+            return True
+        if s in ('css', 'css selector', 'xpath') and 'pw-glass' in v:
+            return True
+        return False
+
+    def _build_locator_candidates(self, element_data: Dict) -> List[Dict]:
+        primary_strategy = element_data.get('locator_strategy', 'css')
+        primary_value = element_data.get('locator_value', '')
+        candidates: List[Dict] = []
+        seen = set()
+
+        def _add(strategy: str, value: str):
+            strategy = (strategy or '').strip()
+            value = (value or '').strip()
+            if not strategy or not value:
+                return
+            if self._is_junk_locator(strategy, value):
+                return
+            key = (strategy.lower(), value)
+            if key in seen:
+                return
+            seen.add(key)
+            candidates.append({'strategy': strategy, 'value': value})
+
+        _add(primary_strategy, primary_value)
+        for backup in element_data.get('backup_locators') or []:
+            _add(backup.get('strategy') or '', backup.get('value') or '')
+        return candidates
+
+    @staticmethod
+    def _format_tried_locators(candidates: List[Dict]) -> str:
+        if not candidates:
+            return ''
+        lines = ['  - 已尝试定位器:']
+        for i, cand in enumerate(candidates):
+            tag = '主' if i == 0 else f'备{i}'
+            lines.append(f"    [{tag}] {cand['strategy']}={cand['value']}")
+        return '\n'.join(lines)
+
+    @staticmethod
+    def append_heal_note(log: str, element_data: Optional[Dict]) -> str:
+        """在步骤日志中追加 AI 自愈说明（不修改元素库）。"""
+        if not element_data or not element_data.get('_healed'):
+            return log or ''
+        if log and 'AI自愈' in log:
+            return log
+        healed_loc = element_data.get('_healed_locator') or {}
+        reason = element_data.get('_healing_reason') or ''
+        note = (
+            f"\n  ★ AI自愈执行通过（未修改原元素/步骤）\n"
+            f"  - 临时定位器: {healed_loc.get('strategy')}={healed_loc.get('value')}\n"
+            f"  - AI分析原失败原因: {reason}"
+        )
+        return (log or '') + note
+
+    async def _try_ai_heal_locator(
+        self,
+        element_data: Dict,
+        failed_candidates: List[Dict],
+        last_error,
+        timeout_ms: int,
+    ):
+        """
+        主/备用定位器均失效后，调用 AI 分析并临时尝试推荐定位器。
+        仅当次执行生效，不写回元素库/步骤。
+        成功返回 (locator, strategy, value)，失败返回 None。
+        """
+        # 清理上次自愈痕迹
+        element_data.pop('_healed', None)
+        element_data.pop('_healed_locator', None)
+        element_data.pop('_healing_reason', None)
+
+        try:
+            from .ai_locator_healer import suggest_healed_locators
+
+            heal = await suggest_healed_locators(
+                self.page,
+                element_data,
+                failed_candidates,
+                last_error=str(last_error or ''),
+            )
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('AI locator heal failed to start: %s', exc)
+            return None
+
+        failure_reason = (heal or {}).get('failure_reason') or '主/备用定位器均失效'
+        suggestions = (heal or {}).get('locators') or []
+        if not suggestions:
+            element_data['_healing_reason'] = failure_reason
+            element_data['_healed'] = False
+            logger.info('AI healer returned no locator suggestions')
+            return None
+
+        probe_timeout = min(3000, max(timeout_ms, 1))
+        for sug in suggestions:
+            strategy = (sug.get('strategy') or '').strip()
+            value = (sug.get('value') or '').strip()
+            if not strategy or not value:
+                continue
+            if self._is_junk_locator(strategy, value):
+                continue
+            # 跳过与已失败定位器完全相同的建议
+            dup = any(
+                (c.get('strategy') or '').lower() == strategy.lower()
+                and (c.get('value') or '') == value
+                for c in (failed_candidates or [])
+            )
+            if dup:
+                continue
+            try:
+                locator = self._build_locator(strategy, value)
+                await locator.wait_for(state='attached', timeout=probe_timeout)
+                element_data['_healed'] = True
+                element_data['_healed_locator'] = {
+                    'strategy': strategy,
+                    'value': value,
+                    'note': sug.get('note') or '',
+                }
+                element_data['_healing_reason'] = failure_reason
+                element_data['_candidate_index'] = -1
+                logger.info(
+                    'AI healed locator for "%s": %s=%s | reason=%s',
+                    element_data.get('name'),
+                    strategy,
+                    value[:80],
+                    failure_reason[:120],
+                )
+                return locator, strategy, value
+            except Exception as exc:  # noqa: BLE001
+                logger.debug(
+                    'AI suggested locator failed probe %s=%s: %s',
+                    strategy, value[:80], exc,
+                )
+                continue
+
+        element_data['_healing_reason'] = failure_reason
+        element_data['_healed'] = False
+        logger.info('AI healer suggestions all failed for "%s"', element_data.get('name'))
+        return None
+
+    async def _resolve_locator_with_backups(self, element_data: Dict, timeout_ms: int):
+        """主定位器失败时依次尝试备用定位器；全部失败则尝试 AI 自愈，仍失败再抛错。"""
+        candidates = self._build_locator_candidates(element_data)
+        element_data['_locator_candidates'] = candidates
+        # 非自愈路径清理标记
+        element_data.pop('_healed', None)
+        element_data.pop('_healed_locator', None)
+        element_data.pop('_healing_reason', None)
+
+        if not candidates:
+            raise PlaywrightTimeout('无可用定位器（主/备用均为空或已过滤）')
+
+        has_backups = len(candidates) > 1
+        last_error = None
+        for i, cand in enumerate(candidates):
+            try:
+                locator = self._build_locator(cand['strategy'], cand['value'])
+                # 有备用时主定位器短探测，失败再试备用，避免每次空等满超时
+                if i == 0:
+                    probe_timeout = min(2500, timeout_ms) if has_backups else timeout_ms
+                else:
+                    probe_timeout = min(2000, max(timeout_ms, 1))
+                await locator.wait_for(state='attached', timeout=probe_timeout)
+                element_data['_candidate_index'] = i
+                if i > 0:
+                    logger.info(
+                        'primary locator failed, using backup #%s %s=%s',
+                        i, cand['strategy'], cand['value'][:80],
+                    )
+                return locator, cand['strategy'], cand['value']
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+
+        # 主/备用均失败 → AI 自愈（仅当次执行，不修改元素/步骤）
+        healed = await self._try_ai_heal_locator(
+            element_data, candidates, last_error, timeout_ms
+        )
+        if healed:
+            return healed
+
+        tried = self._format_tried_locators(candidates)
+        detail = f'{last_error}' if last_error else ''
+        heal_reason = element_data.get('_healing_reason')
+        heal_note = f'\n  - AI自愈分析: {heal_reason}' if heal_reason else ''
+        raise PlaywrightTimeout(
+            f'所有定位器均未找到元素（已尝试 {len(candidates)} 个）\n{tried}\n  - 最后错误: {detail}{heal_note}'
+        )
+
+    async def _retry_action_on_backups(self, element_data: Dict, timeout_ms: int, action):
+        """主定位器已 attached 但操作失败时，继续试后续备用。action(locator) 为 async。"""
+        candidates = element_data.get('_locator_candidates') or self._build_locator_candidates(element_data)
+        start = int(element_data.get('_candidate_index') or 0) + 1
+        last_error = None
+        for i in range(start, len(candidates)):
+            cand = candidates[i]
+            locator = self._build_locator(cand['strategy'], cand['value'])
+            try:
+                await locator.wait_for(state='attached', timeout=min(2000, max(timeout_ms, 1)))
+                await action(locator)
+                element_data['_candidate_index'] = i
+                logger.info(
+                    'action failed on prior locator, using backup #%s %s=%s',
+                    i, cand['strategy'], cand['value'][:80],
+                )
+                return locator, cand['strategy'], cand['value']
+            except Exception as exc:  # noqa: BLE001
+                last_error = exc
+                continue
+        return None, last_error
 
     async def execute_step(self, step, element_data: Dict) -> Tuple[bool, str, Optional[str]]:
         """
@@ -437,87 +723,10 @@ class PlaywrightTestEngine:
             else:
                 timeout_ms = 5000  # 默认5秒
 
-            # 根据定位策略获取元素
-            # 注意：Playwright 默认 strict 模式，匹配多个元素时会抛 strict mode violation。
-            # 除非用户显式写了索引（如 XPath [n]、CSS >> nth=N、:nth-child），否则统一加 .first 兜底。
-            _has_explicit_index = False
-            if any(x in locator_value for x in [
-                '>> nth=', ':nth-child(', ':nth-of-type(', ':first-child', ':last-child', '>> first', '>> last'
-            ]):
-                _has_explicit_index = True
-
-            if locator_strategy.lower() == 'id':
-                locator = self.page.locator(f'#{locator_value}')
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() in ['class', 'class name']:
-                # 将空格分隔的多个 class 转成 .class1.class2.class3 的 CSS 选择器
-                classes = [c.strip() for c in locator_value.split() if c.strip()]
-                if classes:
-                    locator = self.page.locator('.' + '.'.join(classes))
-                else:
-                    locator = self.page.locator(locator_value)
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() in ['css', 'css selector']:
-                # CSS 定位器：下拉框场景先额外过滤 visible=true，其他情况统一 .first
-                if any(keyword in locator_value.lower() for keyword in ['dropdown', 'el-select', ':has(', 'li']):
-                    if 'visible=true' not in locator_value:
-                        locator = self.page.locator(f"{locator_value} >> visible=true").first
-                    else:
-                        locator = self.page.locator(locator_value).first
-                else:
-                    locator = self.page.locator(locator_value)
-                    if not _has_explicit_index:
-                        locator = locator.first
-            elif locator_strategy.lower() == 'xpath':
-                if any(keyword in locator_value.lower() for keyword in ['dropdown', 'el-select', ':has(', 'li']):
-                    if 'visible=true' not in locator_value:
-                        locator = self.page.locator(f"xpath={locator_value} >> visible=true").first
-                    else:
-                        locator = self.page.locator(f"xpath={locator_value}").first
-                # XPath 自带索引 [n]，不要加 .first 避免冲突
-                elif '[' in locator_value and ']' in locator_value:
-                    locator = self.page.locator(f'xpath={locator_value}')
-                else:
-                    locator = self.page.locator(f'xpath={locator_value}').first
-            elif locator_strategy.lower() == 'label':
-                label_sel = locator_value.split(' >> ')[0]
-                locator = self.page.get_by_label(label_sel)
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() == 'placeholder':
-                ph_sel = locator_value.split(' >> ')[0]
-                locator = self.page.get_by_placeholder(ph_sel)
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() == 'role':
-                # 支持：link / link[name="收藏商品"] / link[name="登录"] >> nth=1
-                role_sel = locator_value if locator_value.startswith('role=') else f'role={locator_value}'
-                locator = self.page.locator(role_sel)
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() == 'text':
-                # 支持 "文案" 或 "文案 >> nth=1"
-                text_sel = locator_value if locator_value.startswith('text=') else f'text={locator_value}'
-                locator = self.page.locator(text_sel)
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() == 'name':
-                locator = self.page.locator(f'[name="{locator_value}"]')
-                if not _has_explicit_index:
-                    locator = locator.first
-            elif locator_strategy.lower() == 'title':
-                locator = self.page.get_by_title(locator_value).first
-            elif locator_strategy.lower() == 'test-id':
-                locator = self.page.get_by_test_id(locator_value)
-                if not _has_explicit_index:
-                    locator = locator.first
-            else:
-                # 默认使用CSS选择器
-                locator = self.page.locator(locator_value)
-                if not _has_explicit_index:
-                    locator = locator.first
+            # 根据定位策略获取元素（主定位失败时尝试备用）
+            locator, locator_strategy, locator_value = await self._resolve_locator_with_backups(
+                element_data, timeout_ms
+            )
 
             # 执行操作
             execution_time = 0
@@ -881,8 +1090,25 @@ class PlaywrightTestEngine:
                             await locator.wait_for(state='attached', timeout=timeout_ms)
                         except:
                             pass  # 如果已经在 DOM 中，继续
-                    
-                    await locator.click(timeout=timeout_ms, force=force_action)
+
+                    async def _do_click(loc):
+                        if force_action:
+                            try:
+                                await loc.wait_for(state='attached', timeout=min(2000, timeout_ms))
+                            except Exception:  # noqa: BLE001
+                                pass
+                        await loc.click(timeout=timeout_ms, force=force_action)
+
+                    try:
+                        await _do_click(locator)
+                    except Exception:
+                        nxt, _ = await self._retry_action_on_backups(
+                            element_data, timeout_ms, _do_click
+                        )
+                        if not nxt:
+                            raise
+                        locator, locator_strategy, locator_value = nxt
+
                     execution_time = round(time.time() - start_time, 2)
                     log = f"✓ 点击元素 '{element_name}' 成功\n"
                     log += f"  - 定位器: {locator_strategy}={locator_value}\n"
@@ -893,7 +1119,18 @@ class PlaywrightTestEngine:
                     return True, log, None
 
             elif action_type == 'fill':
-                await locator.fill(resolved_input_value, timeout=timeout_ms, force=force_action)
+                async def _do_fill(loc):
+                    await loc.fill(resolved_input_value, timeout=timeout_ms, force=force_action)
+
+                try:
+                    await _do_fill(locator)
+                except Exception:
+                    nxt, _ = await self._retry_action_on_backups(
+                        element_data, timeout_ms, _do_fill
+                    )
+                    if not nxt:
+                        raise
+                    locator, locator_strategy, locator_value = nxt
                 execution_time = round(time.time() - start_time, 2)
 
                 # 输入成功后短暂等待，确保表单验证生效
@@ -1023,6 +1260,9 @@ class PlaywrightTestEngine:
             log += f"  - 元素: '{element_name}'\n"
             log += f"  - 定位器: {locator_strategy}={locator_value}\n"
             log += f"  - 超时时间: {execution_time}秒\n"
+            tried = self._format_tried_locators(element_data.get('_locator_candidates') or [])
+            if tried and '已尝试定位器' not in str(e):
+                log += f"{tried}\n"
             log += f"  - 错误: {str(e)}"
 
             # 捕获失败截图
@@ -1040,6 +1280,9 @@ class PlaywrightTestEngine:
             log += f"  - 元素: '{element_name}'\n"
             log += f"  - 定位器: {locator_strategy}={locator_value}\n"
             log += f"  - 执行时间: {execution_time}秒\n"
+            tried = self._format_tried_locators(element_data.get('_locator_candidates') or [])
+            if tried and '已尝试定位器' not in str(e):
+                log += f"{tried}\n"
             log += f"  - 错误: {str(e)}"
 
             # 捕获失败截图

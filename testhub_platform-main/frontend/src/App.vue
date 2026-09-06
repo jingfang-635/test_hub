@@ -9,12 +9,10 @@
 <script setup>
 import { computed, onMounted } from 'vue'
 import { ElConfigProvider } from 'element-plus'
-import { useUserStore } from '@/stores/user'
 import { useAppStore } from '@/stores/app'
 import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import en from 'element-plus/es/locale/lang/en'
 
-const userStore = useUserStore()
 const appStore = useAppStore()
 
 const elementLocale = computed(() => {
@@ -22,8 +20,7 @@ const elementLocale = computed(() => {
 })
 
 onMounted(() => {
-  userStore.initAuth()
-  // 确保主题 class 已应用到 html
+  // initAuth 已在 main.js 完成，这里不再重复调用
   document.documentElement.classList.toggle('dark', appStore.isDark)
 })
 </script>

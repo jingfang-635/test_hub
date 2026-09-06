@@ -270,8 +270,6 @@ export default {
     content: 'SKILL.md 内容',
     contentPlaceholder: '填写 Skill 指令内容（Markdown）',
     enabled: '启用状态',
-    fileMeta: '{count} 个文件',
-    fileMetaWithFolders: '{count} 个文件 ({folders})',
     emptyTitle: '还没有 Skill',
     emptyDescription: '点击「添加 Skill」或「导入 MD」开始配置',
     messages: {

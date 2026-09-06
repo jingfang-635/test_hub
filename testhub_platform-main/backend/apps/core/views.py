@@ -153,7 +153,7 @@ class SkillViewSet(viewsets.ModelViewSet):
     filterset_fields = ['is_enabled', 'is_builtin']
     search_fields = ['name', 'description']
     ordering_fields = ['name', 'created_at', 'updated_at']
-    ordering = ['name']
+    ordering = ['-created_at']
 
     def perform_create(self, serializer):
         serializer.save(created_by=self.request.user, is_builtin=False)

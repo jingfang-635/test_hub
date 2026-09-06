@@ -111,7 +111,24 @@
           <el-input v-model="createForm.start_url" placeholder="https://example.com" />
         </el-form-item>
         <el-form-item label="环境">
-          <el-input v-model="createForm.environment" placeholder="如：测试环境 / 生产环境" />
+          <el-select v-model="createForm.environment" placeholder="请选择项目环境" clearable filterable style="width: 100%">
+            <el-option
+              v-for="env in environmentOptions"
+              :key="env.id"
+              :label="env.label"
+              :value="env.value"
+            />
+          </el-select>
+        </el-form-item>
+        <el-form-item label="AI模型">
+          <el-select v-model="createForm.ai_model_id" placeholder="请选择AI模型" clearable filterable style="width: 100%">
+            <el-option
+              v-for="model in aiModelOptions"
+              :key="model.id"
+              :label="model.label"
+              :value="model.id"
+            />
+          </el-select>
         </el-form-item>
         <el-form-item label="数据来源">
           <el-radio-group v-model="createForm.data_source">
@@ -127,21 +144,12 @@
             placeholder="请输入功能用例描述，每行一条"
           />
         </el-form-item>
-        <el-divider content-position="left">补充信息（可选，可与数据来源组合）</el-divider>
         <el-form-item label="自然语言意图">
           <el-input
             v-model="createForm.intent_content"
             type="textarea"
             :rows="3"
             placeholder="如：登录并验证首页核心功能"
-          />
-        </el-form-item>
-        <el-form-item label="代码仓库">
-          <el-input
-            v-model="createForm.repo_content"
-            type="textarea"
-            :rows="3"
-            placeholder="代码仓库路径/模块说明等参考信息"
           />
         </el-form-item>
         <el-form-item label="任务名称">
@@ -213,6 +221,7 @@
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { Plus, Refresh, ArrowLeft, Document, Loading, Check } from '@element-plus/icons-vue'
+import api from '@/utils/api'
 import {
   getAIExplorationTasks,
   getAIExplorationTaskDetail,
@@ -263,14 +272,16 @@ function disconnectWebSocket() {
 // 创建弹窗
 const showCreateDialog = ref(false)
 const creating = ref(false)
+const environmentOptions = ref([])
+const aiModelOptions = ref([])
 const createForm = reactive({
   name: '',
   start_url: '',
   environment: '',
+  ai_model_id: null,
   data_source: 'autonomous',
   data_content: '',
-  intent_content: '',
-  repo_content: ''
+  intent_content: ''
 })
 
 // 可视化编排
@@ -333,16 +344,54 @@ async function loadTasks() {
   }
 }
 
+// 加载环境选项（从项目配置的环境获取）
+async function loadEnvironmentOptions() {
+  try {
+    const res = await api.get('/projects/')
+    const projects = res.data || []
+    const options = []
+    projects.forEach(project => {
+      const envs = project.environments || []
+      envs.forEach(env => {
+        options.push({
+          id: env.id,
+          label: `${project.name} - ${env.name}`,
+          value: env.base_url
+        })
+      })
+    })
+    environmentOptions.value = options
+  } catch (e) {
+    console.error('加载环境列表失败', e)
+  }
+}
+
+// 加载AI模型选项（从AI智能模式配置获取）
+async function loadAIModelOptions() {
+  try {
+    const res = await api.get('/ui-automation/ai-models/')
+    const configs = res.data || []
+    aiModelOptions.value = configs.map(config => ({
+      id: config.id,
+      label: `${config.name} (${config.model_name})`
+    }))
+  } catch (e) {
+    console.error('加载AI模型列表失败', e)
+  }
+}
+
 // 打开创建弹窗
-function openCreateDialog() {
+async function openCreateDialog() {
   createForm.name = ''
   createForm.start_url = ''
   createForm.environment = ''
+  createForm.ai_model_id = null
   createForm.data_source = 'autonomous'
   createForm.data_content = ''
   createForm.intent_content = ''
-  createForm.repo_content = ''
   showCreateDialog.value = true
+  loadEnvironmentOptions()
+  loadAIModelOptions()
 }
 
 // 确认创建并启动

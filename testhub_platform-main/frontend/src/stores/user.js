@@ -3,6 +3,16 @@ import { ref, computed } from 'vue'
 import api from '@/utils/api'
 
 export const useUserStore = defineStore('user', () => {
+  const ACCESS_TOKEN_TTL_MS = 60 * 60 * 1000 // 与后端 ACCESS_TOKEN_LIFETIME 一致
+
+  const getAccessExpiresAt = (accessTokenValue) => {
+    try {
+      const payload = JSON.parse(atob(accessTokenValue.split('.')[1]))
+      if (payload.exp) return payload.exp * 1000
+    } catch (_) { /* ignore */ }
+    return Date.now() + ACCESS_TOKEN_TTL_MS
+  }
+
   const user = ref(null)
   const accessToken = ref(localStorage.getItem('access_token') || '')
   const refreshToken = ref(localStorage.getItem('refresh_token') || '')
@@ -66,8 +76,7 @@ export const useUserStore = defineStore('user', () => {
       refreshToken.value = response.data.refresh
       user.value = response.data.user
 
-      // 计算过期时间（当前时间 + 30分钟）
-      const expiresAt = Date.now() + 30 * 60 * 1000
+      const expiresAt = getAccessExpiresAt(accessToken.value)
       tokenExpiresAt.value = expiresAt
 
       // 持久化存储
@@ -100,6 +109,8 @@ export const useUserStore = defineStore('user', () => {
 
   // 添加一个标记防止logout过程中的循环调用
   let isLoggingOut = false
+  // 单飞：并发 refresh 共用同一次请求，避免 ROTATE+BLACKLIST 把旧 refresh 拉黑后二次刷新 401
+  let refreshPromise = null
 
   const logout = async () => {
     // 防止重复调用logout
@@ -143,33 +154,44 @@ export const useUserStore = defineStore('user', () => {
 
   // 刷新access token
   const refreshAccessToken = async () => {
-    try {
-      const response = await api.post('/auth/token/refresh/', {
-        refresh: refreshToken.value
-      })
-
-      // 更新access token和过期时间
-      accessToken.value = response.data.access
-      const expiresAt = Date.now() + 30 * 60 * 1000
-      tokenExpiresAt.value = expiresAt
-
-      // 如果返回了新的refresh token（启用了ROTATE_REFRESH_TOKENS）
-      if (response.data.refresh) {
-        refreshToken.value = response.data.refresh
-        localStorage.setItem('refresh_token', refreshToken.value)
-      }
-
-      // 持久化存储
-      localStorage.setItem('access_token', accessToken.value)
-      localStorage.setItem('token_expires_at', expiresAt.toString())
-
-      return response.data.access
-    } catch (error) {
-      // 刷新失败，清除所有认证信息
-      console.error('Token refresh failed:', error)
+    if (!refreshToken.value) {
       await logout()
-      throw error
+      throw new Error('No refresh token')
     }
+
+    if (refreshPromise) {
+      return refreshPromise
+    }
+
+    refreshPromise = (async () => {
+      try {
+        const response = await api.post('/auth/token/refresh/', {
+          refresh: refreshToken.value
+        })
+
+        accessToken.value = response.data.access
+        const expiresAt = getAccessExpiresAt(accessToken.value)
+        tokenExpiresAt.value = expiresAt
+
+        if (response.data.refresh) {
+          refreshToken.value = response.data.refresh
+          localStorage.setItem('refresh_token', refreshToken.value)
+        }
+
+        localStorage.setItem('access_token', accessToken.value)
+        localStorage.setItem('token_expires_at', expiresAt.toString())
+
+        return response.data.access
+      } catch (error) {
+        console.error('Token refresh failed:', error)
+        await logout()
+        throw error
+      } finally {
+        refreshPromise = null
+      }
+    })()
+
+    return refreshPromise
   }
 
   const fetchUser = async () => {
@@ -204,6 +226,33 @@ export const useUserStore = defineStore('user', () => {
       hasUser: !!user.value,
       isExpired: isTokenExpired.value
     })
+
+    // 多标签页同步最新 token，避免 A 页刷新后 B 页仍用已拉黑的 refresh
+    if (typeof window !== 'undefined' && !window.__testhub_token_storage_bound) {
+      window.__testhub_token_storage_bound = true
+      window.addEventListener('storage', (e) => {
+        if (e.key === 'access_token' && e.newValue) {
+          accessToken.value = e.newValue
+        }
+        if (e.key === 'refresh_token' && e.newValue) {
+          refreshToken.value = e.newValue
+        }
+        if (e.key === 'token_expires_at' && e.newValue) {
+          tokenExpiresAt.value = parseInt(e.newValue) || 0
+        }
+        if (e.key === 'user' && e.newValue) {
+          try {
+            user.value = JSON.parse(e.newValue)
+          } catch (_) { /* ignore */ }
+        }
+        if (e.key === 'access_token' && !e.newValue) {
+          accessToken.value = ''
+          refreshToken.value = ''
+          user.value = null
+          tokenExpiresAt.value = 0
+        }
+      })
+    }
 
     // 从localStorage恢复用户信息
     if (!user.value) {

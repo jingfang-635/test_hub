@@ -108,28 +108,34 @@ class CodegenRecorderService:
     def check_environment(self) -> dict[str, Any]:
         node = self._which_node()
         npx = self._which('npx')
+        # 先解析 Python Playwright：本机 npx playwright --version 常因首次下载卡住数分钟，
+        # 会拖垮前端 30s 超时并误报「环境检测失败」。
         python_playwright = self._resolve_python_playwright()
+        py_ok = bool(python_playwright.get('installed'))
         npx_playwright = False
         npx_playwright_version = ''
 
-        if npx:
+        # 仅在缺少 Python Playwright、需要确认 npx 回退路径时才探测；并严格限时。
+        if npx and not py_ok:
             try:
-                result = subprocess.run(
-                    [npx, 'playwright', '--version'],
-                    capture_output=True,
-                    text=True,
-                    timeout=60,
-                    shell=False,
-                )
+                kwargs: dict[str, Any] = {
+                    'capture_output': True,
+                    'text': True,
+                    'timeout': 8,
+                    'shell': False,
+                }
+                if os.name == 'nt':
+                    kwargs['creationflags'] = getattr(subprocess, 'CREATE_NO_WINDOW', 0)
+                result = subprocess.run([npx, 'playwright', '--version'], **kwargs)
                 if result.returncode == 0:
                     npx_playwright = True
                     npx_playwright_version = (result.stdout or result.stderr or '').strip()
             except Exception as exc:  # noqa: BLE001
-                logger.info('npx playwright check failed: %s', exc)
+                logger.info('npx playwright check failed/skipped: %s', exc)
 
-        browsers = self._check_browsers(python_playwright.get('python') if python_playwright.get('installed') else None)
-        ready = bool(python_playwright.get('installed') or (npx and (npx_playwright or node)))
-        can_start = bool(python_playwright.get('installed') or npx)
+        browsers = self._check_browsers(python_playwright.get('python') if py_ok else None)
+        ready = bool(py_ok or (npx and (npx_playwright or node)))
+        can_start = bool(py_ok or npx)
 
         return {
             'ready': ready and (browsers.get('ok') or can_start),
@@ -142,18 +148,20 @@ class CodegenRecorderService:
             'npx': {
                 'installed': bool(npx),
                 'path': npx or '',
+                # npx --version 本身很快；避免再跑会卡住的 playwright 探测
                 'version': self._run_version([npx, '--version']) if npx else '',
             },
             'python_playwright': python_playwright,
             'npx_playwright': {
                 'installed': npx_playwright,
                 'version': npx_playwright_version,
+                'skipped': bool(py_ok),
             },
             'browsers': browsers,
             'tips': self._env_tips(
                 bool(node),
                 bool(npx),
-                bool(python_playwright.get('installed')),
+                py_ok,
                 npx_playwright,
                 browsers,
                 python_playwright.get('python') or '',
@@ -175,10 +183,15 @@ class CodegenRecorderService:
         language: str = 'python',
         project_id: int | None = None,
         script_name: str = '',
+        auto_login: bool = True,
     ) -> CodegenSession:
         url = (url or '').strip()
         if not url or url in {'https://', 'http://'}:
-            raise ValueError('请输入有效的目标 URL')
+            # 目标 URL 留空时，始终尝试从项目环境取 base_url（与是否自动登录无关）
+            if project_id:
+                url = self._resolve_project_base_url(project_id)
+            if not url or url in {'https://', 'http://'}:
+                raise ValueError('请输入有效的目标 URL，或在项目环境中配置基础地址')
 
         browser = (browser or 'chromium').lower()
         if browser not in BROWSER_CHOICES:
@@ -191,6 +204,41 @@ class CodegenRecorderService:
         env = self.check_environment()
         if not env.get('can_start'):
             raise RuntimeError('未检测到可用的 Playwright 环境，请先安装 Node.js/npx 或 python playwright')
+
+        if auto_login:
+            if not project_id:
+                raise ValueError('复用登录态需要指定项目')
+            from .auth_state import (
+                auth_path_for_project,
+                ensure_project_auth_state,
+                load_path_if_exists,
+            )
+
+            login_user, login_pass = self._resolve_project_login(project_id)
+            auth_file = auth_path_for_project(project_id)
+            existing = load_path_if_exists(auth_file)
+            if not existing and not (login_user and login_pass):
+                raise ValueError(
+                    '复用登录态失败：项目环境未配置登录账号/密码，且尚无已保存的登录态'
+                )
+
+            logger.info(
+                'codegen reuse-auth enabled project=%s existing=%s user=%s',
+                project_id, bool(existing), login_user or '',
+            )
+            ensured = ensure_project_auth_state(
+                project_id,
+                base_url=url,
+                username=login_user,
+                password=login_pass,
+            )
+            logger.info('codegen ensure auth result=%s project=%s', ensured, project_id)
+            if not ensured:
+                raise ValueError(
+                    '复用登录态失败：静默登录未成功，请检查项目环境的基础地址与登录账号密码'
+                )
+        else:
+            logger.info('codegen reuse-auth disabled by request')
 
         with self._lock:
             current = self._sessions.get(user_id)
@@ -210,7 +258,11 @@ class CodegenRecorderService:
 
             output_path = str(self.recorded_root() / safe_name)
             log_path = str(self.logs_root() / f'{session_id}.log')
-            command = self._build_command(env, target, browser, output_path, url)
+            # 复用登录态：不传账号，禁止表单自动登录
+            command = self._build_command(
+                env, target, browser, output_path, url,
+                login_username='',
+            )
 
             session = CodegenSession(
                 session_id=session_id,
@@ -233,13 +285,39 @@ class CodegenRecorderService:
                     # 不弹黑窗口；stdout/stderr 已重定向到日志文件，避免与 Django IO 互相阻塞
                     creationflags = subprocess.CREATE_NO_WINDOW  # type: ignore[attr-defined]
 
+                child_env = os.environ.copy()
+                # 复用登录态：只注入 auth 文件；明确禁止表单自动登录
+                from .auth_state import auth_path_for_project, load_path_if_exists
+
+                child_env.pop('CODEGEN_LOGIN_USERNAME', None)
+                child_env.pop('CODEGEN_LOGIN_PASSWORD', None)
+                child_env.pop('CODEGEN_FORCE_FORM_LOGIN', None)
+                # 勿继承开发自检开关，否则 launcher 秒退并误报浏览器未安装
+                child_env.pop('CODEGEN_LAUNCHER_SELFCHECK', None)
+                if auto_login:
+                    child_env['CODEGEN_REUSE_AUTH_ONLY'] = '1'
+                    auth_file = auth_path_for_project(project_id)
+                    # 上面已 ensure 成功；此处再确认文件存在并强制注入路径
+                    if auth_file is None or not load_path_if_exists(auth_file):
+                        raise RuntimeError('复用登录态失败：登录态文件未就绪')
+                    child_env['CODEGEN_AUTH_STATE_PATH'] = str(auth_file)
+                else:
+                    child_env.pop('CODEGEN_REUSE_AUTH_ONLY', None)
+                    child_env.pop('CODEGEN_AUTH_STATE_PATH', None)
+
                 log_fh = open(log_path, 'w', encoding='utf-8', errors='replace')  # noqa: SIM115
+                log_fh.write(
+                    f'[codegen_service] auto_login={auto_login} '
+                    f'auth_path={child_env.get("CODEGEN_AUTH_STATE_PATH", "")!r}\n'
+                )
+                log_fh.flush()
                 session.process = subprocess.Popen(
                     command,
                     cwd=str(self.recorded_root()),
                     stdout=log_fh,
                     stderr=subprocess.STDOUT,
                     stdin=subprocess.DEVNULL,
+                    env=child_env,
                     creationflags=creationflags,
                 )
                 # 句柄由子进程继承，父进程可关闭
@@ -471,7 +549,88 @@ class CodegenRecorderService:
             pass
         return '1920,1080'
 
-    def _build_command(self, env: dict[str, Any], target: str, browser: str, output_path: str, url: str) -> list[str]:
+    def _resolve_project_base_url(self, project_id: int | None) -> str:
+        """从主项目环境读取 base_url（默认环境优先）。
+
+        project_id 可为 UiProject.id，也可为关联的主项目 hub_project_id。
+        """
+        if not project_id:
+            return ''
+        try:
+            from .models import UiProject
+            from apps.projects.models import ProjectEnvironment
+
+            pid = int(project_id)
+            project = UiProject.objects.filter(pk=pid).only('hub_project_id').first()
+            hub_id = project.hub_project_id if project else None
+            # 前端偶发传入主项目 id：按 hub_project 反查
+            if not hub_id:
+                hub_id = pid if UiProject.objects.filter(hub_project_id=pid).exists() else None
+                if not hub_id:
+                    return ''
+
+            envs = ProjectEnvironment.objects.filter(project_id=hub_id).order_by(
+                '-is_default', 'id',
+            ).only('base_url')
+            for env in envs:
+                u = (env.base_url or '').strip()
+                if u:
+                    return u
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('resolve project base_url failed: %s', exc)
+        return ''
+
+    def _resolve_project_login(self, project_id: int | None) -> tuple[str, str]:
+        """优先读主项目环境登录凭证，再回退 UI 项目凭证。
+
+        project_id 可为 UiProject.id，也可为关联的主项目 hub_project_id。
+        """
+        if not project_id:
+            return '', ''
+        try:
+            from .models import UiProject
+            from apps.projects.models import ProjectEnvironment
+
+            pid = int(project_id)
+            project = UiProject.objects.filter(pk=pid).only(
+                'login_username', 'login_password', 'hub_project_id',
+            ).first()
+            hub_id = project.hub_project_id if project else None
+            if not hub_id:
+                hub_id = pid if UiProject.objects.filter(hub_project_id=pid).exists() else None
+                if not project and hub_id:
+                    project = UiProject.objects.filter(hub_project_id=hub_id).only(
+                        'login_username', 'login_password', 'hub_project_id',
+                    ).first()
+
+            if hub_id:
+                envs = ProjectEnvironment.objects.filter(project_id=hub_id).order_by(
+                    '-is_default', 'id',
+                ).only('login_username', 'login_password')
+                for env in envs:
+                    u = (env.login_username or '').strip()
+                    p = env.login_password or ''
+                    if u and p:
+                        return u, p
+
+            if project:
+                username = (project.login_username or '').strip()
+                password = project.login_password or ''
+                if username and password:
+                    return username, password
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('resolve project login failed: %s', exc)
+        return '', ''
+
+    def _build_command(
+        self,
+        env: dict[str, Any],
+        target: str,
+        browser: str,
+        output_path: str,
+        url: str,
+        login_username: str = '',
+    ) -> list[str]:
         py_info = env.get('python_playwright') or {}
         python_ok = bool(py_info.get('installed'))
         python_bin = py_info.get('python') or ''
@@ -481,19 +640,24 @@ class CodegenRecorderService:
         # 优先使用带 playwright 的 Python + 全屏启动器（最大化窗口录制）
         if python_ok and python_bin:
             stop_file = f'{output_path}.stop'
-            return [
+            cmd = [
                 python_bin, launcher,
                 '--target', target,
                 '--browser', browser,
                 '-o', output_path,
                 '--stop-file', stop_file,
-                url,
             ]
+            if login_username:
+                cmd.extend(['--login-username', login_username])
+            cmd.append(url)
+            return cmd
 
         if not npx:
             raise RuntimeError('未找到可用的 Python Playwright 或 npx，无法启动录制')
 
-        # npx 回退：官方 CLI 不支持 maximized，用主屏分辨率近似全屏
+        # npx 回退：官方 CLI 不支持 maximized / 自动登录，用主屏分辨率近似全屏
+        if login_username:
+            logger.warning('npx codegen 回退路径不支持自动登录，请安装 python playwright')
         return [
             npx, 'playwright', 'codegen',
             '--target', target,
@@ -560,13 +724,19 @@ class CodegenRecorderService:
 
     @staticmethod
     def _browser_install_hint(env: dict[str, Any], detail: str) -> str:
+        tail = (detail or '').strip()
+        if 'selfcheck ok' in tail.lower():
+            return (
+                '录制进程被 CODEGEN_LAUNCHER_SELFCHECK 自检开关秒退（非浏览器问题）。\n'
+                '请重启后端后再试「开始录制」。'
+                f'\n\n详情：\n{tail[:600]}'
+            )
         py = (env.get('python_playwright') or {}).get('python') or sys.executable
         base = (
             '录制进程启动后立即退出。常见原因是 Playwright 浏览器未安装。\n'
             f'请执行：\n  "{py}" -m playwright install chromium\n'
             '然后重新点击「开始录制」。'
         )
-        tail = (detail or '').strip()
         if tail:
             return f'{base}\n\n详情：\n{tail[:600]}'
         return base

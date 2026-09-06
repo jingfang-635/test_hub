@@ -17,7 +17,9 @@ class UiProject(models.Model):
     name = models.CharField(max_length=200, verbose_name='项目名称')
     description = models.TextField(blank=True, verbose_name='项目描述')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, verbose_name='项目状态', default='IN_PROGRESS')
-    base_url = models.URLField(verbose_name='基础URL')
+    # 测试环境登录凭证（供用例/codegen/auth.json 复用，非平台账号）
+    login_username = models.CharField(max_length=200, blank=True, default='', verbose_name='登录账号')
+    login_password = models.CharField(max_length=200, blank=True, default='', verbose_name='登录密码')
     start_date = models.DateField(null=True, blank=True, verbose_name='开始日期')
     end_date = models.DateField(null=True, blank=True, verbose_name='结束日期')
     owner = models.ForeignKey(User, on_delete=models.CASCADE, related_name='owned_ui_projects', verbose_name='负责人')
@@ -46,7 +48,7 @@ class UiProject(models.Model):
 
 class LocatorStrategy(models.Model):
     """元素定位策略模型"""
-    name = models.CharField(max_length=50, verbose_name='策略名称')
+    name = models.CharField(max_length=50, unique=True, verbose_name='策略名称')
     description = models.TextField(blank=True, verbose_name='策略描述')
 
     class Meta:
@@ -118,6 +120,14 @@ class Element(models.Model):
         null=True,
         verbose_name='备用定位器',
         help_text='多个定位策略的JSON数组，格式：[{"strategy": "css", "value": ".button"}, ...]'
+    )
+
+    # 控件截图（录制时自动截取）
+    screenshot = models.ImageField(
+        upload_to='ui-automation/elements/',
+        blank=True,
+        null=True,
+        verbose_name='控件截图',
     )
 
     page = models.CharField(max_length=200, verbose_name='所属页面', blank=True)
@@ -1103,6 +1113,13 @@ class AIExplorationTask(models.Model):
     data_content = models.TextField(blank=True, default='', verbose_name='功能用例描述', help_text='功能用例驱动模式下填写')
     intent_content = models.TextField(blank=True, default='', verbose_name='自然语言意图', help_text='独立填写，作为探索的意图补充')
     repo_content = models.TextField(blank=True, default='', verbose_name='代码仓库信息', help_text='独立填写，作为探索的参考补充')
+    ai_model_config = models.ForeignKey(
+        'requirement_analysis.AIModelConfig',
+        on_delete=models.SET_NULL,
+        null=True, blank=True,
+        verbose_name='AI模型配置',
+        help_text='关联AI智能模式配置的模型'
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
     logs = models.TextField(blank=True, default='', verbose_name='执行日志')
     start_time = models.DateTimeField(auto_now_add=True, verbose_name='开始时间')

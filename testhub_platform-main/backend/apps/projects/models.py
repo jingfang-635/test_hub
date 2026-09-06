@@ -70,6 +70,8 @@ class ProjectEnvironment(models.Model):
     project = models.ForeignKey(Project, on_delete=models.CASCADE, related_name='environments')
     name = models.CharField(max_length=100, verbose_name='环境名称')
     base_url = models.URLField(verbose_name='基础URL')
+    login_username = models.CharField(max_length=200, blank=True, default='', verbose_name='登录账号')
+    login_password = models.CharField(max_length=200, blank=True, default='', verbose_name='登录密码')
     description = models.TextField(blank=True, verbose_name='环境描述')
     variables = models.JSONField(default=dict, verbose_name='环境变量')
     is_default = models.BooleanField(default=False, verbose_name='是否默认')

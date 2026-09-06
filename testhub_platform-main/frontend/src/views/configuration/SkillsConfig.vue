@@ -39,9 +39,8 @@
           <span v-for="tag in skill.tags" :key="tag" class="tag-pill">{{ tag }}</span>
         </div>
 
-        <div class="file-meta">
-          <el-icon class="file-icon"><Document /></el-icon>
-          <span>{{ fileMetaText(skill) }}</span>
+        <div class="created-at">
+          <span>{{ $t('configuration.common.createdAt') }}: {{ formatDateTime(skill.created_at) }}</span>
         </div>
 
         <div class="card-footer">
@@ -132,7 +131,6 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Document } from '@element-plus/icons-vue'
 import {
   createSkill,
   deleteSkill,
@@ -189,22 +187,23 @@ const unwrapList = (res) => {
   return []
 }
 
-const fileMetaText = (skill) => {
-  const count = skill.file_count ?? (1 + Object.keys(skill.files || {}).length)
-  const folders = skill.file_folders || []
-  if (folders.length) {
-    return t('configuration.skills.fileMetaWithFolders', {
-      count,
-      folders: folders.join(', ')
-    })
-  }
-  return t('configuration.skills.fileMeta', { count })
+const formatDateTime = (dateString) => {
+  if (!dateString) return '-'
+  const date = new Date(dateString)
+  const locale = t('configuration.common.locale') || 'zh-CN'
+  return date.toLocaleString(locale, {
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit'
+  })
 }
 
 const loadSkills = async () => {
   loading.value = true
   try {
-    const res = await getSkills({ ordering: 'name' })
+    const res = await getSkills({ ordering: '-created_at' })
     skills.value = unwrapList(res).map((item) => ({
       ...item,
       toggling: false,
@@ -572,17 +571,13 @@ onMounted(loadSkills)
   font-size: 12px;
 }
 
-.file-meta {
+.created-at {
   display: flex;
   align-items: center;
   gap: 6px;
   color: #6b7280;
   font-size: 12px;
   margin-bottom: 14px;
-}
-
-.file-icon {
-  font-size: 14px;
 }
 
 .card-footer {
@@ -679,7 +674,7 @@ onMounted(loadSkills)
 }
 
 :global(.is-dark) .skill-desc,
-:global(.is-dark) .file-meta,
+:global(.is-dark) .created-at,
 :global(.is-dark) .empty-state p {
   color: var(--th-text-secondary, #9aa3b2);
 }

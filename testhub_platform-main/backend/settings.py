@@ -232,8 +232,9 @@ from datetime import timedelta
 SIMPLE_JWT = {
     'ACCESS_TOKEN_LIFETIME': timedelta(minutes=60),  # access_token 60分钟
     'REFRESH_TOKEN_LIFETIME': timedelta(days=7),  # refresh_token 7天
-    'ROTATE_REFRESH_TOKENS': True,  # 刷新时轮换refresh_token
-    'BLACKLIST_AFTER_ROTATION': True,  # 旧的refresh_token加入黑名单
+    # ponytail: 关闭轮换/拉黑。并发/多标签刷新时旧 refresh 会被拉黑导致 401；需要轮换时再开并做跨标签锁
+    'ROTATE_REFRESH_TOKENS': False,
+    'BLACKLIST_AFTER_ROTATION': False,
     'UPDATE_LAST_LOGIN': True,  # 更新最后登录时间
 
     'ALGORITHM': 'HS256',

@@ -143,7 +143,7 @@
 
           <!-- 元素配置 -->
           <div class="element-form">
-            <el-form ref="elementFormRef" :key="formKey" :model="selectedElement" :rules="elementRules" label-width="100px">
+            <el-form ref="elementFormRef" :key="formKey" :model="selectedElement" :rules="elementRules" label-width="120px">
               <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item :label="$t('uiAutomation.element.page')">
@@ -166,31 +166,10 @@
 
               <el-row :gutter="20">
                 <el-col :span="12">
-                  <el-form-item :label="$t('uiAutomation.element.locatorStrategy')" prop="locator_strategy_id" required>
-                    <el-select
-                      v-model="selectedElement.locator_strategy_id"
-                      :key="`strategy-${formKey}-${selectedElement.locator_strategy_id || 'null'}`"
-                      :placeholder="$t('uiAutomation.element.rules.strategyRequired')"
-                      value-key="id"
-                      @blur="validateField('locator_strategy_id')"
-                    >
-                      <el-option
-                        v-for="strategy in locatorStrategies"
-                        :key="strategy.id"
-                        :label="strategy.name"
-                        :value="strategy.id"
-                      />
-                    </el-select>
-                  </el-form-item>
-                </el-col>
-                <el-col :span="12">
-                  <el-form-item :label="$t('uiAutomation.element.waitTimeout') + '(' + $t('uiAutomation.element.waitTimeoutUnit') + ')'">
+                  <el-form-item :label="$t('uiAutomation.element.waitTimeout')">
                     <el-input-number v-model="selectedElement.wait_timeout" :min="1" :max="60" style="width: 100%" />
                   </el-form-item>
                 </el-col>
-              </el-row>
-
-              <el-row :gutter="20">
                 <el-col :span="12">
                   <el-form-item :label="$t('uiAutomation.element.forceAction')">
                     <div class="force-action-row">
@@ -203,14 +182,102 @@
                 </el-col>
               </el-row>
 
-              <el-form-item :label="$t('uiAutomation.element.locatorExpression')" prop="locator_value" required>
-                <el-input v-model="selectedElement.locator_value" :placeholder="$t('uiAutomation.element.locatorExpressionPlaceholder')" @blur="validateField('locator_value')" />
-                <div class="form-help-text">
+              <el-form-item :label="$t('uiAutomation.element.elementScreenshot')">
+                <div class="element-shot-box">
+                  <el-image
+                    v-if="selectedElement.screenshot"
+                    :src="resolveMediaUrl(selectedElement.screenshot)"
+                    fit="contain"
+                    :preview-src-list="[resolveMediaUrl(selectedElement.screenshot)]"
+                    class="element-shot-img"
+                  >
+                    <template #error>
+                      <span class="element-shot-empty">{{ $t('uiAutomation.element.noElementScreenshot') }}</span>
+                    </template>
+                  </el-image>
+                  <span v-else class="element-shot-empty">{{ $t('uiAutomation.element.noElementScreenshot') }}</span>
+                </div>
+              </el-form-item>
+
+              <el-form-item :label="$t('uiAutomation.element.primarySelector')" required>
+                <div class="locator-editor">
+                  <el-form-item prop="locator_strategy_id" class="locator-strategy-item">
+                    <el-select
+                      v-model="selectedElement.locator_strategy_id"
+                      :key="`strategy-${formKey}-${selectedElement.locator_strategy_id || 'null'}`"
+                      :placeholder="$t('uiAutomation.element.rules.strategyRequired')"
+                      style="width: 140px"
+                      @blur="validateField('locator_strategy_id')"
+                    >
+                      <el-option
+                        v-for="strategy in locatorStrategies"
+                        :key="strategy.id"
+                        :label="strategy.name"
+                        :value="strategy.id"
+                      />
+                    </el-select>
+                  </el-form-item>
+                  <el-form-item prop="locator_value" class="locator-value-item">
+                    <el-input
+                      v-model="selectedElement.locator_value"
+                      :placeholder="$t('uiAutomation.element.locatorExpressionPlaceholder')"
+                      @blur="validateField('locator_value')"
+                    />
+                  </el-form-item>
+                  <button
+                    type="button"
+                    class="locator-row-action locator-tip-toggle"
+                    :title="$t('uiAutomation.element.locatorTip.toggle')"
+                    @click="showLocatorTip = !showLocatorTip"
+                  >
+                    <el-icon class="locator-tip-toggle-icon" :class="{ expanded: showLocatorTip }">
+                      <ArrowDown />
+                    </el-icon>
+                  </button>
+                </div>
+                <div v-show="showLocatorTip" class="form-help-text">
                   {{ $t('uiAutomation.element.locatorTip.title') }}<br>
                   - {{ $t('uiAutomation.element.locatorTip.id') }}<br>
                   - {{ $t('uiAutomation.element.locatorTip.css') }}<br>
                   - {{ $t('uiAutomation.element.locatorTip.xpath') }}<br>
                   - {{ $t('uiAutomation.element.locatorTip.other') }}
+                </div>
+              </el-form-item>
+
+              <el-form-item :label="$t('uiAutomation.element.backupSelectors')">
+                <div class="backup-list">
+                  <div
+                    v-for="(backup, bIdx) in (selectedElement.backup_locators || [])"
+                    :key="backup._key || `backup-${bIdx}`"
+                    class="locator-editor backup-row"
+                  >
+                    <el-select
+                      v-model="backup.strategy"
+                      style="width: 140px"
+                      :placeholder="$t('uiAutomation.element.locatorStrategy')"
+                    >
+                      <el-option
+                        v-for="strategy in locatorStrategies"
+                        :key="strategy.id"
+                        :label="strategy.name"
+                        :value="strategy.name"
+                      />
+                    </el-select>
+                    <el-input
+                      v-model="backup.value"
+                      :placeholder="$t('uiAutomation.element.locatorExpressionPlaceholder')"
+                    />
+                    <button
+                      type="button"
+                      class="locator-row-action locator-delete-btn"
+                      @click="removeBackupLocator(bIdx)"
+                    >
+                      <el-icon><Delete /></el-icon>
+                    </button>
+                  </div>
+                  <el-button type="primary" size="small" class="add-backup-btn" @click="addBackupLocator">
+                    + {{ $t('uiAutomation.element.addBackupSelector') }}
+                  </el-button>
                 </div>
               </el-form-item>
 
@@ -506,6 +573,7 @@ const validating = ref(false)
 const moving = ref(false) // 拖拽移动锁，防止并发操作
 const generating = ref(false)
 const suggestions = ref([])
+const showLocatorTip = ref(false)
 
 
 // 将关键变量暴露到window对象，方便在控制台调试
@@ -860,13 +928,75 @@ const createEmptyElement = (preferredProjectId = null) => {
     element_type: 'BUTTON',
     page: '',
     component_name: '',
+    screenshot: '',
     locator_strategy_id: null, // 使用null而不是空字符串
     locator_value: '',
+    backup_locators: [],
     wait_timeout: 5,
     force_action: false,  // 强制操作选项，默认禁用
     description: '',
     project_id: projectId
   }
+}
+
+const resolveMediaUrl = (url) => {
+  if (!url) return ''
+  if (String(url).startsWith('data:')) return url
+  if (/^https?:\/\//i.test(url)) {
+    try {
+      const u = new URL(url)
+      if (u.pathname.startsWith('/media/')) return u.pathname + u.search
+      return url
+    } catch (e) {
+      return url
+    }
+  }
+  if (url.startsWith('/')) return url
+  return `/media/${url.replace(/^\/+/, '')}`
+}
+
+let backupKeySeq = 0
+
+/** 把策略名对齐到下拉选项的精确 name（大小写不敏感） */
+const resolveStrategyName = (name) => {
+  const n = (name || '').trim()
+  const list = locatorStrategies.value || []
+  if (!n) return list[0]?.name || 'CSS'
+  const found = list.find(s => s.name === n || s.name.toLowerCase() === n.toLowerCase())
+  return found?.name || n
+}
+
+const addBackupLocator = () => {
+  if (!selectedElement.value) return
+  if (!Array.isArray(selectedElement.value.backup_locators)) {
+    selectedElement.value.backup_locators = []
+  }
+  const primaryName = locatorStrategies.value.find(
+    s => s.id === selectedElement.value.locator_strategy_id
+  )?.name
+  selectedElement.value.backup_locators.push({
+    _key: ++backupKeySeq,
+    strategy: resolveStrategyName(primaryName),
+    value: ''
+  })
+}
+
+const removeBackupLocator = (index) => {
+  if (!Array.isArray(selectedElement.value?.backup_locators)) return
+  selectedElement.value.backup_locators.splice(index, 1)
+}
+
+/** 规范化备用定位器，保证表单可编辑 */
+const normalizeBackupLocators = (el) => {
+  if (!el) return el
+  el.backup_locators = Array.isArray(el.backup_locators)
+    ? el.backup_locators.map(b => ({
+        _key: ++backupKeySeq,
+        strategy: resolveStrategyName(b.strategy),
+        value: b.value || ''
+      }))
+    : []
+  return el
 }
 
 // 验证单个字段（用于失焦验证）
@@ -963,7 +1093,7 @@ const onNodeClick = async (data, node) => {
   if (data.type === 'element') {
     try {
       const response = await getElementDetail(data.id)
-      selectedElement.value = response.data
+      selectedElement.value = normalizeBackupLocators(response.data)
 
       // 强制刷新表单，确保下拉框正确显示
       formKey.value += 1
@@ -1185,6 +1315,9 @@ const copyElementNode = async (data) => {
       component_name: src.component_name || '',
       locator_strategy_id: src.locator_strategy_id,
       locator_value: src.locator_value,
+      backup_locators: Array.isArray(src.backup_locators)
+        ? src.backup_locators.map(b => ({ strategy: b.strategy || 'css', value: b.value || '' }))
+        : [],
       wait_timeout: src.wait_timeout,
       force_action: src.force_action,
       description: src.description || '',
@@ -1203,7 +1336,7 @@ const copyElementNode = async (data) => {
     if (createRes.data?.id) {
       try {
         const detailRes = await getElementDetail(createRes.data.id)
-        selectedElement.value = detailRes.data
+        selectedElement.value = normalizeBackupLocators(detailRes.data)
         formKey.value += 1
       } catch (e) {
         console.error('获取复制元素详情失败:', e)
@@ -1306,6 +1439,18 @@ const saveElement = async () => {
         description: selectedElement.value.description,
         locator_strategy_id: selectedElement.value.locator_strategy_id,
         locator_value: selectedElement.value.locator_value,
+        backup_locators: (() => {
+          const seen = new Set()
+          const list = []
+          for (const b of (selectedElement.value.backup_locators || [])) {
+            if (!b.strategy || !b.value) continue
+            const key = `${String(b.strategy).toLowerCase()}|${b.value}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            list.push({ strategy: b.strategy, value: b.value })
+          }
+          return list
+        })(),
         wait_timeout: selectedElement.value.wait_timeout,
         force_action: selectedElement.value.force_action,
         project_id: projectId
@@ -1340,7 +1485,7 @@ const saveElement = async () => {
 
       // 重新获取完整的元素详情以确保所有关联字段正确显示
       const detailResponse = await getElementDetail(selectedElement.value.id)
-      selectedElement.value = detailResponse.data
+      selectedElement.value = normalizeBackupLocators(detailResponse.data)
       console.log('更新后获取到完整元素详情:', selectedElement.value)
       console.log('locator_strategy_id值:', selectedElement.value.locator_strategy_id, '类型:', typeof selectedElement.value.locator_strategy_id)
       console.log('locator_strategy对象:', selectedElement.value.locator_strategy)
@@ -1367,6 +1512,18 @@ const saveElement = async () => {
       // 确保传递正确的字段名 project_id 而不是 project
       const elementData = {
         ...selectedElement.value,
+        backup_locators: (() => {
+          const seen = new Set()
+          const list = []
+          for (const b of (selectedElement.value.backup_locators || [])) {
+            if (!b.strategy || !b.value) continue
+            const key = `${String(b.strategy).toLowerCase()}|${b.value}`
+            if (seen.has(key)) continue
+            seen.add(key)
+            list.push({ strategy: b.strategy, value: b.value })
+          }
+          return list
+        })(),
         project_id: projectId
       }
 
@@ -1409,7 +1566,7 @@ const saveElement = async () => {
 
       // 重新获取完整的元素详情以确保所有关联字段正确显示
       const detailResponse = await getElementDetail(response.data.id)
-      selectedElement.value = detailResponse.data
+      selectedElement.value = normalizeBackupLocators(detailResponse.data)
       console.log('获取到完整元素详情:', selectedElement.value)
       console.log('locator_strategy_id值:', selectedElement.value.locator_strategy_id, '类型:', typeof selectedElement.value.locator_strategy_id)
       console.log('locator_strategy对象:', selectedElement.value.locator_strategy)
@@ -1583,7 +1740,7 @@ const editNode = async () => {
     // 编辑元素 - 通过API获取完整的元素详情，避免使用树节点的复杂数据
     try {
       const response = await getElementDetail(rightClickedNode.value.id)
-      selectedElement.value = response.data
+      selectedElement.value = normalizeBackupLocators(response.data)
       console.log('Set selected element for editing via API:', selectedElement.value)
 
       // 强制刷新表单，确保下拉框正确显示
@@ -1931,6 +2088,126 @@ const convertUnassignedPageToGroup = async () => {
   font-size: 12px;
   color: #909399;
   margin-top: 5px;
+}
+
+.element-shot-box {
+  width: 120px;
+  height: 120px;
+  border: 1px solid #dcdfe6;
+  border-radius: 4px;
+  overflow: hidden;
+  background: #f5f7fa;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.element-shot-img {
+  width: 120px;
+  height: 120px;
+}
+
+.element-shot-empty {
+  font-size: 12px;
+  color: #909399;
+  text-align: center;
+  padding: 4px;
+}
+
+.locator-editor {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+}
+
+.locator-strategy-item,
+.locator-value-item {
+  margin-bottom: 0;
+}
+
+.locator-strategy-item {
+  flex-shrink: 0;
+  width: 140px;
+}
+
+.locator-strategy-item :deep(.el-form-item__content) {
+  margin-left: 0 !important;
+}
+
+.locator-value-item {
+  flex: 1;
+  min-width: 0;
+}
+
+.locator-value-item :deep(.el-form-item__content) {
+  width: 100%;
+}
+
+.locator-tip-toggle {
+  color: #909399;
+}
+
+.locator-tip-toggle:hover {
+  color: #409eff;
+}
+
+.locator-tip-toggle-icon {
+  transition: transform 0.2s;
+}
+
+.locator-tip-toggle-icon.expanded {
+  transform: rotate(180deg);
+}
+
+.locator-row-action {
+  flex-shrink: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  padding: 0;
+  margin: 0;
+  border: none;
+  background: transparent;
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.locator-row-action:hover,
+.locator-row-action:focus {
+  border: none;
+  background: transparent;
+  outline: none;
+}
+
+.locator-delete-btn {
+  color: #f56c6c;
+}
+
+.locator-delete-btn:hover {
+  color: #f78989;
+}
+
+.backup-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  width: 100%;
+}
+
+.backup-row {
+  width: 100%;
+}
+
+.backup-row .el-input {
+  flex: 1;
+}
+
+.add-backup-btn {
+  align-self: flex-start;
 }
 
 .force-action-row {

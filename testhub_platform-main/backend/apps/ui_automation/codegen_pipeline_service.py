@@ -73,10 +73,14 @@ def parse_recorded(content: str, language: str = 'python') -> dict[str, Any]:
     pages: list[str] = []
 
     goto_re = re.compile(r'''\.goto\(\s*["']([^"']+)["']''')
-    # 定位器参数可能含 nth-child(3) 等括号；动作前可能有 .first / .nth(1) 链
+    # 定位器参数可能含 nth-child(3) 等括号；动作前可能有 .first / .nth(1) / .filter(...) 链
+    # codegen 常见：page.locator("span").filter(has_text="个人中心").click()
+    _arg = r'''(?:[^()"']|"[^"]*"|'[^']*'|\([^()]*\))*'''
+    _chain = rf'''(?:\.(?:first|last|nth\(\s*\d+\s*\)|filter\({_arg}\)))*'''
     _loc = (
-        r'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\((?:[^()"']|"[^"]*"|'[^']*')*\)'''
-        r'''(?:\.(?:first|last|nth\(\s*\d+\s*\)))*)'''
+        rf'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\({_arg}\)'''
+        + _chain
+        + r''')'''
     )
     fill_re = re.compile(_loc + r'''\.fill\(\s*["'](?P<val>[^"']*)["']''')
     click_re = re.compile(_loc + r'''\.click\(''')
@@ -85,7 +89,8 @@ def parse_recorded(content: str, language: str = 'python') -> dict[str, Any]:
     locator_lit_re = re.compile(
         r'''(?:get_by_role|get_by_label|get_by_text|get_by_placeholder|get_by_test_id|'''
         r'''locator|getByRole|getByLabel|getByText|getByPlaceholder|getByTestId)'''
-        r'''\((?:[^()"']|"[^"]*"|'[^']*')*\)(?:\.(?:first|last|nth\(\s*\d+\s*\)))*'''
+        + rf'''\({_arg}\)'''
+        + _chain
     )
 
     for idx, line in enumerate(lines, start=1):
@@ -1188,6 +1193,218 @@ def _method_name_from_locator(sel: str, idx: int) -> str:
     return f'el_{idx}'
 
 
+_ROLE_TYPE_ZH = {
+    'button': '按钮',
+    'textbox': '输入框',
+    'text box': '输入框',
+    'searchbox': '搜索框',
+    'link': '链接',
+    'checkbox': '复选框',
+    'radio': '单选框',
+    'combobox': '下拉框',
+    'listbox': '下拉框',
+    'option': '选项',
+    'menuitem': '菜单项',
+    'menuitemcheckbox': '菜单项',
+    'menuitemradio': '菜单项',
+    'tab': '标签',
+    'switch': '开关',
+    'img': '图片',
+    'image': '图片',
+    'heading': '标题',
+    'spinbutton': '输入框',
+}
+
+_ELEMENT_TYPE_ZH = {
+    'INPUT': '输入框',
+    'BUTTON': '按钮',
+    'LINK': '链接',
+    'DROPDOWN': '下拉框',
+    'CHECKBOX': '复选框',
+    'RADIO': '单选框',
+    'TEXT': '文本',
+    'IMAGE': '图片',
+    'CONTAINER': '容器',
+    'TABLE': '表格',
+    'FORM': '表单',
+    'MODAL': '弹窗',
+}
+
+_ROLE_TO_ELEMENT_TYPE = {
+    'button': 'BUTTON',
+    'link': 'LINK',
+    'textbox': 'INPUT',
+    'searchbox': 'INPUT',
+    'spinbutton': 'INPUT',
+    'checkbox': 'CHECKBOX',
+    'radio': 'RADIO',
+    'combobox': 'DROPDOWN',
+    'listbox': 'DROPDOWN',
+    'img': 'IMAGE',
+    'image': 'IMAGE',
+}
+
+
+def _clean_display_label(label: str) -> str:
+    """去掉 recorded_ / record_ 前缀，整理可读标签。"""
+    text = (label or '').strip()
+    if not text:
+        return ''
+    text = re.sub(r'^(?:recorded?_)+', '', text, flags=re.I)
+    text = re.sub(r'[_]+', ' ', text).strip()
+    text = re.sub(r'\s+', ' ', text)
+    return text[:80]
+
+
+def _filter_has_text(raw: str) -> str:
+    """从 .filter(has_text=...) / .filter({ hasText: ... }) 提取文案。"""
+    m = re.search(
+        r'''\.filter\(\s*(?:has_text|hasText)\s*=\s*["']([^"']+)["']'''
+        r'''|\.filter\(\s*\{\s*hasText\s*:\s*["']([^"']+)["']''',
+        raw or '',
+        re.I,
+    )
+    if not m:
+        return ''
+    return (m.group(1) or m.group(2) or '').strip()
+
+
+def _extract_locator_label_and_kind(locator: str, action: str = '') -> tuple[str, str, str]:
+    """
+    从 Playwright 定位表达式提取 (显示标签, 控件类型中文, Element.element_type)。
+    例如 get_by_role("button", name="登录") → ("登录", "按钮", "BUTTON")
+    """
+    raw = _strip_page_prefix(locator or '')
+    action_l = (action or '').lower()
+    default_type = _element_type_for_action(action_l)
+    default_kind = _ELEMENT_TYPE_ZH.get(default_type, '元素')
+
+    if not raw:
+        return '', default_kind, default_type
+
+    # locator("span").filter(has_text="个人中心") → 用文案作标签
+    filter_text = _filter_has_text(raw)
+    if filter_text:
+        return _clean_display_label(filter_text) or default_kind, default_kind, default_type
+
+    role_m = re.search(
+        r'''(?:get_by_role|getByRole)\(\s*["']([^"']+)["'](?:[^)]*name\s*[:=]\s*["']([^"']*)["'])?''',
+        raw,
+        re.I,
+    )
+    if role_m:
+        role = (role_m.group(1) or '').strip().lower()
+        name = _clean_display_label(role_m.group(2) or '')
+        kind = _ROLE_TYPE_ZH.get(role, default_kind)
+        el_type = _ROLE_TO_ELEMENT_TYPE.get(role, default_type)
+        if not name:
+            name = kind
+        return name, kind, el_type
+
+    for method, kind, el_type in (
+        ('get_by_placeholder|getByPlaceholder', '输入框', 'INPUT'),
+        ('get_by_label|getByLabel', '输入框', 'INPUT'),
+        ('get_by_text|getByText', '文本', 'TEXT'),
+        ('get_by_title|getByTitle', '元素', default_type),
+        ('get_by_alt_text|getByAltText', '图片', 'IMAGE'),
+        ('get_by_test_id|getByTestId', default_kind, default_type),
+    ):
+        m = re.search(rf'''(?:{method})\(\s*["']([^"']+)["']''', raw, re.I)
+        if m:
+            label = _clean_display_label(m.group(1))
+            return label or kind, kind, el_type
+
+    loc_m = re.search(r'''(?:locator)\(\s*["']([^"']+)["']''', raw, re.I)
+    if loc_m:
+        val = loc_m.group(1).strip()
+        # #username / [name="user"] / input[placeholder="..."]
+        id_m = re.match(r'#([\w\-]+)', val)
+        if id_m:
+            return _clean_display_label(id_m.group(1)) or default_kind, default_kind, default_type
+        name_m = re.search(r'''\[(?:name|aria-label|placeholder|title)\s*=\s*["']([^"']+)["']''', val, re.I)
+        if name_m:
+            label = _clean_display_label(name_m.group(1))
+            kind = default_kind
+            if 'placeholder' in val.lower() or re.search(r'\binput\b', val, re.I):
+                kind, default_type = '输入框', 'INPUT'
+            elif re.search(r'\bbutton\b', val, re.I):
+                kind, default_type = '按钮', 'BUTTON'
+            elif re.search(r'\ba\b', val, re.I):
+                kind, default_type = '链接', 'LINK'
+            return label or kind, kind, default_type
+        # 取末段有意义文本
+        text_m = re.search(r'''["']([^"']{1,40})["']\s*$''', val)
+        if text_m:
+            return _clean_display_label(text_m.group(1)) or default_kind, default_kind, default_type
+        cleaned = _clean_display_label(re.sub(r'[^\w\u4e00-\u9fff\-]+', ' ', val))
+        if cleaned:
+            return cleaned[:40], default_kind, default_type
+
+    # 回退：任意引号内文案
+    m = re.search(r'''["']([^"']{1,40})["']''', raw)
+    if m:
+        return _clean_display_label(m.group(1)) or default_kind, default_kind, default_type
+
+    method = _clean_display_label(_method_name_from_locator(raw, 0))
+    return method or default_kind, default_kind, default_type
+
+
+def _build_step_description(
+    *,
+    action: str,
+    locator: str = '',
+    url: str = '',
+    value: str = '',
+    raw: str = '',
+    element_name: str = '',
+    element_type: str = '',
+) -> str:
+    """生成可读的步骤描述，如「点击「登录」按钮」，不含 recorded_ 前缀。"""
+    action_l = (action or '').lower()
+    label, kind, inferred_type = _extract_locator_label_and_kind(locator, action_l)
+    el_type = element_type or inferred_type
+    if not kind and el_type:
+        kind = _ELEMENT_TYPE_ZH.get(el_type, '元素')
+    if not label:
+        label = _clean_display_label(element_name) or kind or '元素'
+
+    if action_l == 'navigate':
+        return f'跳转到 {url}' if url else '跳转到页面'
+
+    if action_l == 'click':
+        if kind in ('文本', '元素') or label == kind:
+            return f'点击「{label}」'
+        return f'点击「{label}」{kind}'
+
+    if action_l == 'fill':
+        ctrl = kind if kind not in ('文本', '元素') else '输入框'
+        if value:
+            shown = value if len(value) <= 40 else value[:37] + '...'
+            return f'在「{label}」{ctrl}中输入「{shown}」'
+        return f'在「{label}」{ctrl}中输入'
+
+    if action_l == 'select':
+        ctrl = kind if kind not in ('文本', '元素') else '下拉框'
+        if value:
+            return f'在「{label}」{ctrl}中选择「{value}」'
+        return f'在「{label}」{ctrl}中选择'
+
+    if action_l == 'assert':
+        assert_type, assert_value = _infer_assert_fields(raw)
+        target = f'「{label}」' if label else '元素'
+        if assert_type == 'urlContains':
+            return f'断言 URL 包含「{assert_value}」' if assert_value else '断言 URL'
+        if assert_type == 'textContains':
+            return f'断言{target}文本包含「{assert_value}」' if assert_value else f'断言{target}文本'
+        if assert_type == 'textEquals':
+            return f'断言{target}文本等于「{assert_value}」' if assert_value else f'断言{target}文本'
+        if assert_type == 'hasAttribute':
+            return f'断言{target}具有属性「{assert_value}」' if assert_value else f'断言{target}属性'
+        return f'断言{target}可见'
+
+    return f'操作「{label}」{kind}'
+
+
 def _strip_page_prefix(locator: str) -> str:
     s = (locator or '').strip()
     if s.startswith('page.'):
@@ -1218,6 +1435,20 @@ def _parse_playwright_locator(locator: str) -> tuple[str, str]:
         return 'css', ''
 
     nth_suffix = _extract_locator_nth_suffix(raw)
+
+    # locator(...).filter(has_text="...") / get_by_role(...).filter(has_text=...)
+    filter_text = _filter_has_text(raw)
+    if filter_text:
+        role_m = re.search(r'''(?:get_by_role|getByRole)\(\s*["']([^"']+)["']''', raw, re.I)
+        if role_m:
+            role = role_m.group(1)
+            if '"' in filter_text and "'" not in filter_text:
+                base = f"{role}[name='{filter_text}']"
+            else:
+                safe = filter_text.replace('\\', '\\\\').replace('"', '\\"')
+                base = f'{role}[name="{safe}"]'
+            return 'role', f'{base}{nth_suffix}'
+        return 'text', f'{filter_text}{nth_suffix}'
 
     # python: get_by_role("button", name="登录") / js: getByRole('button', { name: '登录' })
     # 保留 role+name，写入 Playwright role 选择器：button[name="登录"]
@@ -1273,6 +1504,8 @@ def _resolve_locator_strategy(strategy_name: str):
         'id': ['id', 'ID', 'Id'],
         'text': ['text', 'Text', 'TEXT'],
         'name': ['name', 'Name', 'NAME'],
+        'class': ['class', 'Class', 'class name', 'CLASS'],
+        'tag': ['tag', 'Tag', 'tag name'],
         'placeholder': ['placeholder', 'Placeholder'],
         'role': ['role', 'Role', 'ROLE'],
         'label': ['label', 'Label', 'LABEL'],
@@ -1335,6 +1568,7 @@ def _get_or_create_element_from_locator(
     page_name: str,
     cache: dict[str, Any],
     idx: int,
+    capture: dict[str, Any] | None = None,
 ) -> tuple[Any, bool] | tuple[None, bool]:
     """按定位表达式匹配或创建 Element，返回 (element, created)。"""
     from .models import Element
@@ -1343,7 +1577,10 @@ def _get_or_create_element_from_locator(
     if not key:
         return None, False
     if key in cache:
-        return cache[key], False
+        element = cache[key]
+        if capture:
+            _apply_capture_to_element(element, capture, primary_strategy=_parse_playwright_locator(key)[0], primary_value=_parse_playwright_locator(key)[1])
+        return element, False
 
     strategy_name, locator_value = _parse_playwright_locator(key)
     if not locator_value:
@@ -1367,12 +1604,20 @@ def _get_or_create_element_from_locator(
                 if not existing.page:
                     existing.page = group.name
                 existing.save(update_fields=['group', 'page'])
+        if capture:
+            _apply_capture_to_element(existing, capture, primary_strategy=strategy_name, primary_value=locator_value)
         cache[key] = existing
         return existing, False
 
-    method = _method_name_from_locator(key, idx)
-    name = f'recorded_{method}'[:200]
-    base_name = name
+    label, kind, el_type = _extract_locator_label_and_kind(key, action)
+    # 可读名称：如「登录按钮」「用户名输入框」，避免 recorded_ 前缀
+    if label and kind and label != kind:
+        base_name = f'{label}{kind}'[:200]
+    elif label:
+        base_name = label[:200]
+    else:
+        base_name = kind or _clean_display_label(_method_name_from_locator(key, idx)) or f'元素{idx + 1}'
+    name = base_name
     n = 1
     while Element.objects.filter(project=project, name=name).exists():
         name = f'{base_name}_{n}'[:200]
@@ -1385,7 +1630,7 @@ def _get_or_create_element_from_locator(
         project=project,
         name=name,
         description=f'录制步骤自动创建: {key[:200]}',
-        element_type=_element_type_for_action(action),
+        element_type=el_type or _element_type_for_action(action),
         locator_strategy=strategy,
         locator_value=locator_value[:500],
         page=(page_name or '')[:200],
@@ -1393,8 +1638,282 @@ def _get_or_create_element_from_locator(
         created_by=user,
         validation_status='UNKNOWN',
     )
+    if capture:
+        _apply_capture_to_element(element, capture, primary_strategy=strategy_name, primary_value=locator_value)
     cache[key] = element
     return element, True
+
+
+def _load_recording_captures(recorded_name: str = '', captures_path: str = '') -> list[dict[str, Any]]:
+    """读取录制 sidecar：media/.../recorded/{name}.captures.json。"""
+    import json
+
+    root = Path(settings.MEDIA_ROOT) / 'ui-automation' / 'recorded'
+    candidates: list[Path] = []
+    if captures_path:
+        candidates.append(Path(captures_path))
+    if recorded_name:
+        name = str(recorded_name).strip()
+        candidates.append(root / f'{name}.captures.json')
+        candidates.append(root / name)
+        if not name.endswith('.captures.json'):
+            candidates.append(root / f'{name}.captures.json')
+        # case_8_record → case_8_record.py.captures.json
+        if not name.endswith('.py'):
+            candidates.append(root / f'{name}.py.captures.json')
+        stem = name
+        for suffix in ('.captures.json', '.py', '.js', '.spec.ts'):
+            if stem.endswith(suffix):
+                stem = stem[: -len(suffix)]
+        if stem:
+            candidates.append(root / f'{stem}.py.captures.json')
+            candidates.append(root / f'{stem}.captures.json')
+
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            if not (path.suffix == '.json' or str(path).endswith('.captures.json')):
+                continue
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if isinstance(data, list) and data:
+                logger.info('loaded captures from %s count=%s', path, len(data))
+                return data
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('load captures failed %s: %s', path, exc)
+
+    # 兜底：取 recorded 目录下最新的 *.captures.json
+    try:
+        newest = sorted(root.glob('*.captures.json'), key=lambda p: p.stat().st_mtime, reverse=True)
+        for path in newest[:3]:
+            data = json.loads(path.read_text(encoding='utf-8'))
+            if isinstance(data, list) and data:
+                logger.info('loaded captures fallback %s count=%s', path, len(data))
+                return data
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('captures fallback failed: %s', exc)
+    return []
+
+
+def _is_junk_capture_locator(strategy: str, value: str) -> bool:
+    v = (value or '').lower()
+    return 'x-pw-glass' in v or 'playwright-inspector' in v or 'pw-glass' in v
+
+
+def _is_junk_capture(capture: dict[str, Any]) -> bool:
+    tag = (capture.get('tag') or '').lower()
+    if tag.startswith('x-pw-') or tag == 'x-pw-glass':
+        return True
+    locs = capture.get('locators') or []
+    if not locs:
+        return True
+    return all(_is_junk_capture_locator(l.get('strategy') or '', l.get('value') or '') for l in locs)
+
+
+def _capture_match_score(capture: dict[str, Any], primary_strategy: str, primary_value: str) -> int:
+    """录制采集与 codegen 主定位器的相似度（越高越匹配）。"""
+    if _is_junk_capture(capture):
+        return 0
+    primary_s = (primary_strategy or '').strip().lower()
+    primary_v = (primary_value or '').strip()
+    if not primary_v:
+        return 0
+    score = 0
+    for loc in capture.get('locators') or []:
+        strategy = (loc.get('strategy') or '').strip().lower()
+        value = (loc.get('value') or '').strip()
+        if not value or _is_junk_capture_locator(strategy, value):
+            continue
+        if value == primary_v:
+            score = max(score, 100 if strategy == primary_s else 80)
+        elif primary_v in value or value in primary_v:
+            score = max(score, 40)
+        elif primary_s and strategy == primary_s and (
+            primary_v[:20] in value or value[:20] in primary_v
+        ):
+            score = max(score, 30)
+    return score
+
+
+def _take_best_capture(
+    captures: list[dict[str, Any]],
+    used: set[int],
+    *,
+    primary_strategy: str,
+    primary_value: str,
+    sequential_idx: int,
+) -> dict[str, Any] | None:
+    """优先按内容匹配未使用的 capture，其次按顺序消费。不分配 junk/零分 capture。"""
+    best_i = -1
+    best_score = 0
+    for i, cap in enumerate(captures):
+        if i in used or _is_junk_capture(cap):
+            continue
+        score = _capture_match_score(cap, primary_strategy, primary_value)
+        if score > best_score:
+            best_score = score
+            best_i = i
+    if best_i >= 0 and best_score >= 30:
+        used.add(best_i)
+        return captures[best_i]
+    # 回退顺序：仅当尚未用过 sequential_idx 且非 junk
+    if 0 <= sequential_idx < len(captures) and sequential_idx not in used:
+        cap = captures[sequential_idx]
+        if not _is_junk_capture(cap):
+            used.add(sequential_idx)
+            return cap
+    return None
+
+
+def _canonicalize_backup_strategy(strategy_name: str) -> str:
+    """对齐 LocatorStrategy.name；失败则保留原名。策略可重复出现在备用列表中。"""
+    from .models import LocatorStrategy
+
+    name = (strategy_name or '').strip()
+    if not name:
+        return ''
+    aliases = {
+        'css': ['css', 'CSS', 'css selector', 'CSS Selector'],
+        'xpath': ['xpath', 'XPath', 'XPATH'],
+        'id': ['id', 'ID', 'Id'],
+        'text': ['text', 'Text', 'TEXT'],
+        'name': ['name', 'Name', 'NAME'],
+        'class': ['class', 'Class', 'class name', 'CLASS'],
+        'tag': ['tag', 'Tag', 'tag name'],
+        'placeholder': ['placeholder', 'Placeholder'],
+        'role': ['role', 'Role', 'ROLE'],
+        'label': ['label', 'Label', 'LABEL'],
+        'title': ['title', 'Title', 'TITLE'],
+        'test-id': ['test-id', 'testid', 'test_id', 'data-testid', 'Test ID'],
+    }
+    try:
+        for cand in aliases.get(name.lower(), [name]):
+            obj = LocatorStrategy.objects.filter(name__iexact=cand).first()
+            if obj:
+                return obj.name
+        obj = LocatorStrategy.objects.filter(name__iexact=name).first()
+        if obj:
+            return obj.name
+    except Exception:  # noqa: BLE001
+        pass
+    return name
+
+
+def _apply_capture_to_element(
+    element,
+    capture: dict[str, Any],
+    *,
+    primary_strategy: str,
+    primary_value: str,
+) -> None:
+    """把录制采集的备用定位器与控件截图写入 Element。
+
+    规则：定位策略可重复；同一策略下同一表达式不可重复（大小写不敏感的策略名 + 精确表达式）。
+    """
+    from django.core.files.base import ContentFile
+    import base64
+
+    update_fields: list[str] = []
+    locators = capture.get('locators') or []
+    backups: list[dict[str, str]] = []
+    seen: set[tuple[str, str]] = set()
+    primary_s = (primary_strategy or '').strip().lower()
+    primary_v = (primary_value or '').strip()
+    for loc in locators:
+        raw_strategy = (loc.get('strategy') or '').strip()
+        value = (loc.get('value') or '').strip()
+        if not raw_strategy or not value:
+            continue
+        if _is_junk_capture_locator(raw_strategy, value):
+            continue
+        if raw_strategy.lower() == primary_s and value == primary_v:
+            continue
+        strategy = _canonicalize_backup_strategy(raw_strategy)
+        key = (strategy.lower(), value)
+        if key in seen:
+            continue
+        seen.add(key)
+        backups.append({'strategy': strategy, 'value': value[:500]})
+
+    if backups:
+        # 录制采集为准：覆盖旧备用，避免历史空/脏数据挡掉新结果
+        element.backup_locators = backups
+        update_fields.append('backup_locators')
+
+    shot_b64 = capture.get('screenshot_b64') or ''
+    if shot_b64:
+        try:
+            raw = base64.b64decode(shot_b64)
+            element.screenshot.save(
+                f'element_{element.pk or "new"}_{int(timezone.now().timestamp())}.png',
+                ContentFile(raw),
+                save=False,
+            )
+            update_fields.append('screenshot')
+        except Exception as exc:  # noqa: BLE001
+            logger.warning('save element screenshot failed: %s', exc)
+
+    if update_fields:
+        element.save(update_fields=update_fields)
+
+
+def _element_screenshot_url(element) -> str:
+    """控件截图可访问地址：优先 data URI（不依赖 /media 代理），否则相对 /media/ 路径。"""
+    import base64
+    import os
+    from urllib.parse import urlparse
+
+    if not element:
+        return ''
+    try:
+        if not element.screenshot:
+            return ''
+    except Exception:  # noqa: BLE001
+        return ''
+
+    try:
+        path = element.screenshot.path
+        if path and os.path.isfile(path):
+            size = os.path.getsize(path)
+            # 控件截图通常很小；给步骤/列表内联，避免跨域/代理丢图
+            if 0 < size <= 300_000:
+                with open(path, 'rb') as fh:
+                    raw = fh.read()
+                return f'data:image/png;base64,{base64.b64encode(raw).decode("ascii")}'
+    except Exception:  # noqa: BLE001
+        pass
+
+    try:
+        url = element.screenshot.url or ''
+        if url.startswith('http://') or url.startswith('https://'):
+            return urlparse(url).path or url
+        if url and not url.startswith('/'):
+            return f'/media/{url.lstrip("/")}'
+        return url
+    except Exception:  # noqa: BLE001
+        return ''
+
+
+def _element_step_extras(element) -> dict[str, Any]:
+    """步骤 DTO 上附带的元素展示字段。"""
+    if not element:
+        return {
+            'element_name': '',
+            'element_locator': '',
+            'element_locator_strategy': '',
+            'element_backup_locators': [],
+            'element_screenshot': '',
+        }
+    return {
+        'element_name': element.name or '',
+        'element_locator': element.locator_value or '',
+        'element_locator_strategy': (
+            element.locator_strategy.name if element.locator_strategy_id else ''
+        ),
+        'element_backup_locators': list(element.backup_locators or []),
+        'element_screenshot': _element_screenshot_url(element),
+    }
+
 
 
 def _infer_assert_fields(raw: str) -> tuple[str, str]:
@@ -1420,6 +1939,8 @@ def map_parse_to_case_steps(
     content: str,
     language: str = 'python',
     create_elements: bool = True,
+    recorded_name: str = '',
+    captures_path: str = '',
 ) -> dict[str, Any]:
     """
     将录制脚本解析为用例管理可用的步骤列表。
@@ -1429,6 +1950,9 @@ def map_parse_to_case_steps(
     pages = parse.get('pages') or []
     default_page = pages[0]['name'] if pages else 'main'
     urls = parse.get('urls') or []
+    captures = _load_recording_captures(recorded_name=recorded_name, captures_path=captures_path)
+    capture_used: set[int] = set()
+    capture_seq = 0
 
     element_cache: dict[str, Any] = {}
     created_ids: list[int] = []
@@ -1452,13 +1976,24 @@ def map_parse_to_case_steps(
                 'wait_time': 1000,
                 'assert_type': '',
                 'assert_value': '',
-                'description': f'跳转到 {url}' if url else '跳转 URL',
+                'description': _build_step_description(action='navigate', url=url, raw=raw)[:500],
                 'raw': raw,
+                **_element_step_extras(None),
             })
             continue
 
         element = None
+        capture = None
         if create_elements and locator:
+            strategy_name, locator_value = _parse_playwright_locator(locator)
+            capture = _take_best_capture(
+                captures,
+                capture_used,
+                primary_strategy=strategy_name,
+                primary_value=locator_value,
+                sequential_idx=capture_seq,
+            )
+            capture_seq += 1
             element, created = _get_or_create_element_from_locator(
                 project=project,
                 user=user,
@@ -1467,9 +2002,12 @@ def map_parse_to_case_steps(
                 page_name=current_page,
                 cache=element_cache,
                 idx=idx,
+                capture=capture,
             )
             if created and element:
                 created_ids.append(element.id)
+
+        extras = _element_step_extras(element)
 
         if action == 'assert':
             assert_type, assert_value = _infer_assert_fields(raw)
@@ -1481,20 +2019,29 @@ def map_parse_to_case_steps(
                 'wait_time': 1000,
                 'assert_type': assert_type,
                 'assert_value': assert_value,
-                'description': raw[:200] or '断言',
+                'description': _build_step_description(
+                    action='assert',
+                    locator=locator,
+                    raw=raw,
+                    element_name=element.name if element else '',
+                    element_type=element.element_type if element else '',
+                )[:500],
                 'raw': raw,
+                **extras,
             })
             continue
 
         # click / fill / select（用例无 select，映射为 fill）
         action_type = 'fill' if action in ('fill', 'select') else 'click'
         input_value = step.get('value') or ''
-        if action == 'click':
-            desc = f'点击 {element.name}' if element else (raw[:120] or '点击')
-        elif action == 'fill':
-            desc = f'输入到 {element.name}' if element else (raw[:120] or '输入')
-        else:
-            desc = f'选择 {element.name}' if element else (raw[:120] or '选择')
+        desc = _build_step_description(
+            action=action,
+            locator=locator,
+            value=input_value,
+            raw=raw,
+            element_name=element.name if element else '',
+            element_type=element.element_type if element else '',
+        )
 
         mapped.append({
             'action_type': action_type,
@@ -1506,6 +2053,7 @@ def map_parse_to_case_steps(
             'assert_value': '',
             'description': desc[:500],
             'raw': raw,
+            **extras,
         })
 
     if urls and not any(s.get('action_type') == 'navigateUrl' for s in mapped):
@@ -1517,8 +2065,9 @@ def map_parse_to_case_steps(
             'wait_time': 1000,
             'assert_type': '',
             'assert_value': '',
-            'description': f'跳转到 {urls[0]}',
+            'description': _build_step_description(action='navigate', url=urls[0])[:500],
             'raw': '',
+            **_element_step_extras(None),
         })
 
     return {
@@ -1527,6 +2076,7 @@ def map_parse_to_case_steps(
         'step_count': len(mapped),
         'created_element_ids': created_ids,
         'target_url': parse.get('target_url') or (urls[0] if urls else ''),
+        'captures_used': len(capture_used),
     }
 
 
@@ -1613,3 +2163,51 @@ def conversion_to_dict(conversion) -> dict[str, Any]:
         'created_at': conversion.created_at.isoformat() if conversion.created_at else None,
         'updated_at': conversion.updated_at.isoformat() if conversion.updated_at else None,
     }
+
+
+if __name__ == '__main__':
+    # ponytail: 匹配逻辑自检，改评分规则时应先挂这里
+    _caps = [
+        {'locators': [
+            {'strategy': 'css', 'value': 'input[name="password"]'},
+            {'strategy': 'placeholder', 'value': '请输入密码'},
+        ]},
+        {'locators': [
+            {'strategy': 'role', 'value': 'button[name="登录"]'},
+        ]},
+    ]
+    _used: set[int] = set()
+    assert _take_best_capture(
+        _caps, _used, primary_strategy='css', primary_value='input[name="password"]', sequential_idx=1
+    ) is _caps[0]
+    assert _take_best_capture(
+        _caps, _used, primary_strategy='role', primary_value='button[name="登录"]', sequential_idx=0
+    ) is _caps[1]
+    assert _capture_match_score(_caps[0], 'css', 'input[name="password"]') >= 80
+
+    # 同策略多表达式：均可保留；同策略同表达式去重
+    _multi = [
+        {'strategy': 'css', 'value': '#pwd'},
+        {'strategy': 'css', 'value': 'input[name="password"]'},
+        {'strategy': 'CSS', 'value': 'input[name="password"]'},  # 策略大小写不同但表达式相同 → 去重
+        {'strategy': 'xpath', 'value': '//*[@id="pwd"]'},
+        {'strategy': 'xpath', 'value': '/html/body/input[1]'},
+    ]
+    _seen: set[tuple[str, str]] = set()
+    _kept: list[tuple[str, str]] = []
+    for _loc in _multi:
+        _s = (_loc['strategy'] or '').strip()
+        _v = (_loc['value'] or '').strip()
+        _key = (_s.lower(), _v)
+        if _key in _seen:
+            continue
+        _seen.add(_key)
+        _kept.append((_s.lower(), _v))
+    assert _kept == [
+        ('css', '#pwd'),
+        ('css', 'input[name="password"]'),
+        ('xpath', '//*[@id="pwd"]'),
+        ('xpath', '/html/body/input[1]'),
+    ], _kept
+    print('capture_match selfcheck ok')
+

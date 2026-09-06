@@ -22,7 +22,7 @@ class TestCaseListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = TestCasePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['priority', 'test_type', 'project']
+    filterset_fields = ['priority', 'test_type', 'case_type', 'project']
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'updated_at', 'priority']
     ordering = ['-created_at']
@@ -150,6 +150,12 @@ TYPE_MAP = {
     '安全测试': 'security', 'security': 'security',
 }
 
+CASE_TYPE_MAP = {
+    '手工': 'manual', 'manual': 'manual',
+    'UI': 'ui', 'ui': 'ui',
+    '接口': 'api', 'api': 'api',
+}
+
 
 @api_view(['POST'])
 @permission_classes([permissions.IsAuthenticated])
@@ -275,6 +281,8 @@ def import_testcases_view(request):
         priority = PRIORITY_MAP.get(priority_val, 'P2') if priority_val else None
         test_type_val = str(case.get('test_type', '')).strip()
         test_type = TYPE_MAP.get(test_type_val, 'functional') if test_type_val else None
+        case_type_val = str(case.get('case_type', '')).strip()
+        case_type = CASE_TYPE_MAP.get(case_type_val, 'manual') if case_type_val else None
 
         prepared.append({
             'row': idx,
@@ -286,6 +294,7 @@ def import_testcases_view(request):
             'versions': versions,
             'priority': priority,
             'test_type': test_type,
+            'case_type': case_type,
         })
 
     # 任一报错：整批不导入
@@ -311,6 +320,7 @@ def import_testcases_view(request):
                 versions = item['versions']
                 priority = item['priority']
                 test_type = item['test_type']
+                case_type = item['case_type']
 
                 # 事务内按需创建项目（同名复用）
                 if not project and item['create_project_name']:
@@ -340,6 +350,8 @@ def import_testcases_view(request):
                         instance.priority = priority
                     if test_type:
                         instance.test_type = test_type
+                    if case_type:
+                        instance.case_type = case_type
                     l1_val = str(case.get('l1', '')).strip()
                     if l1_val:
                         instance.l1 = l1_val[:500]
@@ -371,6 +383,7 @@ def import_testcases_view(request):
                         steps=str(case.get('steps', '')).strip()[:1000],
                         expected_result=str(case.get('expected_result', '')).strip(),
                         priority=priority or 'P2',
+                        case_type=case_type or 'manual',
                         test_type=test_type or 'functional',
                         l1=str(case.get('l1', '')).strip()[:500],
                         l2=str(case.get('l2', '')).strip()[:500],

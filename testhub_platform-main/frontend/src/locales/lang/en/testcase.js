@@ -25,6 +25,14 @@ export default {
     priority: 'Priority',
     status: 'Status',
     testType: 'Test Type',
+    caseType: 'Case Type',
+    tabBasic: 'Basic Info',
+    tabUi: 'UI Automation',
+    tabApi: 'API Automation',
+    tabEmpty: 'No content yet',
+    goEdit: 'Go to Edit',
+    aiGenerateSteps: 'AI Generate Steps',
+    aiGenerateStepsTodo: 'AI generate steps is coming soon',
     preconditions: 'Preconditions',
     steps: 'Steps',
     expectedResult: 'Expected Result',
@@ -54,6 +62,11 @@ export default {
     active: 'Active',
     deprecated: 'Deprecated',
 
+    // Case types
+    caseTypeManual: 'Manual',
+    caseTypeUi: 'UI',
+    caseTypeApi: 'API',
+
     // Test types
     functional: 'Functional Testing',
     integration: 'Integration Testing',
@@ -70,12 +83,14 @@ export default {
     selectProject: 'Select project',
     selectPriority: 'Select priority',
     selectTestType: 'Select test type',
+    selectCaseType: 'Select case type',
     selectStatus: 'Select status',
     selectVersions: 'Select versions (multiple)',
     preconditionsPlaceholder: 'Enter preconditions',
     stepsPlaceholder: 'Enter detailed steps, e.g.:\n1. Open login page\n2. Enter username and password\n3. Click login button\n4. Verify login result',
     expectedResultPlaceholder: 'Enter overall expected result',
     priorityFilter: 'Priority Filter',
+    caseTypeFilter: 'Case Type Filter',
     statusFilter: 'Status Filter',
 
     // Messages
@@ -133,6 +148,7 @@ export default {
     projectRequired: 'Please select project',
     priorityRequired: 'Please select priority',
     testTypeRequired: 'Please select test type',
+    caseTypeRequired: 'Please select case type',
     versionsRequired: 'Please select related versions',
     l1Required: 'Please enter L1',
     l2Required: 'Please enter L2',
@@ -151,6 +167,7 @@ export default {
     excelPriority: 'Priority',
     excelStatus: 'Status',
     excelTestType: 'Test Type',
+    excelCaseType: 'Case Type',
     excelAuthor: 'Author',
     excelCreatedAt: 'Created At',
     excelSheetName: 'Test Cases',

@@ -460,7 +460,9 @@ class ScriptRunner:
             launch_name = BROWSER_LAUNCH_MAP.get(self.browser, 'chromium')
             base_url = ''
             try:
-                base_url = (getattr(self.script.project, 'base_url', None) or '').strip()
+                from .codegen_service import codegen_recorder
+                project_id = getattr(self.script, 'project_id', None)
+                base_url = codegen_recorder._resolve_project_base_url(project_id)
             except Exception:
                 base_url = ''
             if not base_url:

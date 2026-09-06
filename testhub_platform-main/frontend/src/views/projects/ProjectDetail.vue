@@ -145,9 +145,23 @@
             </div>
             <el-table :data="project?.environments || []" style="width: 100%; margin-top: 20px;">
               <el-table-column prop="name" :label="$t('project.environmentName')" />
-              <el-table-column prop="base_url" :label="$t('project.baseUrl')" />
+              <el-table-column prop="base_url" :label="$t('project.baseUrl')" min-width="180" show-overflow-tooltip />
+              <el-table-column prop="login_username" :label="$t('project.loginUsername')" width="140" show-overflow-tooltip />
+              <el-table-column :label="$t('project.authStateSaved')" width="120">
+                <template #default="{ row }">
+                  <el-tag v-if="row.auth_state_saved" type="success" size="small">
+                    {{ $t('project.yes') }}
+                  </el-tag>
+                  <el-tag v-else type="info" size="small">{{ $t('project.no') }}</el-tag>
+                </template>
+              </el-table-column>
+              <el-table-column prop="auth_state_updated_at" :label="$t('project.authStateUpdatedAt')" width="170" show-overflow-tooltip>
+                <template #default="{ row }">
+                  {{ row.auth_state_updated_at || '-' }}
+                </template>
+              </el-table-column>
               <el-table-column prop="description" :label="$t('project.description')" />
-              <el-table-column prop="is_default" :label="$t('project.defaultEnvironment')">
+              <el-table-column prop="is_default" :label="$t('project.defaultEnvironment')" width="100">
                 <template #default="{ row }">
                   <el-tag v-if="row.is_default" type="success">{{ $t('project.yes') }}</el-tag>
                   <span v-else>{{ $t('project.no') }}</span>
@@ -166,13 +180,32 @@
     </div>
 
     <!-- 添加/编辑环境对话框 -->
-    <el-dialog v-model="envDialogVisible" :title="envIsEdit ? $t('project.editEnvironment') : $t('project.addEnvironment')" width="500px">
+    <el-dialog v-model="envDialogVisible" :title="envIsEdit ? $t('project.editEnvironment') : $t('project.addEnvironment')" width="520px">
       <el-form ref="envFormRef" :model="envForm" :rules="envRules" label-width="100px">
         <el-form-item :label="$t('project.environmentName')" prop="name">
           <el-input v-model="envForm.name" :placeholder="$t('project.environmentName')" />
         </el-form-item>
         <el-form-item :label="$t('project.baseUrl')" prop="base_url">
           <el-input v-model="envForm.base_url" :placeholder="$t('project.baseUrl')" />
+        </el-form-item>
+        <el-form-item :label="$t('project.loginUsername')" prop="login_username">
+          <el-input v-model="envForm.login_username" :placeholder="$t('project.loginUsernamePlaceholder')" clearable />
+        </el-form-item>
+        <el-form-item :label="$t('project.loginPassword')" prop="login_password">
+          <el-input
+            v-model="envForm.login_password"
+            type="password"
+            show-password
+            :placeholder="$t('project.loginPasswordPlaceholder')"
+            clearable
+          />
+        </el-form-item>
+        <el-form-item v-if="envIsEdit" :label="$t('project.authStateSaved')">
+          <el-tag v-if="envForm.auth_state_saved" type="success" size="small">{{ $t('project.yes') }}</el-tag>
+          <el-tag v-else type="info" size="small">{{ $t('project.no') }}</el-tag>
+          <span v-if="envForm.auth_state_updated_at" class="auth-state-mtime">
+            {{ envForm.auth_state_updated_at }}
+          </span>
         </el-form-item>
         <el-form-item :label="$t('project.description')" prop="description">
           <el-input v-model="envForm.description" type="textarea" :rows="3" />
@@ -287,6 +320,10 @@ const projectTypeOptions = computed(() => [
 const envForm = reactive({
   name: '',
   base_url: '',
+  login_username: '',
+  login_password: '',
+  auth_state_saved: false,
+  auth_state_updated_at: '',
   description: '',
   is_default: false
 })
@@ -439,6 +476,10 @@ const openEnvDialog = () => {
   editingEnvId.value = null
   envForm.name = ''
   envForm.base_url = ''
+  envForm.login_username = ''
+  envForm.login_password = ''
+  envForm.auth_state_saved = false
+  envForm.auth_state_updated_at = ''
   envForm.description = ''
   envForm.is_default = false
   envDialogVisible.value = true
@@ -449,6 +490,10 @@ const openEditEnvDialog = (row) => {
   editingEnvId.value = row.id
   envForm.name = row.name || ''
   envForm.base_url = row.base_url || ''
+  envForm.login_username = row.login_username || ''
+  envForm.login_password = row.login_password || ''
+  envForm.auth_state_saved = Boolean(row.auth_state_saved)
+  envForm.auth_state_updated_at = row.auth_state_updated_at || ''
   envForm.description = row.description || ''
   envForm.is_default = row.is_default || false
   envDialogVisible.value = true
@@ -462,6 +507,8 @@ const saveEnvironment = async () => {
     const payload = {
       name: envForm.name,
       base_url: envForm.base_url,
+      login_username: envForm.login_username,
+      login_password: envForm.login_password,
       description: envForm.description,
       is_default: envForm.is_default
     }
@@ -661,6 +708,12 @@ onMounted(() => {
 .env-header {
   display: flex;
   justify-content: flex-end;
+}
+
+.auth-state-mtime {
+  margin-left: 10px;
+  color: #909399;
+  font-size: 12px;
 }
 
 @media screen and (max-width: 900px) {

@@ -19,6 +19,12 @@ class TestCase(models.Model):
         ('deprecated', '废弃'),
     ]
     
+    CASE_TYPE_CHOICES = [
+        ('manual', '手工'),
+        ('ui', 'UI'),
+        ('api', '接口'),
+    ]
+
     TYPE_CHOICES = [
         ('functional', '功能测试'),
         ('integration', '集成测试'),
@@ -38,6 +44,7 @@ class TestCase(models.Model):
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='P2', verbose_name='优先级')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')
     test_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='functional', verbose_name='测试类型')
+    case_type = models.CharField(max_length=20, choices=CASE_TYPE_CHOICES, default='manual', verbose_name='用例类型')
     l1 = models.CharField(max_length=500, blank=True, default='', verbose_name='L1')
     l2 = models.CharField(max_length=500, blank=True, default='', verbose_name='L2')
     l3 = models.CharField(max_length=500, blank=True, default='', verbose_name='L3')

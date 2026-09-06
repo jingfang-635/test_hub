@@ -90,7 +90,10 @@ export async function loadUiAutomationProjects() {
         mapped.push({
           id: uiProject.id,
           name: hub.name || uiProject.name,
-          hub_project_id: hub.id
+          hub_project_id: hub.id,
+          login_username: uiProject.login_username || '',
+          // 仅用于判断是否已配置；实际登录凭证仍由后端按 project_id 读取
+          login_password: uiProject.login_password ? '1' : ''
         })
       }
     } catch (error) {
@@ -1215,7 +1218,9 @@ export function startCodegenRecording(data) {
   return request({
     url: '/ui-automation/codegen/start/',
     method: 'post',
-    data
+    data,
+    // 复用登录态时可能先静默 headless 登录刷新 auth，需更长超时
+    timeout: 120000
   })
 }
 
@@ -1313,5 +1318,79 @@ export function generateCodegenScripts(id, data = {}) {
     data: { use_ai: useAi },
     // 模板生成很快；AI 增强最多约 60s，预留缓冲
     timeout: useAi ? 120000 : 30000
+  })
+}
+
+/** 测试步骤元素拾取（投屏 + 检查元素） */
+export function startElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/start/',
+    method: 'post',
+    data,
+    timeout: 120000
+  })
+}
+
+export function getElementPickerStatus() {
+  return request({
+    url: '/ui-automation/element-picker/status/',
+    method: 'get'
+  })
+}
+
+export function inspectElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/inspect/',
+    method: 'post',
+    data
+  })
+}
+
+export function clickElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/click/',
+    method: 'post',
+    data
+  })
+}
+
+export function typeElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/type/',
+    method: 'post',
+    data
+  })
+}
+
+export function scrollElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/scroll/',
+    method: 'post',
+    data
+  })
+}
+
+export function navigateElementPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/navigate/',
+    method: 'post',
+    data,
+    timeout: 60000
+  })
+}
+
+export function saveElementFromPicker(data) {
+  return request({
+    url: '/ui-automation/element-picker/save-element/',
+    method: 'post',
+    data,
+    timeout: 60000
+  })
+}
+
+export function stopElementPicker() {
+  return request({
+    url: '/ui-automation/element-picker/stop/',
+    method: 'post'
   })
 }

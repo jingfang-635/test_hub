@@ -88,10 +88,15 @@ class Command(BaseCommand):
                 else:
                     self.stdout.write(f'  - 策略已存在: {strategy.name}')
 
+        # 清理历史重复数据：同名只保留最小 id，其余迁移引用后删除
+        deduped_count = self._dedupe_strategies()
+
         self.stdout.write('\n' + '='*60)
         self.stdout.write(self.style.SUCCESS(f'初始化完成！'))
         self.stdout.write(self.style.SUCCESS(f'新创建: {created_count} 个'))
         self.stdout.write(self.style.SUCCESS(f'更新: {updated_count} 个'))
+        if deduped_count:
+            self.stdout.write(self.style.WARNING(f'去重删除: {deduped_count} 个'))
         self.stdout.write(self.style.SUCCESS(f'总计: {LocatorStrategy.objects.count()} 个定位策略'))
         self.stdout.write('='*60 + '\n')
 
@@ -100,3 +105,26 @@ class Command(BaseCommand):
         for strategy in LocatorStrategy.objects.all().order_by('id'):
             playwright_tag = ' [Playwright专用]' if strategy.name in ['text', 'placeholder', 'role', 'label', 'title', 'test-id'] else ''
             self.stdout.write(f'  - {strategy.name}{playwright_tag}: {strategy.description}')
+
+    def _dedupe_strategies(self):
+        """按 name 去重，元素外键迁移到保留记录。"""
+        from collections import defaultdict
+        from apps.ui_automation.models import Element
+
+        by_name = defaultdict(list)
+        for strategy in LocatorStrategy.objects.all().order_by('id'):
+            by_name[strategy.name].append(strategy)
+
+        removed = 0
+        for name, items in by_name.items():
+            if len(items) < 2:
+                continue
+            keep, dups = items[0], items[1:]
+            for dup in dups:
+                Element.objects.filter(locator_strategy_id=dup.id).update(locator_strategy_id=keep.id)
+                self.stdout.write(self.style.WARNING(
+                    f'  去重: 删除重复策略 {name}(id={dup.id})，保留 id={keep.id}'
+                ))
+                dup.delete()
+                removed += 1
+        return removed

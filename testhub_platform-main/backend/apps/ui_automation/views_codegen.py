@@ -31,11 +31,16 @@ class PlaywrightCodegenViewSet(viewsets.ViewSet):
     @action(detail=False, methods=['post'], url_path='start')
     def start(self, request):
         data = request.data or {}
-        url = data.get('url', '')
+        url = data.get('url') or data.get('target_url') or ''
         browser = data.get('browser', 'chromium')
         language = data.get('language', 'python')
         project_id = data.get('project_id') or data.get('project')
         script_name = data.get('script_name') or data.get('name') or ''
+        auto_login_raw = data.get('auto_login', True)
+        if isinstance(auto_login_raw, str):
+            auto_login = auto_login_raw.strip().lower() not in {'0', 'false', 'no', 'off'}
+        else:
+            auto_login = bool(auto_login_raw)
 
         try:
             project_id_int = int(project_id) if project_id not in (None, '', 'all') else None
@@ -50,9 +55,13 @@ class PlaywrightCodegenViewSet(viewsets.ViewSet):
                 language=language,
                 project_id=project_id_int,
                 script_name=script_name,
+                auto_login=auto_login,
             )
+            msg = '录制已启动，请在打开的浏览器中完成操作，结束后在 Inspector 点击停止'
+            if auto_login and project_id_int:
+                msg = '录制已启动；已加载项目登录态（失效时已后台静默刷新），结束后在 Inspector 点击停止'
             return Response({
-                'message': '录制已启动，请在打开的浏览器中完成操作，结束后在 Inspector 点击停止',
+                'message': msg,
                 'session': session.to_dict(include_content=False),
             })
         except ValueError as exc:
@@ -174,6 +183,8 @@ class PlaywrightCodegenViewSet(viewsets.ViewSet):
                 content=content,
                 language=data.get('language') or 'python',
                 create_elements=create_elements,
+                recorded_name=data.get('recorded_name') or data.get('script_name') or '',
+                captures_path=data.get('captures_path') or '',
             )
             return Response({
                 'message': f'已解析出 {result.get("step_count", 0)} 个用例步骤',

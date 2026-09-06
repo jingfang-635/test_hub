@@ -1,0 +1,88 @@
+[
+  {
+    "ts": 1788623501621,
+    "tag": "span",
+    "locators": [
+      {
+        "strategy": "class",
+        "value": "item-a"
+      },
+      {
+        "strategy": "css",
+        "value": ".item-a"
+      },
+      {
+        "strategy": "css",
+        "value": "span.item-a"
+      },
+      {
+        "strategy": "text",
+        "value": "个人中心"
+      },
+      {
+        "strategy": "xpath",
+        "value": "//span[normalize-space()=\"个人中心\"]"
+      },
+      {
+        "strategy": "xpath",
+        "value": "//span[contains(normalize-space(),\"个人中心\")]"
+      },
+      {
+        "strategy": "css",
+        "value": "#__layout > div > div:nth-of-type(1) > div > div:nth-of-type(2) > div:nth-of-type(4) > span"
+      },
+      {
+        "strategy": "css",
+        "value": "html > body > div > div > div > div:nth-of-type(1) > div > div:nth-of-type(2) > div:nth-of-type(4) > span"
+      },
+      {
+        "strategy": "xpath",
+        "value": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[1]/div[1]/div[2]/div[4]/span[1]"
+      }
+    ],
+    "screenshot_b64": "iVBORw0KGgoAAAANSUhEUgAAAEYAAAAkCAIAAAC7cNuCAAACnUlEQVR4nOxYP4viQBR/u1gOuwEVUohglXBWXhGr23JAy/kA+XD5AFMqpDwrg5xVJBbHsnIHAVdwZcDSe5PEGLM5TYotEvJrJM+XefN7v/dHbByPR6gWHqFyqCmVATWlMqCmVAbUlMqAR9d1oUJAOhVUqQFFsbatORgm1dNfeLa16V7bt3M+gw5Z75N2NE7/dkbMaAdPDp96JD4PD3H8W+HVrNBXyEFJckhHcSzLScYZmlT73/s9On7ltqd/P/CJJyKjN7W8i4sIzyP6mFFTvwr91r1HIY0clDRqaucAF31kOuEWkwRaBqPyk5kGJK7L9wM2bH/yDnQT8aN/yR7Rz9rewsNisej3+3e8soSKISWCi4Oqqr7vZ7tpqesmcLku+szghRmtlIdn88PgHiUcD3l7iWgjmdF3h/96YrQZR8XGWEKo5LmXMP3Poyj9GVKo2X3ID1lhkd4S4xWqvCLjAbVylRGT5xsvHT6x9kNzkOUo1lNrDfL2QxAfO4Cdba2UcZh4P9WHEUixhrmB/JRebRfUZFsTlbh8SQCUtGsgKdLYQFMhb6jkSmg/aFRIhVTa7UHpQTHkp9SjDLAMuvF4kJVNISy8CKgA36gAz8ETUZqtJ+I7Ux9ptBM+uVVab/zPCbuHonspcSFyPW3nQh+bKIUchWHhqWEr42gOGkw2FeRQqW0wFhnxzKEysywRvEUZfAWl9IW8DyHzGA/6d2cl9JEZkMFZYsnxJn5veyCIgrZtTpWCjSvXFLafoRnBUZaTb4gXotSO9otEPI5VI7ah8ef+G6MRn8mfztg0WtJzKvB+oc9NleRb8lSc+CZNfI+bDXca1gJ37rLKt5fKg2r+bK0gpYf639YSoKZUBtSUyoCaUhnQOJ1OUC1UkNI/AAAA//+3/bDrAAAABklEQVQDAHnKWRvdcbgfAAAAAElFTkSuQmCC"
+  },
+  {
+    "ts": 1788623505069,
+    "tag": "a",
+    "locators": [
+      {
+        "strategy": "class",
+        "value": "action-a"
+      },
+      {
+        "strategy": "css",
+        "value": ".action-a"
+      },
+      {
+        "strategy": "css",
+        "value": "a.action-a"
+      },
+      {
+        "strategy": "role",
+        "value": "link[name=\"查看订单\"]"
+      },
+      {
+        "strategy": "text",
+        "value": "查看订单"
+      },
+      {
+        "strategy": "xpath",
+        "value": "//a[normalize-space()=\"查看订单\"]"
+      },
+      {
+        "strategy": "xpath",
+        "value": "//a[contains(normalize-space(),\"查看订单\")]"
+      },
+      {
+        "strategy": "css",
+        "value": "div > div:nth-of-type(2) > div:nth-of-type(3) > div:nth-of-type(2) > table > tbody > tr:nth-of-type(2) > td:nth-of-type(5) > div > a"
+      },
+      {
+        "strategy": "xpath",
+        "value": "/html[1]/body[1]/div[1]/div[1]/div[1]/div[3]/div[1]/div[2]/div[3]/div[2]/table[1]/tbody[1]/tr[2]/td[5]/div[1]/a[1]"
+      }
+    ],
+    "screenshot_b64": ""
+  }
+]

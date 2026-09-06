@@ -175,7 +175,6 @@ def ensure_ui_project_for_hub(user, hub_project_id):
                 name=hub_project.name,
                 description=hub_project.description or '',
                 status=status_map.get(hub_project.status, 'IN_PROGRESS'),
-                base_url='http://localhost',
                 owner=hub_project.owner,
                 hub_project=hub_project,
             )
@@ -367,7 +366,14 @@ class ElementViewSet(viewsets.ModelViewSet):
         if not strategy or not value:
             return Response({'error': '策略和值都是必需的'}, status=status.HTTP_400_BAD_REQUEST)
 
-        backup_locators = element.backup_locators or []
+        backup_locators = list(element.backup_locators or [])
+        # 策略可重复；同一策略下同一表达式不可重复
+        if any(
+            (b.get('strategy') or '').lower() == strategy.lower()
+            and (b.get('value') or '') == value
+            for b in backup_locators
+        ):
+            return Response({'message': '备用定位器已存在'})
         backup_locators.append({'strategy': strategy, 'value': value})
         element.backup_locators = backup_locators
         element.save()
@@ -1805,6 +1811,25 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         try:
             # 获取执行引擎选择，默认使用playwright
             engine_type = request.data.get('engine', 'playwright')
+            browser_name = request.data.get('browser', 'chrome')
+            headless_raw = request.data.get('headless', False)
+            if isinstance(headless_raw, str):
+                headless_mode = headless_raw.strip().lower() in ('1', 'true', 'yes', 'on')
+            else:
+                headless_mode = bool(headless_raw)
+
+            target_url = (request.data.get('target_url') or request.data.get('url') or '').strip()
+            if not target_url or target_url in {'https://', 'http://'}:
+                from .codegen_service import codegen_recorder
+                target_url = codegen_recorder._resolve_project_base_url(
+                    getattr(test_case, 'project_id', None)
+                )
+
+            auto_login_raw = request.data.get('auto_login', False)
+            if isinstance(auto_login_raw, str):
+                auto_login = auto_login_raw.strip().lower() not in {'0', 'false', 'no', 'off'}
+            else:
+                auto_login = bool(auto_login_raw)
 
             # 创建执行记录
             execution = TestCaseExecution.objects.create(
@@ -1813,8 +1838,8 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 execution_source='manual',
                 status='running',
                 engine=engine_type,
-                browser=request.data.get('browser', 'chrome'),
-                headless=request.data.get('headless', False),
+                browser=browser_name,
+                headless=headless_mode,
                 created_by=request.user,
                 started_at=timezone.now()
             )
@@ -1824,7 +1849,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                 from .selenium_engine import SeleniumTestEngine
 
                 # Selenium 引擎需要预先检查浏览器是否可用
-                browser_type = request.data.get('browser', 'chrome')
+                browser_type = browser_name
                 is_available, error_msg = SeleniumTestEngine.check_browser_available(browser_type)
                 if not is_available:
                     # 浏览器不可用，立即返回错误
@@ -1878,13 +1903,29 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                         'locator_strategy': step.element.locator_strategy.name if step.element.locator_strategy else 'css',
                         'locator_value': step.element.locator_value,
                         'name': step.element.name,
+                        'description': getattr(step.element, 'description', '') or '',
+                        'element_type': getattr(step.element, 'element_type', '') or '',
                         'wait_timeout': step.element.wait_timeout,  # 添加元素的等待超时设置（秒）
-                        'force_action': step.element.force_action  # 添加强制操作选项
+                        'force_action': step.element.force_action,  # 添加强制操作选项
+                        'backup_locators': step.element.backup_locators or [],
                     }
                 else:
                     step_data['element_data'] = None
 
                 steps_data.append(step_data)
+
+            # 复用登录态：跳过用例中的登录相关步骤（点登录/填账号密码等）
+            skipped_login_steps = 0
+            if auto_login and steps_data:
+                from .auth_state import is_login_related_step
+
+                kept = []
+                for sd in steps_data:
+                    if is_login_related_step(sd):
+                        skipped_login_steps += 1
+                    else:
+                        kept.append(sd)
+                steps_data = kept
 
             # 存储步骤执行结果（用于JSON格式的execution_logs）
             step_results = []
@@ -1894,12 +1935,14 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             execution_logs.append(f"测试用例 '{test_case.name}' 开始执行")
             execution_logs.append(f"执行时间: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}")
             execution_logs.append(f"执行引擎: {engine_type.upper()}")
-            execution_logs.append(f"浏览器: {request.data.get('browser', 'chrome').capitalize()}")
-            headless_mode = request.data.get('headless', False)
+            execution_logs.append(f"浏览器: {browser_name.capitalize()}")
             mode_text = "无头模式" if headless_mode else "有头模式"
             execution_logs.append(f"执行模式: {mode_text}")
             execution_logs.append(f"执行用户: {request.user.username}")
-            execution_logs.append(f"项目基础URL: {test_case.project.base_url}")
+            execution_logs.append(f"目标URL: {target_url or '(未指定)'}")
+            execution_logs.append(f"复用登录态: {'是' if auto_login else '否'}")
+            if auto_login and skipped_login_steps:
+                execution_logs.append(f"已跳过登录相关步骤: {skipped_login_steps} 个")
             execution_logs.append("")
 
             # 截图列表
@@ -1908,13 +1951,41 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             detailed_errors = []
             execution_result = {'status': 'passed', 'error_message': None}
 
+            login_username, login_password = ('', '')
+            auth_state_file = None
+            storage_to_load = None
+            if auto_login:
+                from .codegen_service import codegen_recorder
+                from .auth_state import auth_path_for_project, ensure_project_auth_state, load_path_if_exists
+
+                # 启动前静默确保登录态：缺失/失效则 headless 登录并写回；运行时只注入文件
+                login_username, login_password = codegen_recorder._resolve_project_login(
+                    getattr(test_case, 'project_id', None)
+                )
+                auth_state_file = auth_path_for_project(getattr(test_case, 'project_id', None))
+                existing = load_path_if_exists(auth_state_file)
+                if not existing and not (login_username and login_password):
+                    execution_logs.append(
+                        "⚠ 复用登录态失败：未配置登录账号/密码且无已保存登录态"
+                    )
+                else:
+                    ensured = ensure_project_auth_state(
+                        getattr(test_case, 'project_id', None),
+                        base_url=target_url or '',
+                        username=login_username,
+                        password=login_password,
+                    )
+                    storage_to_load = ensured or existing
+                    if not storage_to_load:
+                        execution_logs.append("⚠ 复用登录态失败：静默登录未成功")
+
             # 根据引擎类型选择执行方式
             if engine_type == 'selenium':
                 # Selenium同步执行
                 def run_test_selenium():
                     """使用Selenium执行测试"""
-                    browser_type = request.data.get('browser', 'chrome')
-                    headless = request.data.get('headless', False)
+                    browser_type = browser_name
+                    headless = headless_mode
 
                     # 创建Selenium引擎实例
                     engine = SeleniumTestEngine(browser_type=browser_type, headless=headless)
@@ -1949,10 +2020,10 @@ class TestCaseViewSet(viewsets.ModelViewSet):
 
                             return False
 
-                        # 导航到项目基础URL
-                        if test_case.project.base_url:
+                        # 导航到目标URL
+                        if target_url:
                             execution_logs.append("========== 导航到测试页面 ==========")
-                            success, nav_log = engine.navigate(test_case.project.base_url)
+                            success, nav_log = engine.navigate(target_url)
                             execution_logs.append(nav_log)
                             execution_logs.append("")
 
@@ -1965,9 +2036,14 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                     'element': '',
                                     'message': '导航到测试页面失败',
                                     'details': nav_log,
-                                    'description': f'导航到 {test_case.project.base_url} 失败'
+                                    'description': f'导航到 {target_url} 失败'
                                 })
                                 return False
+
+                        if auto_login:
+                            execution_logs.append("========== 复用登录态 ==========")
+                            execution_logs.append("⚠ Selenium 引擎暂不支持复用登录态，已跳过")
+                            execution_logs.append("")
 
                         if steps_data:
                             execution_logs.append("========== 执行测试步骤 ==========")
@@ -2124,27 +2200,30 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                         browser_map = {
                             'chrome': 'chromium',
                             'firefox': 'firefox',
-                            'safari': 'webkit'
+                            'safari': 'webkit',
+                            'edge': 'chromium',
                         }
-                        browser_type = browser_map.get(request.data.get('browser', 'chrome'), 'chromium')
-                        headless = request.data.get('headless', False)
+                        browser_type = browser_map.get(browser_name, 'chromium')
+                        headless = headless_mode
 
                         # 创建Playwright引擎实例
                         engine = PlaywrightTestEngine(browser_type=browser_type, headless=headless)
 
                         try:
-                            # 启动浏览器
+                            # 启动浏览器（有未过期登录态则直接注入）
                             execution_logs.append("========== 初始化浏览器 ==========")
-                            await engine.start()
+                            await engine.start(storage_state=storage_to_load)
                             mode_text = "无头模式" if headless else "有头模式"
                             execution_logs.append(
                                 f"✓ {browser_type.capitalize()} 浏览器启动成功 (Playwright, {mode_text})")
+                            if storage_to_load:
+                                execution_logs.append(f"✓ 已加载项目登录态: {storage_to_load}")
                             execution_logs.append("")
 
-                            # 导航到项目基础URL
-                            if test_case.project.base_url:
+                            # 导航到目标URL
+                            if target_url:
                                 execution_logs.append("========== 导航到测试页面 ==========")
-                                success, nav_log = await engine.navigate(test_case.project.base_url)
+                                success, nav_log = await engine.navigate(target_url)
                                 execution_logs.append(nav_log)
                                 execution_logs.append("")
 
@@ -2157,9 +2236,29 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                         'element': '',
                                         'message': '导航到测试页面失败',
                                         'details': nav_log,
-                                        'description': f'导航到 {test_case.project.base_url} 失败'
+                                        'description': f'导航到 {target_url} 失败'
                                     })
                                     return False
+
+                            if auto_login:
+                                execution_logs.append("========== 复用登录态 ==========")
+                                if storage_to_load:
+                                    execution_logs.append(
+                                        f"✓ 已加载项目登录态，跳过登录 "
+                                        f"({login_username or '已保存会话'})"
+                                    )
+                                    # 刷新 cookies / mtime，延长复用窗口
+                                    if auth_state_file is not None and getattr(engine, 'context', None):
+                                        from .auth_state import save_storage_state
+                                        await save_storage_state(engine.context, auth_state_file)
+                                elif auth_state_file is not None:
+                                    execution_logs.append(
+                                        f"⚠ 未找到可用登录态（请在项目中配置登录账号或先手动登录一次）: "
+                                        f"{auth_state_file}"
+                                    )
+                                else:
+                                    execution_logs.append("⚠ 无法解析项目登录态路径，已跳过登录")
+                                execution_logs.append("")
 
                             if steps_data:
                                 execution_logs.append("========== 执行测试步骤 ==========")
@@ -2199,6 +2298,21 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                                                                                          element_data or {})
                                         execution_logs.append(f"  [调试] 步骤执行完成, success={success}")
 
+                                        # AI 自愈：仅当次临时定位，不改元素/步骤；成功时写入结果标记
+                                        healed = bool(element_data and element_data.get('_healed'))
+                                        healing_reason = (
+                                            (element_data or {}).get('_healing_reason') if element_data else None
+                                        )
+                                        healed_locator = (
+                                            (element_data or {}).get('_healed_locator') if element_data else None
+                                        )
+                                        if healed and success:
+                                            from .playwright_engine import PlaywrightTestEngine as _PTE
+                                            step_log = _PTE.append_heal_note(step_log, element_data)
+                                            execution_logs.append(
+                                                f"  ★ AI自愈执行通过: {healing_reason or ''}"
+                                            )
+
                                         execution_logs.append(f"  {step_log}")
                                         execution_logs.append("")
 
@@ -2208,7 +2322,10 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                             'action_type': action_type,
                                             'description': description or '',
                                             'success': success,
-                                            'error': None if success else step_log
+                                            'error': None if success else step_log,
+                                            'healed': healed and success,
+                                            'healing_reason': healing_reason if (healed and success) else None,
+                                            'healed_locator': healed_locator if (healed and success) else None,
                                         })
 
                                         # 如果步骤失败,保存截图
@@ -2363,9 +2480,12 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             execution_logs.append("")
             execution_logs.append("执行环境信息:")
             execution_logs.append(f"- 执行引擎: {engine_type.upper()}")
-            execution_logs.append(f"- 浏览器: {request.data.get('browser', 'chrome').capitalize()}")
+            execution_logs.append(f"- 浏览器: {browser_name.capitalize()}")
             execution_logs.append(f"- 屏幕分辨率: 1920x1080")
             execution_logs.append(f"- 总执行时间: {total_time}秒")
+            if target_url:
+                execution_logs.append(f"- 目标URL: {target_url}")
+            execution_logs.append(f"- 复用登录态: {'是' if auto_login else '否'}")
 
             if screenshots:
                 execution_logs.append(f"- 截图数量: {len(screenshots)} 张")
@@ -2409,12 +2529,30 @@ class TestCaseViewSet(viewsets.ModelViewSet):
             # 记录运行操作
             log_operation('run', 'test_case', test_case.id, test_case.name, request.user)
 
+            healed_steps = [
+                {
+                    'step_number': s.get('step_number'),
+                    'description': s.get('description') or '',
+                    'healing_reason': s.get('healing_reason') or '',
+                    'healed_locator': s.get('healed_locator'),
+                }
+                for s in step_results
+                if s.get('healed')
+            ]
+            passed_with_heal = execution.status == 'passed' and len(healed_steps) > 0
+
             return Response({
                 'success': execution.status == 'passed',
                 'logs': execution.execution_logs,
                 'screenshots': screenshots,
                 'execution_time': execution.execution_time,
-                'errors': errors
+                'errors': errors,
+                'healed': passed_with_heal,
+                'ai_healing': {
+                    'used': len(healed_steps) > 0,
+                    'passed_with_heal': passed_with_heal,
+                    'steps': healed_steps,
+                },
             })
 
         except Exception as e:
@@ -2783,8 +2921,11 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                             'locator_strategy': step.element.locator_strategy.name if step.element.locator_strategy else 'css',
                                             'locator_value': step.element.locator_value,
                                             'name': step.element.name,
+                                            'description': getattr(step.element, 'description', '') or '',
+                                            'element_type': getattr(step.element, 'element_type', '') or '',
                                             'wait_timeout': step.element.wait_timeout,
-                                            'force_action': step.element.force_action
+                                            'force_action': step.element.force_action,
+                                            'backup_locators': step.element.backup_locators or [],
                                         }
                                     else:
                                         step_data['element_data'] = None
@@ -2826,9 +2967,13 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                         engine.start()
                                         execution_logs.append("✓ 浏览器启动成功")
 
-                                        # 导航到项目基础URL
-                                        if test_case.project.base_url:
-                                            success, nav_log = engine.navigate(test_case.project.base_url)
+                                        # 导航到项目环境基础URL
+                                        from .codegen_service import codegen_recorder
+                                        case_base_url = codegen_recorder._resolve_project_base_url(
+                                            getattr(test_case, 'project_id', None)
+                                        )
+                                        if case_base_url:
+                                            success, nav_log = engine.navigate(case_base_url)
                                             execution_logs.append(nav_log)
                                             if not success:
                                                 execution_result['status'] = 'failed'
@@ -2900,10 +3045,15 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                             await engine.start()
                                             execution_logs.append("✓ 浏览器启动成功")
 
-                                            # 获取项目基础URL（同步操作）
-                                            base_url = await sync_to_async(lambda: test_case.project.base_url)()
+                                            # 获取项目环境基础URL（同步操作）
+                                            from .codegen_service import codegen_recorder
+                                            base_url = await sync_to_async(
+                                                lambda: codegen_recorder._resolve_project_base_url(
+                                                    getattr(test_case, 'project_id', None)
+                                                )
+                                            )()
 
-                                            # 导航到项目基础URL
+                                            # 导航到项目环境基础URL
                                             if base_url:
                                                 success, nav_log = await engine.navigate(base_url)
                                                 execution_logs.append(nav_log)
@@ -2929,12 +3079,26 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                                 success, step_log, screenshot_base64 = await engine.execute_step(step,
                                                                                                                  element_data or {})
 
+                                                healed = bool(element_data and element_data.get('_healed'))
+                                                healing_reason = (
+                                                    (element_data or {}).get('_healing_reason') if element_data else None
+                                                )
+                                                healed_locator = (
+                                                    (element_data or {}).get('_healed_locator') if element_data else None
+                                                )
+                                                if healed and success:
+                                                    from .playwright_engine import PlaywrightTestEngine as _PTE
+                                                    step_log = _PTE.append_heal_note(step_log, element_data)
+
                                                 step_results.append({
                                                     'step_number': i,
                                                     'action_type': action_type,
                                                     'description': step_info['description'] or '',
                                                     'success': success,
-                                                    'error': None if success else step_log
+                                                    'error': None if success else step_log,
+                                                    'healed': healed and success,
+                                                    'healing_reason': healing_reason if (healed and success) else None,
+                                                    'healed_locator': healed_locator if (healed and success) else None,
                                                 })
 
                                                 if not success:

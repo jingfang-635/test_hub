@@ -8,12 +8,40 @@ class ProjectSimpleSerializer(serializers.ModelSerializer):
         fields = ('id', 'name')
 
 class ProjectEnvironmentSerializer(serializers.ModelSerializer):
+    auth_state_saved = serializers.SerializerMethodField()
+    auth_state_updated_at = serializers.SerializerMethodField()
+
     class Meta:
         model = ProjectEnvironment
-        fields = '__all__'
+        fields = (
+            'id', 'project', 'name', 'base_url',
+            'login_username', 'login_password',
+            'auth_state_saved', 'auth_state_updated_at',
+            'description', 'variables', 'is_default', 'created_at',
+        )
         extra_kwargs = {
-            'project': {'read_only': True}
+            'project': {'read_only': True},
+            'variables': {'required': False},
+            'auth_state_saved': {'read_only': True},
+            'auth_state_updated_at': {'read_only': True},
         }
+
+    def _auth_status(self, obj):
+        cache = self.context.setdefault('_auth_status_cache', {})
+        hub_id = obj.project_id
+        if hub_id not in cache:
+            try:
+                from apps.ui_automation.auth_state import auth_status_for_hub_project
+                cache[hub_id] = auth_status_for_hub_project(hub_id)
+            except Exception:
+                cache[hub_id] = {'auth_state_saved': False, 'auth_state_updated_at': None}
+        return cache[hub_id]
+
+    def get_auth_state_saved(self, obj):
+        return bool(self._auth_status(obj).get('auth_state_saved'))
+
+    def get_auth_state_updated_at(self, obj):
+        return self._auth_status(obj).get('auth_state_updated_at')
 
 class ProjectMemberSerializer(serializers.ModelSerializer):
     user = UserSerializer(read_only=True)
