@@ -1122,6 +1122,8 @@ class AIExplorationTask(models.Model):
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
     logs = models.TextField(blank=True, default='', verbose_name='执行日志')
+    # 探索引擎生成的 Playwright 测试代码（playwright-explore-to-test 流程产物）
+    generated_code = models.CharField(max_length=10000, blank=True, default='', verbose_name='生成的测试代码')
     start_time = models.DateTimeField(auto_now_add=True, verbose_name='开始时间')
     end_time = models.DateTimeField(null=True, blank=True, verbose_name='结束时间')
     duration = models.FloatField(null=True, blank=True, verbose_name='执行时长(秒)')
@@ -1181,6 +1183,9 @@ class AIExplorationStep(models.Model):
     action_description = models.TextField(blank=True, default='', verbose_name='动作描述')
     element_index = models.IntegerField(null=True, blank=True, verbose_name='元素索引')
     element_text = models.CharField(max_length=500, blank=True, default='', verbose_name='元素文本')
+    # 元素定位策略（playwright-explore-to-test 探索产物：test-id/role/id/class/xpath）
+    locator_strategy = models.CharField(max_length=50, blank=True, default='', verbose_name='定位策略')
+    locator_value = models.CharField(max_length=500, blank=True, default='', verbose_name='定位值')
     # 元素边界框 bounding rect: {x, y, width, height}
     rect = models.JSONField(default=dict, blank=True, verbose_name='元素边界框')
     # 点击点坐标: {x, y}

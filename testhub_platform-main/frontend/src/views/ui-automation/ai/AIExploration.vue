@@ -19,6 +19,12 @@
         <el-table-column prop="name" label="任务名称" min-width="140" />
         <el-table-column prop="start_url" label="起始URL" min-width="200" show-overflow-tooltip />
         <el-table-column prop="data_source_display" label="数据来源" min-width="140" />
+        <el-table-column prop="ai_model_name" label="AI模型" min-width="150" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.ai_model_name || '-' }}</template>
+        </el-table-column>
+        <el-table-column prop="intent_content" label="自然语言意图" min-width="180" show-overflow-tooltip>
+          <template #default="{ row }">{{ row.intent_content || '-' }}</template>
+        </el-table-column>
         <el-table-column prop="environment" label="环境" min-width="100" />
         <el-table-column label="状态" width="100">
           <template #default="{ row }">
@@ -28,11 +34,12 @@
         <el-table-column prop="duration" label="时长(秒)" width="90">
           <template #default="{ row }">{{ row.duration ? row.duration.toFixed(1) : '-' }}</template>
         </el-table-column>
-        <el-table-column label="操作" width="180" fixed="right">
+        <el-table-column label="操作" width="240" fixed="right">
           <template #default="{ row }">
             <el-button size="small" @click="enterTask(row)">查看</el-button>
             <el-button v-if="row.status !== 'running'" size="small" type="primary" @click="startTask(row)">启动</el-button>
             <el-button v-else size="small" type="danger" @click="stopTask(row)">停止</el-button>
+            <el-button v-if="row.status !== 'running'" size="small" type="danger" plain @click="deleteTask(row)">删除</el-button>
           </template>
         </el-table-column>
       </el-table>
@@ -55,12 +62,20 @@
         <el-col :span="14">
           <div class="panel screen-panel">
             <div class="section-title">实时画面（投屏）</div>
-            <div class="screen-area">
-              <img v-if="liveScreenshot" :src="liveScreenshot" class="screen-img" />
-              <img v-else-if="latestScreenshot" :src="latestScreenshot" class="screen-img" :key="latestScreenshot" />
+            <div class="screen-area" ref="screenAreaRef">
+              <img v-if="liveScreenshot" :src="liveScreenshot" class="screen-img" ref="screenImgRef" @load="onScreenImgLoad" />
+              <img v-else-if="latestScreenshot" :src="latestScreenshot" class="screen-img" :key="latestScreenshot" ref="screenImgRef" @load="onScreenImgLoad" />
               <div v-else class="empty-screen">
                 <el-icon class="is-loading" v-if="currentTask.status === 'running'"><Loading /></el-icon>
                 <span>{{ currentTask.status === 'running' ? '等待采集画面...' : '暂无画面' }}</span>
+              </div>
+              <!-- 当前步骤元素高亮框 -->
+              <div
+                v-if="activeStep && activeStep.rect && activeStep.rect.x != null && screenScale.x"
+                class="active-rect-box"
+                :style="activeRectStyle"
+              >
+                <span class="active-rect-label">{{ activeStep.action_type }} → {{ activeStep.element_text || activeStep.action_description }}</span>
               </div>
             </div>
             <div class="logs-box">
@@ -70,31 +85,72 @@
           </div>
         </el-col>
 
-        <!-- 右：正在执行的用例（动态加载） -->
+        <!-- 右：用例矩阵 + 实时探索步骤 -->
         <el-col :span="10">
           <div class="panel cases-panel">
-            <div class="section-title">正在执行的用例（动态加载）</div>
+            <!-- 用例矩阵（AI 规划完成、探索前展示） -->
+            <div v-if="casePlan.length > 0" class="plan-section">
+              <div class="section-title">
+                用例矩阵（AI 规划）
+                <el-tag size="small" type="info">{{ casePlan.length }} 条用例</el-tag>
+              </div>
+              <div class="plan-list">
+                <div v-for="(pc, idx) in casePlan" :key="idx" class="plan-case">
+                  <div class="plan-case-header">
+                    <span class="plan-case-id">{{ pc.id || `EX-${idx + 1}` }}</span>
+                    <span class="plan-case-name">{{ pc.name }}</span>
+                    <span class="plan-step-count">{{ pc.step_count || (pc.steps || []).length }} 步</span>
+                  </div>
+                  <div class="plan-steps">
+                    <div v-for="ps in (pc.steps || [])" :key="ps.order" class="plan-step">
+                      <span class="plan-step-order">{{ ps.order }}</span>
+                      <span class="plan-step-action" :class="`step-type-${ps.action}`">{{ ps.action }}</span>
+                      <span class="plan-step-target" :title="ps.target">{{ ps.target }}</span>
+                      <span v-if="ps.value" class="plan-step-value">= "{{ ps.value }}"</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 实时探索步骤 -->
+            <div class="section-title" style="margin-top: 12px;">
+              实时探索步骤
+              <el-tag v-if="activeStep" size="small" type="warning">执行中</el-tag>
+            </div>
             <div class="cases-list">
-              <div v-if="cases.length === 0" class="empty-tip">
+              <div v-if="cases.length === 0 && casePlan.length === 0" class="empty-tip">
                 <el-icon class="is-loading" v-if="currentTask.status === 'running'"><Loading /></el-icon>
                 {{ currentTask.status === 'running' ? 'AI 正在规划用例...' : '暂无用例' }}
               </div>
-              <div v-for="c in cases" :key="c.id" class="case-item">
-                <div class="case-header" @click="openOrchestration(c)">
+              <div v-for="c in cases" :key="c.id" class="case-item" :class="{ 'case-active': activeCaseId === c.id }">
+                <div class="case-header" @click="toggleExpand(c.id)">
                   <el-icon><Document /></el-icon>
                   <span class="case-name">{{ c.name }}</span>
                   <el-tag size="small" :type="statusTagType(c.status)">{{ statusText(c.status) }}</el-tag>
                   <span class="step-count">{{ (c.steps || []).length }} 步</span>
-                  <el-button size="small" type="primary" link>可视化编排 ›</el-button>
+                  <el-button size="small" type="primary" link class="expand-btn" @click.stop="toggleExpand(c.id)">
+                    {{ isExpanded(c.id) ? '收起' : '展开' }}
+                    <el-icon class="expand-icon"><CaretBottom v-if="isExpanded(c.id)" /><CaretRight v-else /></el-icon>
+                  </el-button>
                 </div>
-                <div class="steps-list">
-                  <div v-for="s in (c.steps || [])" :key="s.id" class="step-item">
+                <div v-show="isExpanded(c.id)" class="steps-list">
+                  <div
+                    v-for="s in (c.steps || [])"
+                    :key="s.id || s.order"
+                    class="step-item"
+                    :class="{ 'step-active': activeStep && activeCaseId === c.id && activeStep.order === s.order }"
+                  >
                     <span class="step-order">{{ s.order }}</span>
-                    <span class="step-type">{{ s.action_type }}</span>
+                    <span class="step-type" :class="`step-type-${s.action_type}`">{{ s.action_type }}</span>
                     <span class="step-desc" :title="s.action_description">{{ s.action_description }}</span>
+                    <span v-if="s.locator_strategy" class="step-locator" :title="`${s.locator_strategy}: ${s.locator_value}`">
+                      [{{ s.locator_strategy }}]
+                    </span>
                     <span v-if="s.rect && s.rect.x != null" class="step-coord" :title="`元素框 ${formatCoord(s.rect)}`">
                       [{{ Math.round(s.rect.x) }},{{ Math.round(s.rect.y) }}]
                     </span>
+                    <span v-if="s.status === 'failed'" class="step-fail">✗</span>
                   </div>
                 </div>
               </div>
@@ -102,6 +158,15 @@
           </div>
         </el-col>
       </el-row>
+
+      <!-- 探索用例输出（playwright-explore-to-test 最终产物） -->
+      <div v-if="currentTask.generated_code" class="panel code-panel">
+        <div class="section-title">
+          探索用例输出（Playwright Test）
+          <el-button size="small" type="primary" link @click="copyCode">复制代码</el-button>
+        </div>
+        <pre class="code-block">{{ currentTask.generated_code }}</pre>
+      </div>
     </div>
 
     <!-- 新建测试弹窗 -->
@@ -137,12 +202,40 @@
           </el-radio-group>
         </el-form-item>
         <el-form-item label="功能用例" v-if="createForm.data_source === 'case_driven'">
-          <el-input
-            v-model="createForm.data_content"
-            type="textarea"
-            :rows="4"
-            placeholder="请输入功能用例描述，每行一条"
-          />
+          <div class="case-upload-wrap">
+            <el-upload
+              ref="caseUploadRef"
+              class="case-upload"
+              drag
+              :auto-upload="false"
+              :show-file-list="false"
+              accept=".xlsx,.xls,.xmind,.md,.markdown,.txt"
+              :on-change="handleCaseFileChange"
+              :disabled="uploadingCases"
+            >
+              <div class="upload-inner">
+                <el-icon class="upload-icon"><UploadFilled /></el-icon>
+                <div class="upload-text">点击或拖拽上传用例文件</div>
+                <div class="upload-hint">支持 Excel（.xlsx/.xls）、XMind（.xmind）、Markdown（.md/.txt）</div>
+              </div>
+            </el-upload>
+            <div v-if="uploadingCases" class="case-upload-tip">
+              <el-icon class="is-loading"><Loading /></el-icon>
+              <span>正在解析用例文件...</span>
+            </div>
+            <div v-else-if="caseFile.parsed" class="case-upload-result case-upload-ok">
+              <el-icon><Check /></el-icon>
+              <span class="result-filename" :title="caseFile.name">{{ caseFile.name }}</span>
+              <el-tag size="small" type="success">解析出 {{ caseFile.caseCount }} 条用例</el-tag>
+              <el-button link type="primary" size="small" @click.prevent="casePreviewVisible = true">预览</el-button>
+              <el-button link type="danger" size="small" @click.prevent="clearCaseFile">移除</el-button>
+            </div>
+            <div v-else-if="caseFile.error" class="case-upload-result case-upload-err">
+              <el-icon><CircleClose /></el-icon>
+              <span class="result-filename" :title="caseFile.name">{{ caseFile.name }}</span>
+              <span class="err-msg">{{ caseFile.error }}</span>
+            </div>
+          </div>
         </el-form-item>
         <el-form-item label="自然语言意图">
           <el-input
@@ -160,6 +253,15 @@
         <el-button @click="showCreateDialog = false">取消</el-button>
         <el-button type="primary" @click="confirmCreate" :loading="creating">确定</el-button>
       </template>
+    </el-dialog>
+
+    <!-- 用例文件解析结果预览 -->
+    <el-dialog v-model="casePreviewVisible" title="用例文件解析结果" width="640px" append-to-body>
+      <div class="case-preview-meta">
+        <span>文件：{{ caseFile.name }}</span>
+        <el-tag size="small" type="success">共 {{ caseFile.caseCount }} 条用例</el-tag>
+      </div>
+      <pre class="case-preview-text">{{ caseFile.text }}</pre>
     </el-dialog>
 
     <!-- 可视化编排弹窗 -->
@@ -219,8 +321,8 @@
 
 <script setup>
 import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
-import { ElMessage } from 'element-plus'
-import { Plus, Refresh, ArrowLeft, Document, Loading, Check } from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import { Plus, Refresh, ArrowLeft, Document, Loading, Check, UploadFilled, CircleClose } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import {
   getAIExplorationTasks,
@@ -228,8 +330,10 @@ import {
   createAIExplorationTask,
   startAIExplorationTask,
   stopAIExplorationTask,
+  deleteAIExplorationTask,
   getAIExplorationProgress,
-  updateAIExplorationStepCoords
+  updateAIExplorationStepCoords,
+  uploadAIExplorationCaseFile
 } from '@/api/ui_automation'
 
 // 任务列表
@@ -240,6 +344,19 @@ const cases = ref([])
 const latestScreenshot = ref('')
 const liveScreenshot = ref('')
 const wsSocket = ref(null)
+// 实时步骤高亮（WS step_update 推送）
+const activeStep = ref(null) // 当前执行的步骤信息（含 rect、click_point）
+const activeCaseId = ref(null) // 当前正在执行的用例 ID
+const casePlan = ref([]) // LLM 规划的用例矩阵（探索前推送）
+
+// 用例步骤展开/收起状态（默认收起）
+const expandedCaseIds = ref({})
+function isExpanded(id) {
+  return !!expandedCaseIds.value[id]
+}
+function toggleExpand(id) {
+  expandedCaseIds.value[id] = !expandedCaseIds.value[id]
+}
 
 // ===== 实时投屏 WebSocket =====
 function connectWebSocket(taskId) {
@@ -252,6 +369,28 @@ function connectWebSocket(taskId) {
       const data = JSON.parse(event.data)
       if (data.type === 'screenshot' && data.image) {
         liveScreenshot.value = data.image
+      } else if (data.type === 'plan_update') {
+        // 用例矩阵规划完成（探索前展示）
+        handlePlanUpdate(data)
+      } else if (data.type === 'step_update') {
+        // 实时收到单步执行结果
+        handleStepUpdate(data)
+      } else if (data.type === 'case_update') {
+        // 用例完成
+        handleCaseUpdate(data)
+      } else if (data.type === 'test_result') {
+        // 探索完成，显示最终用例
+        handleTestResult(data)
+      } else if (data.type === 'log_update') {
+        // 实时日志
+        if (currentTask.value) {
+          currentTask.value.logs = (currentTask.value.logs || '') + data.log + '\n'
+        }
+      } else if (data.type === 'status') {
+        // 任务状态变更
+        if (data.status === 'finished' || data.status === 'failed') {
+          reloadTaskDetail()
+        }
       }
     } catch (err) {
       console.error('投屏 WS 消息解析失败', err)
@@ -261,12 +400,92 @@ function connectWebSocket(taskId) {
   wsSocket.value = ws
 }
 
+// 处理用例矩阵推送：在右边展示规划好的用例
+function handlePlanUpdate(data) {
+  casePlan.value = data.cases || []
+}
+
+// 处理单步实时推送：右边显示点击元素 + 高亮坐标框
+function handleStepUpdate(data) {
+  const step = data.step
+  if (!step) return
+  activeCaseId.value = data.case_id
+  activeStep.value = step
+
+  // 实时将步骤插入 cases 列表（如果用例还不存在则创建）
+  let caseItem = cases.value.find(c => c.id === data.case_id)
+  if (!caseItem) {
+    caseItem = {
+      id: data.case_id,
+      name: data.case_name || '探索用例',
+      status: 'running',
+      steps: []
+    }
+    cases.value.push(caseItem)
+  }
+  // 追加步骤（避免重复）
+  if (!caseItem.steps.some(s => s.order === step.order)) {
+    caseItem.steps.push(step)
+  }
+
+  // 更新投屏为该步骤截图（如果有）
+  if (step.screenshot) {
+    // 步骤截图是相对路径，需拼接
+    const ss = step.screenshot.startsWith('http') ? step.screenshot : step.screenshot
+    latestScreenshot.value = ss
+  }
+}
+
+// 处理用例完成推送
+function handleCaseUpdate(data) {
+  const caseItem = cases.value.find(c => c.id === data.case_id)
+  if (caseItem) {
+    caseItem.status = data.status
+  }
+  activeStep.value = null
+}
+
+// 处理最终测试结果推送
+function handleTestResult(data) {
+  if (data.generated_code && currentTask.value) {
+    currentTask.value.generated_code = data.generated_code
+  }
+  // 刷新完整数据（不重连 WS）
+  reloadTaskDetail()
+}
+
+// 重新加载任务详情（不重连 WS，用于 WS 完成后同步数据）
+async function reloadTaskDetail() {
+  if (!currentTask.value) return
+  try {
+    const res = await getAIExplorationTaskDetail(currentTask.value.id)
+    currentTask.value = { ...currentTask.value, ...res.data }
+    // 仅在 cases 为空或新数据更多时覆盖（避免覆盖实时步骤）
+    const incoming = res.data.cases || []
+    if (!cases.value.length || incoming.length >= cases.value.length) {
+      cases.value = incoming.map(ic => {
+        // 接口未返回步骤时保留现有步骤（兼容旧后端/时序问题），避免步骤被清空
+        const existing = cases.value.find(c => c.id === ic.id)
+        if ((ic.steps || []).length === 0 && existing && (existing.steps || []).length > 0) {
+          return { ...ic, steps: existing.steps }
+        }
+        return ic
+      })
+    }
+  } catch {
+    // 静默
+  }
+}
+
 function disconnectWebSocket() {
   if (wsSocket.value) {
     try { wsSocket.value.close() } catch {}
     wsSocket.value = null
   }
   liveScreenshot.value = ''
+  activeStep.value = null
+  activeCaseId.value = null
+  casePlan.value = []
 }
 
 // 创建弹窗
@@ -284,6 +503,70 @@ const createForm = reactive({
   intent_content: ''
 })
 
+// 功能用例文件上传（功能用例驱动模式）
+const CASE_FILE_ACCEPTS = ['xlsx', 'xls', 'xmind', 'md', 'markdown', 'txt']
+const caseUploadRef = ref(null)
+const uploadingCases = ref(false)
+const casePreviewVisible = ref(false)
+const caseFile = ref({
+  name: '',
+  parsed: false,
+  error: '',
+  caseCount: 0,
+  text: ''
+})
+
+function resetCaseFile() {
+  caseFile.value = { name: '', parsed: false, error: '', caseCount: 0, text: '' }
+  createForm.data_content = ''
+  // 清空 el-upload 内部文件列表，保证同名文件可再次触发选择
+  if (caseUploadRef.value) {
+    try { caseUploadRef.value.clearFiles() } catch { /* ignore */ }
+  }
+}
+
+// 选择文件后立即上传解析
+async function handleCaseFileChange(uploadFile) {
+  const raw = uploadFile && uploadFile.raw
+  if (!raw) return
+  const ext = (raw.name.includes('.') ? raw.name.slice(raw.name.lastIndexOf('.') + 1) : '').toLowerCase()
+  if (!CASE_FILE_ACCEPTS.includes(ext)) {
+    ElMessage.error('仅支持 Excel（.xlsx/.xls）、XMind（.xmind）、Markdown（.md/.txt）文件')
+    return
+  }
+  uploadingCases.value = true
+  caseFile.value = { name: raw.name, parsed: false, error: '', caseCount: 0, text: '' }
+  try {
+    const fd = new FormData()
+    fd.append('file', raw)
+    const res = await uploadAIExplorationCaseFile(fd)
+    const text = res.data.text || ''
+    if (!text) {
+      throw new Error('解析结果为空')
+    }
+    createForm.data_content = text
+    caseFile.value = {
+      name: res.data.filename || raw.name,
+      parsed: true,
+      error: '',
+      caseCount: res.data.case_count || 0,
+      text
+    }
+    ElMessage.success(`用例文件解析成功，共 ${res.data.case_count || 0} 条用例`)
+  } catch (e) {
+    const msg = e.response?.data?.error || e.message || '解析失败'
+    caseFile.value = { name: raw.name, parsed: false, error: msg, caseCount: 0, text: '' }
+    createForm.data_content = ''
+    ElMessage.error('用例文件解析失败：' + msg)
+  } finally {
+    uploadingCases.value = false
+  }
+}
+
+function clearCaseFile() {
+  resetCaseFile()
+}
+
 // 可视化编排
 const showOrchestration = ref(false)
 const orchestrationCase = ref(null)
@@ -294,6 +577,30 @@ const imgScale = ref({ x: 1, y: 1 })
 const savingCoords = ref(false)
 const canvasRef = ref(null)
 const orchImg = ref(null)
+
+// 投屏区图片缩放（用于实时高亮框）
+const screenScale = ref({ x: 1, y: 1 })
+const screenImgRef = ref(null)
+const screenAreaRef = ref(null)
+
+function onScreenImgLoad(e) {
+  const img = e.target
+  if (img && img.naturalWidth) {
+    screenScale.value = { x: img.clientWidth / img.naturalWidth, y: img.clientHeight / img.naturalHeight }
+  }
+}
+
+// 实时步骤高亮框样式
+const activeRectStyle = computed(() => {
+  const r = activeStep.value && activeStep.value.rect
+  if (!r || r.x == null || !screenScale.value.x) return {}
+  return {
+    left: (r.x * screenScale.value.x) + 'px',
+    top: (r.y * screenScale.value.y) + 'px',
+    width: (r.width * screenScale.value.x) + 'px',
+    height: (r.height * screenScale.value.y) + 'px'
+  }
+})
 
 // 拖拽状态
 const dragging = ref(null)
@@ -389,6 +696,8 @@ async function openCreateDialog() {
   createForm.data_source = 'autonomous'
   createForm.data_content = ''
   createForm.intent_content = ''
+  resetCaseFile()
+  casePreviewVisible.value = false
   showCreateDialog.value = true
   loadEnvironmentOptions()
   loadAIModelOptions()
@@ -399,6 +708,16 @@ async function confirmCreate() {
   if (!createForm.start_url) {
     ElMessage.error('请填写起始URL')
     return
+  }
+  if (createForm.data_source === 'case_driven') {
+    if (uploadingCases.value) {
+      ElMessage.warning('用例文件正在解析中，请稍候')
+      return
+    }
+    if (!createForm.data_content) {
+      ElMessage.error('请上传功能用例文件（Excel / XMind / Markdown）')
+      return
+    }
   }
   creating.value = true
   try {
@@ -442,6 +761,26 @@ async function stopTask(task) {
   }
 }
 
+// 删除任务
+async function deleteTask(task) {
+  try {
+    await ElMessageBox.confirm(`确定删除任务「${task.name}」吗？删除后不可恢复`, '删除确认', {
+      confirmButtonText: '删除',
+      cancelButtonText: '取消',
+      type: 'warning'
+    })
+  } catch {
+    return
+  }
+  try {
+    await deleteAIExplorationTask(task.id)
+    ElMessage.success('删除成功')
+    loadTasks()
+  } catch (e) {
+    ElMessage.error('删除失败：' + (e.response?.data?.error || e.message))
+  }
+}
+
 // 进入执行视图
 async function enterTask(task) {
   try {
@@ -450,6 +789,7 @@ async function enterTask(task) {
     cases.value = res.data.cases || []
     latestScreenshot.value = ''
     liveScreenshot.value = ''
+    casePlan.value = []
     connectWebSocket(task.id)
     startPolling()
   } catch (e) {
@@ -475,13 +815,22 @@ function startPolling() {
     if (!currentTask.value) return
     try {
       const res = await getAIExplorationProgress(currentTask.value.id)
-      currentTask.value = res.data
-      cases.value = res.data.cases || []
-      // 最新步骤截图作为投屏占位
-      const allSteps = cases.value.flatMap(c => c.steps || [])
-      latestScreenshot.value = allSteps.length ? allSteps[allSteps.length - 1].screenshot : latestScreenshot.value
+      // 保留 WS 实时推送的 logs，仅更新状态字段
+      const wsLogs = currentTask.value?.logs || ''
+      currentTask.value = { ...res.data, logs: wsLogs || res.data.logs }
+      // 仅当 WS 未实时推送 cases 时才用轮询数据覆盖
+      if (!cases.value.length || cases.value.length < (res.data.cases || []).length) {
+        cases.value = res.data.cases || []
+      }
+      // 最新步骤截图作为投屏占位（WS 未推送截图时）
+      if (!liveScreenshot.value) {
+        const allSteps = cases.value.flatMap(c => c.steps || [])
+        latestScreenshot.value = allSteps.length ? allSteps[allSteps.length - 1].screenshot : latestScreenshot.value
+      }
       if (['passed', 'failed', 'stopped'].includes(currentTask.value.status)) {
         stopPolling()
+        // 最终刷新完整数据
+        reloadTaskDetail()
       }
     } catch (e) {
       console.error('轮询进度失败', e)
@@ -582,6 +931,15 @@ async function saveCoords() {
   }
 }
 
+function copyCode() {
+  if (!currentTask.value || !currentTask.value.generated_code) return
+  navigator.clipboard.writeText(currentTask.value.generated_code).then(() => {
+    ElMessage.success('代码已复制到剪贴板')
+  }).catch(() => {
+    ElMessage.error('复制失败')
+  })
+}
+
 onMounted(() => {
   loadTasks()
   window.addEventListener('mousemove', onWindowMouseMove)
@@ -622,6 +980,107 @@ onUnmounted(() => {
   justify-content: center;
   gap: 6px;
 }
+/* 功能用例文件上传 */
+.case-upload-wrap {
+  width: 100%;
+}
+.case-upload {
+  width: 100%;
+}
+.case-upload :deep(.el-upload),
+.case-upload :deep(.el-upload-dragger) {
+  width: 100%;
+}
+.case-upload :deep(.el-upload-dragger) {
+  padding: 20px;
+  border-radius: 6px;
+  border: 1px dashed #dcdfe6;
+  background: #fafafa;
+  &:hover {
+    border-color: var(--el-color-primary);
+  }
+  &.is-disabled {
+    cursor: not-allowed;
+    opacity: 0.6;
+  }
+}
+.upload-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  .upload-icon {
+    font-size: 32px;
+    color: #c0c4cc;
+  }
+  .upload-text {
+    font-size: 13px;
+    color: #606266;
+  }
+  .upload-hint {
+    font-size: 12px;
+    color: #909399;
+  }
+}
+.case-upload-tip {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  font-size: 12px;
+  color: #409eff;
+}
+.case-upload-result {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 4px;
+  font-size: 12px;
+  flex-wrap: wrap;
+  &.case-upload-ok {
+    background: #f0f9eb;
+    color: #67c23a;
+  }
+  &.case-upload-err {
+    background: #fef0f0;
+    color: #f56c6c;
+  }
+  .result-filename {
+    font-weight: 600;
+    max-width: 220px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #303133;
+  }
+  .err-msg {
+    color: #f56c6c;
+    flex-basis: 100%;
+    word-break: break-all;
+  }
+}
+.case-preview-meta {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 10px;
+  font-size: 13px;
+  color: #606266;
+}
+.case-preview-text {
+  background: #f5f7fa;
+  border-radius: 4px;
+  padding: 12px;
+  max-height: 420px;
+  overflow: auto;
+  font-size: 13px;
+  font-family: Consolas, Monaco, monospace;
+  white-space: pre-wrap;
+  word-wrap: break-word;
+  margin: 0;
+}
 .execution-view {
   .exec-header {
     display: flex;
@@ -654,6 +1113,7 @@ onUnmounted(() => {
     display: flex;
     align-items: center;
     justify-content: center;
+    position: relative;
     .screen-img { max-width: 100%; max-height: 520px; object-fit: contain; }
     .empty-screen {
       color: #909399;
@@ -665,6 +1125,32 @@ onUnmounted(() => {
       .el-icon { font-size: 24px; }
       .screen-tip { font-size: 12px; color: #666; margin-top: 6px; max-width: 360px; }
     }
+    .active-rect-box {
+      position: absolute;
+      border: 2px solid #f56c6c;
+      background: rgba(245, 108, 108, 0.15);
+      border-radius: 2px;
+      pointer-events: none;
+      animation: pulse-highlight 1.5s ease-out infinite;
+      .active-rect-label {
+        position: absolute;
+        top: -22px;
+        left: 0;
+        background: #f56c6c;
+        color: #fff;
+        font-size: 11px;
+        padding: 1px 6px;
+        border-radius: 2px;
+        white-space: nowrap;
+        max-width: 300px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+    }
+  }
+  @keyframes pulse-highlight {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(245, 108, 108, 0.4); }
+    50% { box-shadow: 0 0 0 6px rgba(245, 108, 108, 0); }
   }
   .logs-box {
     margin-top: 10px;
@@ -683,6 +1169,44 @@ onUnmounted(() => {
     }
   }
 }
+/* 用例矩阵（AI 规划） */
+.plan-section {
+  margin-bottom: 8px;
+  .plan-list {
+    max-height: 300px;
+    overflow-y: auto;
+  }
+  .plan-case {
+    border: 1px solid #e4e7ed;
+    border-radius: 4px;
+    margin-bottom: 8px;
+    overflow: hidden;
+    .plan-case-header {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 6px 8px;
+      background: #f5f7fa;
+      .plan-case-id { color: #409eff; font-size: 12px; font-weight: 600; font-family: Consolas, monospace; flex-shrink: 0; }
+      .plan-case-name { flex: 1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .plan-step-count { color: #909399; font-size: 11px; flex-shrink: 0; }
+    }
+    .plan-steps { padding: 4px 8px; }
+    .plan-step {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      padding: 3px 0;
+      font-size: 12px;
+      border-bottom: 1px dashed #f0f0f0;
+      &:last-child { border-bottom: none; }
+      .plan-step-order { width: 16px; height: 16px; border-radius: 50%; background: #dcdfe6; color: #606266; font-size: 10px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+      .plan-step-action { font-size: 11px; flex-shrink: 0; &.step-type-click { color: #e6a23c; } &.step-type-fill { color: #409eff; } &.step-type-navigate { color: #909399; } &.step-type-assert { color: #67c23a; } &.step-type-select { color: #9c27b0; } }
+      .plan-step-target { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #606266; }
+      .plan-step-value { color: #e6a23c; font-size: 11px; font-family: Consolas, monospace; flex-shrink: 0; }
+    }
+  }
+}
 .cases-panel {
   max-height: calc(100vh - 180px);
   display: flex;
@@ -693,6 +1217,8 @@ onUnmounted(() => {
     border-radius: 4px;
     margin-bottom: 10px;
     overflow: hidden;
+    transition: border-color 0.3s;
+    &.case-active { border-color: #f56c6c; box-shadow: 0 0 6px rgba(245, 108, 108, 0.2); }
     .case-header {
       display: flex;
       align-items: center;
@@ -703,6 +1229,7 @@ onUnmounted(() => {
       &:hover { background: #ecf5ff; }
       .case-name { font-weight: 600; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .step-count { color: #909399; font-size: 12px; }
+      .expand-btn { flex-shrink: 0; .expand-icon { margin-left: 2px; } }
     }
     .steps-list { padding: 4px 10px; }
     .step-item {
@@ -713,16 +1240,40 @@ onUnmounted(() => {
       font-size: 13px;
       border-bottom: 1px dashed #f0f0f0;
       &:last-child { border-bottom: none; }
+      &.step-active { background: #fdf6ec; border-radius: 3px; padding-left: 4px; padding-right: 4px; }
       .step-order {
         width: 20px; height: 20px; border-radius: 50%;
         background: #409eff; color: #fff; font-size: 11px;
         display: flex; align-items: center; justify-content: center;
         flex-shrink: 0;
       }
-      .step-type { color: #409eff; font-size: 12px; flex-shrink: 0; }
+      .step-type { color: #409eff; font-size: 12px; flex-shrink: 0; &.step-type-click { color: #e6a23c; } &.step-type-fill { color: #409eff; } &.step-type-navigate { color: #909399; } &.step-type-assert { color: #67c23a; } &.step-type-select { color: #9c27b0; } }
       .step-desc { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #606266; }
+      .step-locator { color: #67c23a; font-size: 11px; font-family: Consolas, monospace; flex-shrink: 0; background: #f0f9eb; padding: 1px 4px; border-radius: 2px; }
       .step-coord { color: #e6a23c; font-size: 12px; font-family: Consolas, monospace; flex-shrink: 0; }
+      .step-fail { color: #f56c6c; font-weight: bold; flex-shrink: 0; }
     }
+  }
+}
+.code-panel {
+  margin-top: 16px;
+  .section-title {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .code-block {
+    background: #1e1e1e;
+    color: #d4d4d4;
+    border-radius: 4px;
+    padding: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+    font-size: 13px;
+    font-family: Consolas, Monaco, monospace;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+    margin: 0;
   }
 }
 .orchestration {

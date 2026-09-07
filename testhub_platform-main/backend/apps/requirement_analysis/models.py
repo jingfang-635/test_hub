@@ -678,7 +678,8 @@ class AIModelService:
     async def call_openai_compatible_api(
             config: AIModelConfig,
             messages: List[Dict[str, str]],
-            max_tokens: int = None
+            max_tokens: int = None,
+            no_proxy: bool = False
     ) -> Dict[str, Any]:
         """
         调用OpenAI兼容格式的API
@@ -687,6 +688,7 @@ class AIModelService:
             config: AI模型配置
             messages: 消息列表
             max_tokens: 可选的最大token数，如果不指定则使用config.max_tokens
+            no_proxy: 为 True 时绕过系统代理/代理环境变量直连（国内 API 走代理易断连）
 
         Returns:
             API响应字典
@@ -741,8 +743,8 @@ class AIModelService:
                 write=60.0,  # 写入超时：60秒
                 pool=60.0  # 连接池超时：60秒
             )
-            async with httpx.AsyncClient(timeout=timeout_config, http2=False) as client:
-                logger.info(f"发送POST请求到: {url}")
+            async with httpx.AsyncClient(timeout=timeout_config, http2=False, trust_env=not no_proxy) as client:
+                logger.info(f"发送POST请求到: {url} (no_proxy={no_proxy})")
                 response = await client.post(
                     url,
                     headers=headers,

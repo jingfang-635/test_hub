@@ -1163,6 +1163,19 @@ export function createAIExplorationTask(data) {
   })
 }
 
+// 上传功能用例文件（Excel/XMind/Markdown）并解析为用例文本
+export function uploadAIExplorationCaseFile(formData) {
+  return request({
+    url: '/ui-automation/ai-exploration-tasks/upload_cases/',
+    method: 'post',
+    data: formData,
+    headers: {
+      'Content-Type': 'multipart/form-data'
+    },
+    timeout: 60000
+  })
+}
+
 // 启动探索任务
 export function startAIExplorationTask(id) {
   return request({
@@ -1176,6 +1189,14 @@ export function stopAIExplorationTask(id) {
   return request({
     url: `/ui-automation/ai-exploration-tasks/${id}/stop/`,
     method: 'post'
+  })
+}
+
+// 删除探索任务
+export function deleteAIExplorationTask(id) {
+  return request({
+    url: `/ui-automation/ai-exploration-tasks/${id}/`,
+    method: 'delete'
   })
 }
 

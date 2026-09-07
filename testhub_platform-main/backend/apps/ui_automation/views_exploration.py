@@ -7,10 +7,12 @@ import threading
 from django.db import connection
 from rest_framework import viewsets, status
 from rest_framework.decorators import action
+from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
 
 from .models import AIExplorationTask, AIExplorationCase, AIExplorationStep
 from .ai_exploration import run_exploration_sync, EXPLORATION_STOP_SIGNALS
+from .case_file_parser import parse_case_file, CaseFileParseError, SUPPORTED_EXTENSIONS
 
 
 def _serialize_task(task):
@@ -25,8 +27,10 @@ def _serialize_task(task):
         'intent_content': task.intent_content,
         'repo_content': task.repo_content,
         'ai_model_id': task.ai_model_config_id,
+        'ai_model_name': (f"{task.ai_model_config.name} ({task.ai_model_config.model_name})" if task.ai_model_config else ''),
         'status': task.status,
         'logs': task.logs,
+        'generated_code': task.generated_code if hasattr(task, 'generated_code') else '',
         'start_time': task.start_time.isoformat() if task.start_time else None,
         'end_time': task.end_time.isoformat() if task.end_time else None,
         'duration': task.duration,
@@ -52,6 +56,8 @@ def _serialize_step(step):
         'action_description': step.action_description,
         'element_index': step.element_index,
         'element_text': step.element_text,
+        'locator_strategy': getattr(step, 'locator_strategy', ''),
+        'locator_value': getattr(step, 'locator_value', ''),
         'rect': step.rect or {},
         'click_point': step.click_point or {},
         'screenshot': step.screenshot,
@@ -71,7 +77,12 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
     def retrieve(self, request, pk=None):
         task = self.get_object()
         data = _serialize_task(task)
-        data['cases'] = [_serialize_case(c) for c in task.cases.all()]
+        case_list = []
+        for c in task.cases.all():
+            cd = _serialize_case(c)
+            cd['steps'] = [_serialize_step(s) for s in c.steps.all()]
+            case_list.append(cd)
+        data['cases'] = case_list
         return Response(data)
 
     def create(self, request):
@@ -108,6 +119,51 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
             created_by=request.user,
         )
         return Response(_serialize_task(task), status=status.HTTP_201_CREATED)
+
+    def destroy(self, request, pk=None):
+        """删除探索任务（运行中的任务不允许删除）"""
+        task = self.get_object()
+        if task.status == 'running':
+            return Response({'error': '任务正在执行中，请先停止后再删除'}, status=status.HTTP_400_BAD_REQUEST)
+        task.delete()
+        return Response(status=status.HTTP_204_NO_CONTENT)
+
+    @action(detail=False, methods=['post'], parser_classes=[MultiPartParser, FormParser])
+    def upload_cases(self, request):
+        """上传功能用例文件（Excel/XMind/Markdown），解析为用例文本供功能用例驱动模式使用。"""
+        upload = request.FILES.get('file')
+        if upload is None:
+            return Response({'error': '未检测到上传文件，请选择用例文件'}, status=status.HTTP_400_BAD_REQUEST)
+
+        ext = ''
+        if upload.name and '.' in upload.name:
+            ext = upload.name[upload.name.rfind('.'):].lower()
+        if ext not in SUPPORTED_EXTENSIONS:
+            return Response(
+                {'error': f'不支持的文件类型：{ext or "未知"}，仅支持 Excel(.xlsx/.xls)、XMind(.xmind)、Markdown(.md/.txt)'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        try:
+            data = upload.read()
+            result = parse_case_file(upload.name, data)
+        except CaseFileParseError as e:
+            return Response({'error': str(e)}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as e:
+            import traceback
+            logger_msg = traceback.format_exc()
+            return Response(
+                {'error': f'文件解析失败：{e}', 'detail': logger_msg},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        return Response({
+            'filename': upload.name,
+            'format': result['format'],
+            'case_count': result['case_count'],
+            'cases': result['cases'],
+            'text': result['text'],
+        }, status=status.HTTP_200_OK)
 
     @action(detail=True, methods=['post'])
     def start(self, request, pk=None):

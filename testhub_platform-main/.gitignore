@@ -91,10 +91,19 @@ media/exploration_screenshots/*
 # 忽略 UI 自动化项目登录态（cookies/storage_state）
 media/ui-automation/auth/*
 !media/ui-automation/auth/.gitkeep
+# 忽略 AI 探索测试登录态（storage_state/cookies，含敏感信息）
+media/exploration_auth/*
+!media/exploration_auth/.gitkeep
+# 忽略 AI 探索生成的测试代码等运行时文件
+media/exploration_tests/*
+!media/exploration_tests/.gitkeep
+# 忽略元素拾取截图等运行时文件
+media/ui-automation/elements/*
+!media/ui-automation/elements/.gitkeep
 # 忽略知识库文档上传文件，但保留 .gitkeep
 media/knowledge_docs/*
 !media/knowledge_docs/.gitkeep
 # 忽略 AI 录屏二进制文件
-backend/agent_history.gif
+agent_history.gif
 # 忽略临时测试脚本
 backend/_run_delete_test.py

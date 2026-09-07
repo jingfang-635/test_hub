@@ -1,6 +1,11 @@
 """
 AI探索测试执行器
-基于 browser-use 自主探索，采集每个步骤的元素坐标(bounding rect + 点击点)和截图。
+
+两种引擎可切换（由任务 data_source 决定）：
+  - playwright_explore_engine：基于 Playwright + LLM 规划的结构化探索（对齐 playwright-explore-to-test 技能）
+  - browser-use 自主探索：AI 控制浏览器自主探索页面
+
+采集每个步骤的元素坐标(bounding rect + 点击点)和截图。
 """
 import asyncio
 import base64
@@ -13,6 +18,7 @@ from django.conf import settings
 
 from .models import AIExplorationTask, AIExplorationCase, AIExplorationStep
 from .ai_agent import BrowserAgent
+from .playwright_explore_engine import run_playwright_exploration_sync
 
 logger = logging.getLogger('django')
 
@@ -364,15 +370,27 @@ def _finish_task(task_id, case_id, status, logs_collector=None, error=''):
 
 
 def run_exploration_sync(task_id):
-    """同步入口（供后台线程调用）"""
+    """同步入口（供后台线程调用）
+
+    默认使用 playwright_explore_engine（对齐 playwright-explore-to-test 技能流程）；
+    当任务 environment 包含 'browser-use' 或 '自主' 关键字时回退到 browser-use 引擎。
+    """
     import sys
-    if sys.platform == 'win32':
-        # Windows: daphne/twisted 强制 SelectorEventLoop 不支持 subprocess，
-        # 显式用 ProactorEventLoop 以支持 browser-use 启动浏览器子进程
-        loop = asyncio.ProactorEventLoop()
-        asyncio.set_event_loop(loop)
-        try:
-            return loop.run_until_complete(run_exploration(task_id))
-        finally:
-            loop.close()
-    return asyncio.run(run_exploration(task_id))
+
+    task = AIExplorationTask.objects.get(id=task_id)
+    env_hint = (task.environment or '').lower()
+
+    # 切换引擎：默认走 Playwright 结构化探索
+    use_browser_use = 'browser-use' in env_hint or 'browseruse' in env_hint
+    if use_browser_use:
+        if sys.platform == 'win32':
+            loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(run_exploration(task_id))
+            finally:
+                loop.close()
+        return asyncio.run(run_exploration(task_id))
+
+    # 默认：Playwright explore-to-test 引擎
+    return run_playwright_exploration_sync(task_id, EXPLORATION_STOP_SIGNALS)
