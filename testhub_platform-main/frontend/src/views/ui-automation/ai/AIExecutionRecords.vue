@@ -210,7 +210,10 @@
           type="primary"
           @click="downloadTaskSource"
         >
-          <el-icon><Download /></el-icon>
+          <el-icon>
+            <Download v-if="taskSourceDetail.task_source === 'file'" />
+            <CopyDocument v-else />
+          </el-icon>
           {{ taskSourceDetail.task_source === 'file'
             ? $t('uiAutomation.ai.executionRecords.downloadDocument')
             : $t('uiAutomation.ai.executionRecords.downloadText') }}
@@ -230,7 +233,7 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Plus, VideoPlay, UploadFilled, Check, CircleClose, Loading, Download } from '@element-plus/icons-vue'
+import { Delete, Plus, VideoPlay, UploadFilled, Check, CircleClose, Loading, Download, CopyDocument } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import {
   getAIExecutionRecords,
@@ -502,19 +505,38 @@ const downloadTaskSource = () => {
     return
   }
 
-  // 文本模式：下载任务描述文本
+  // 文本模式：复制任务描述文本到剪贴板
   if (!detail.task_description) return
   const content = detail.task_description
-  const baseName = (detail.task_name || detail.case_name || 'task').replace(/[\\/:*?"<>|]/g, '_')
-  const blob = new Blob([content], { type: 'text/plain;charset=utf-8' })
-  const url = URL.createObjectURL(blob)
-  const a = document.createElement('a')
-  a.href = url
-  a.download = `${baseName}.txt`
-  document.body.appendChild(a)
-  a.click()
-  document.body.removeChild(a)
-  URL.revokeObjectURL(url)
+  const copyToClipboard = (text) => {
+    if (navigator.clipboard && window.isSecureContext) {
+      return navigator.clipboard.writeText(text)
+    }
+    // 降级方案：兼容非安全上下文
+    return new Promise((resolve, reject) => {
+      const textarea = document.createElement('textarea')
+      textarea.value = text
+      textarea.style.position = 'fixed'
+      textarea.style.opacity = '0'
+      document.body.appendChild(textarea)
+      textarea.select()
+      try {
+        document.execCommand('copy')
+        resolve()
+      } catch (e) {
+        reject(e)
+      } finally {
+        document.body.removeChild(textarea)
+      }
+    })
+  }
+  copyToClipboard(content)
+    .then(() => {
+      ElMessage.success(t('uiAutomation.ai.executionRecords.copySuccess'))
+    })
+    .catch(() => {
+      ElMessage.error(t('uiAutomation.ai.executionRecords.copyFailed'))
+    })
 }
 
 const formatDate = (row, column, cellValue) => {
