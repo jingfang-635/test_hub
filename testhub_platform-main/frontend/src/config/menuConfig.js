@@ -48,6 +48,7 @@ export const MENU_ITEMS = [
   // ===== UI自动化测试 =====
   { key: '/ui-automation/dashboard', module: 'ui-automation', nameKey: 'menu.dashboard', sort: 1 },
   { key: '/ui-automation/projects', module: 'ui-automation', nameKey: 'menu.projectAndVersion', sort: 2 },
+  { key: '/ui-automation/ai-testing', module: 'ui-automation', nameKey: 'menu.aiIntelligentTesting', sort: 2.5 },
   { key: '/ui-automation/elements-enhanced', module: 'ui-automation', nameKey: 'menu.elementManagement', sort: 3 },
   { key: '/ui-automation/test-cases', module: 'ui-automation', nameKey: 'menu.caseManagement', sort: 4 },
   { key: '/ui-automation/scripts-enhanced', module: 'ui-automation', nameKey: 'menu.scriptGeneration', sort: 5 },
@@ -75,9 +76,7 @@ export const MENU_ITEMS = [
 
   // ===== AI 智能模式 =====
   { key: '/ai-intelligent-mode/projects', module: 'ai-intelligent-mode', nameKey: 'menu.projectAndVersion', sort: 1 },
-  { key: '/ai-intelligent-mode/testing', module: 'ai-intelligent-mode', nameKey: 'menu.aiIntelligentTesting', sort: 2 },
   { key: '/ai-intelligent-mode/cases', module: 'ai-intelligent-mode', nameKey: 'menu.aiCaseManagement', sort: 3 },
-  { key: '/ai-intelligent-mode/execution-records', module: 'ai-intelligent-mode', nameKey: 'menu.aiExecutionRecords', sort: 4 },
   { key: '/ai-intelligent-mode/exploration', module: 'ai-intelligent-mode', name: 'AI探索测试', sort: 5 },
 
   // ===== 配置中心 =====

@@ -172,14 +172,21 @@ def _split_md_steps(lines: list[str]) -> tuple[list[str], str]:
 
 # 表头关键字 -> 字段
 _HEADER_KEYWORDS = [
-    ('name', ('用例名称', '用例标题', '案例名称', '测试用例', '用例名', '测试标题',
+    ('name', ('用例标题', '用例名称', '案例名称', '用例名', '测试标题',
               '测试项', '功能点', '测试场景', '场景', '标题', '名称', 'casename', 'case name', 'name', 'title')),
     ('precondition', ('前置条件', '前置要求', '前提条件', '前置', '前提', 'precondition', 'pre-condition')),
     ('steps', ('操作步骤', '测试步骤', '执行步骤', '操作描述', '步骤描述', '操作流程',
                '测试步骤描述', '步骤', '操作', 'steps', 'step', 'procedure', 'actions')),
     ('expected', ('预期结果', '期望结果', '预期输出', '预期', '期望', 'expected', 'expect result', 'expected result')),
-    ('priority', ('优先级', '优先级别', '级别', 'priority', 'severity')),
+    ('priority', ('优先级', '优先级别', '级别', 'priority', 'plevel')),
+    # 序号列单独识别，避免「测试用例编号」被误当成用例名称
+    ('serial', ('测试用例编号', '用例编号', '案例编号', '用例id', '序号', '编号',
+                'caseid', 'case id', 'case no', 'no', 'id')),
 ]
+
+# 名称列排除：表头含这些词时绝不当作用例标题（防止「测试用例编号」命中名称）
+_NAME_HEADER_EXCLUDE = ('编号', '序号', 'id', 'no', '索引', 'index')
+
 
 
 def _parse_xlsx(data: bytes) -> dict:
@@ -281,21 +288,44 @@ def _read_xlsx_rows_stdlib(data: bytes) -> list[list[str]]:
     return rows
 
 
+def _norm_header(s: str) -> str:
+    return re.sub(r'[\s*/_（）()：:\-]+', '', (s or '')).lower()
+
+
 def _detect_header(row: list[str]) -> dict[str, int] | None:
-    """识别表头行，返回 {字段: 列索引}。"""
-    mapping: dict[str, int] = {}
+    """识别表头行，返回 {字段: 列索引}。
+
+    评分规则：精确匹配 > 更长关键字包含匹配；名称字段排除含「编号/序号」的表头。
+    """
+    best: dict[str, tuple[int, int, int]] = {}  # field -> (score, kw_len, col_index)
+
     for i, cell in enumerate(row):
-        cell_norm = re.sub(r'[\s*/_（）()：:]+', '', cell).lower()
+        cell_norm = _norm_header(cell)
         if not cell_norm:
             continue
         for field, keywords in _HEADER_KEYWORDS:
-            if field in mapping:
+            # 名称列：表头若是编号类，跳过，留给 serial
+            if field == 'name' and any(ex in cell_norm for ex in _NAME_HEADER_EXCLUDE):
                 continue
             for kw in keywords:
-                kw_norm = re.sub(r'[\s*/_（）()：:]+', '', kw).lower()
-                if kw_norm and (cell_norm == kw_norm or kw_norm in cell_norm):
-                    mapping[field] = i
-                    break
+                kw_norm = _norm_header(kw)
+                if not kw_norm:
+                    continue
+                if cell_norm == kw_norm:
+                    score = 100 + len(kw_norm)
+                elif kw_norm in cell_norm or cell_norm in kw_norm:
+                    # 短词仅允许精确匹配，避免误伤
+                    if len(kw_norm) <= 2 and cell_norm != kw_norm:
+                        continue
+                    score = 50 + len(kw_norm)
+                else:
+                    continue
+                prev = best.get(field)
+                key = (score, len(kw_norm), -i)
+                if prev is None or key > (prev[0], prev[1], -prev[2]):
+                    best[field] = (score, len(kw_norm), i)
+
+    mapping = {field: col for field, (_, __, col) in best.items()}
     # 至少识别出 名称 或 步骤 才算表头
     if 'name' in mapping or 'steps' in mapping:
         return mapping
@@ -328,7 +358,14 @@ def _rows_to_cases(rows: list[list[str]]) -> list[dict]:
             precondition = cell('precondition')
             if not any((name, steps_raw, expected, precondition)):
                 continue
-            if not name:
+            # 名称若是纯数字（误把序号当名称），从同行其他非空文本列回退
+            if name and re.fullmatch(r'\d+', name.strip()):
+                for col in row:
+                    col = (col or '').strip()
+                    if col and not re.fullmatch(r'\d+', col) and col not in (steps_raw, expected, precondition):
+                        name = col
+                        break
+            if not name or re.fullmatch(r'\d+', name.strip()):
                 name = f'用例{len(cases) + 1}'
             cases.append({
                 'name': name,
@@ -337,15 +374,19 @@ def _rows_to_cases(rows: list[list[str]]) -> list[dict]:
                 'expected': expected,
             })
     else:
-        # 无表头：每行视为一条用例，第一列为名称，其余拼接为步骤
+        # 无表头：每行视为一条用例；若首列是纯数字序号则取第二列为名称
         for row in rows:
             vals = [c for c in row if c.strip()]
             if not vals:
                 continue
+            if len(vals) >= 2 and re.fullmatch(r'\d+', vals[0]):
+                name, rest = vals[1], vals[2:]
+            else:
+                name, rest = vals[0], vals[1:]
             cases.append({
-                'name': vals[0],
+                'name': name,
                 'precondition': '',
-                'steps': vals[1:] if len(vals) > 1 else [],
+                'steps': rest,
                 'expected': '',
             })
     return cases

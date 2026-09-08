@@ -319,8 +319,10 @@ def _build_planning_prompt(
             '"value":"输入值（fill时必填）","expect":"assert时：页面必须出现的逐字文案",'
             '"expect_url":"assert时：URL必须包含的片段","description":"步骤说明"}]}]}\n'
             '规则：\n'
-            '- 文件中的每条功能用例对应一条 case，用例名称保持一致，不得遗漏、合并或自行新增用例\n'
-            '- 用例顺序与文件一致，操作步骤按文件中的步骤顺序逐条转换为 click/fill/select/navigate 动作\n'
+            '- 文件中的每条功能用例对应一条 case，name 必须逐字复制【用例N】后面的用例名称原文（如"登录成功验证"），'
+            '严禁把 name 写成"1""2""用例1""EX-001"等序号\n'
+            '- 用例顺序与文件【用例1】【用例2】…序号一致，不得遗漏、合并或自行新增用例\n'
+            '- 操作步骤按文件中的步骤顺序逐条转换为 click/fill/select/navigate 动作\n'
             '- action 可选：navigate（导航/打开页面）、click（点击按钮/链接/菜单）、fill（输入框输入）、select（下拉选择）、assert（断言）\n'
             + target_rule +
             '- 文件中的"预期结果"转换为 assert 步骤\n'
@@ -412,15 +414,93 @@ def _compact_snapshot(snapshot: dict[str, Any], limit: int = 150) -> dict[str, A
     }
 
 
+def _repair_json(text: str) -> str:
+    """修复 LLM 输出中常见的 JSON 语法问题，尽量让 json.loads 能解析。
+
+    处理：代码围栏、多余前后缀、尾随逗号、注释、单引号、未转义换行等。
+    """
+    s = _strip_code_fence(text)
+    # 提取首个 { ... } 块（含嵌套，用括号配对）
+    start = s.find('{')
+    if start < 0:
+        return s
+    depth = 0
+    in_str = False
+    esc = False
+    end = -1
+    for i in range(start, len(s)):
+        ch = s[i]
+        if in_str:
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            continue
+        if ch == '"':
+            in_str = True
+        elif ch == '{':
+            depth += 1
+        elif ch == '}':
+            depth -= 1
+            if depth == 0:
+                end = i
+                break
+    if end < 0:
+        end = len(s)
+    s = s[start:end + 1]
+
+    # 去掉 // 和 /* */ 注释（保留字符串内的）
+    out = []
+    in_str = False
+    esc = False
+    i = 0
+    n = len(s)
+    while i < n:
+        ch = s[i]
+        if in_str:
+            out.append(ch)
+            if esc:
+                esc = False
+            elif ch == '\\':
+                esc = True
+            elif ch == '"':
+                in_str = False
+            i += 1
+            continue
+        if ch == '"':
+            in_str = True
+            out.append(ch)
+            i += 1
+            continue
+        if ch == '/' and i + 1 < n and s[i + 1] == '/':
+            while i < n and s[i] != '\n':
+                i += 1
+            continue
+        if ch == '/' and i + 1 < n and s[i + 1] == '*':
+            i += 2
+            while i + 1 < n and not (s[i] == '*' and s[i + 1] == '/'):
+                i += 1
+            i += 2
+            continue
+        out.append(ch)
+        i += 1
+    s = ''.join(out)
+
+    # 去掉尾随逗号：,} 或 ,]
+    s = re.sub(r',\s*([}\]])', r'\1', s)
+    return s
+
+
 def _parse_plan(raw: str) -> list[dict[str, Any]]:
-    """解析 LLM 返回的探索步骤矩阵 JSON。"""
-    cleaned = _strip_code_fence(raw)
-    # 容错：提取首个 { ... } 块
-    start = cleaned.find('{')
-    end = cleaned.rfind('}')
-    if start >= 0 and end > start:
-        cleaned = cleaned[start:end + 1]
-    data = json.loads(cleaned)
+    """解析 LLM 返回的探索步骤矩阵 JSON（含容错修复）。"""
+    cleaned = _repair_json(raw)
+    try:
+        data = json.loads(cleaned)
+    except json.JSONDecodeError:
+        # 修复后仍失败：尝试逐条提取 cases 数组中的对象（容忍部分损坏）
+        data = _parse_cases_fallback(cleaned)
     cases = data.get('cases') or []
     # 规范化
     result = []
@@ -434,6 +514,109 @@ def _parse_plan(raw: str) -> list[dict[str, Any]]:
             'name': c.get('name', f'探索用例{len(result) + 1}'),
             'steps': norm_steps,
         })
+    return result
+
+
+def _parse_cases_fallback(text: str) -> dict:
+    """容错解析：从文本中逐个提取 cases 数组里的用例对象。
+
+    当整体 JSON 损坏时，用括号配对逐个提取 { ... } 对象，尽量保留可用用例。
+    """
+    cases: list[dict] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        j = text.find('{', i)
+        if j < 0:
+            break
+        depth = 0
+        in_str = False
+        esc = False
+        k = j
+        while k < n:
+            ch = text[k]
+            if in_str:
+                if esc:
+                    esc = False
+                elif ch == '\\':
+                    esc = True
+                elif ch == '"':
+                    in_str = False
+            elif ch == '"':
+                in_str = True
+            elif ch == '{':
+                depth += 1
+            elif ch == '}':
+                depth -= 1
+                if depth == 0:
+                    break
+            k += 1
+        obj_text = text[j:k + 1]
+        i = k + 1
+        try:
+            obj = json.loads(obj_text)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(obj, dict):
+            continue
+        # 只接受含 name 或 steps 的用例对象
+        if 'name' in obj or 'steps' in obj:
+            cases.append(obj)
+    return {'cases': cases}
+
+
+def _parse_document_case_names(data_content: str) -> list[str]:
+    """从功能用例文本（data_content）中按序号从小到大提取用例名称。
+
+    文本由 case_file_parser._cases_to_text 生成，格式为：
+        【用例1】用例名称
+        【用例2】用例名称
+    """
+    names: list[tuple[int, str]] = []
+    for m in re.finditer(r'【用例(\d+)】\s*(.+)', data_content or ''):
+        try:
+            idx = int(m.group(1))
+        except ValueError:
+            continue
+        name = m.group(2).strip()
+        if name:
+            names.append((idx, name))
+    # 按序号从小到大排序
+    names.sort(key=lambda x: x[0])
+    return [n for _, n in names]
+
+
+def _reorder_cases_by_document(cases_plan: list[dict[str, Any]], data_content: str) -> list[dict[str, Any]]:
+    """功能用例驱动模式下，按文档序号强制覆盖用例名称，并按文档顺序对齐。
+
+    不以 LLM 返回的 name 做模糊匹配（LLM 常把名称写成"1""2"或 EX-001），
+    直接按文档序号 i 把第 i 条规划用例的 name 强制设为文档中的真实用例名称。
+    """
+    doc_names = _parse_document_case_names(data_content)
+    if not doc_names:
+        return cases_plan
+
+    result: list[dict[str, Any]] = []
+    for i, case in enumerate(cases_plan):
+        c = dict(case)
+        if i < len(doc_names):
+            c['name'] = doc_names[i]
+            c['id'] = f'EX-{i + 1:03d}'
+        else:
+            # 超出文档条数的规划用例保留，但编号顺延
+            c['id'] = c.get('id') or f'EX-{i + 1:03d}'
+            if not (c.get('name') or '').strip() or re.fullmatch(r'\d+', str(c.get('name', '')).strip()):
+                c['name'] = f'探索用例{i + 1}'
+        result.append(c)
+
+    # 文档中有、但 LLM 漏规划的用例：补空壳（仅名称），保证矩阵按文档序号完整展示
+    if len(result) < len(doc_names):
+        for i in range(len(result), len(doc_names)):
+            result.append({
+                'id': f'EX-{i + 1:03d}',
+                'name': doc_names[i],
+                'steps': [],
+            })
     return result
 
 
@@ -1331,6 +1514,20 @@ async def run_playwright_exploration(task_id: int, stop_signals: dict):
         messages = _build_planning_prompt(task, snapshot_summary, recent_case_names)
         plan_raw = await _run_llm(llm_config, messages)
         cases_plan = _parse_plan(plan_raw)
+        # 功能用例驱动：按文档序号强制覆盖用例名称（不依赖 LLM 返回的 name）
+        if task.data_source == 'case_driven':
+            doc_names = _parse_document_case_names(task.data_content or '')
+            cases_plan = _reorder_cases_by_document(cases_plan, task.data_content or '')
+            if doc_names:
+                await append_log(
+                    '按文档序号覆盖用例名称: '
+                    + '、'.join(f'{i + 1}.{n}' for i, n in enumerate(doc_names[:20]))
+                )
+        # LLM 常把 name 写成 "1"/"2"，统一回退为可读名称
+        for i, cp in enumerate(cases_plan):
+            raw_name = str(cp.get('name') or '').strip()
+            if not raw_name or re.fullmatch(r'\d+', raw_name):
+                cp['name'] = f'探索用例{i + 1}'
         await append_log(f'AI 规划完成: {len(cases_plan)} 条用例')
 
         # ---- 推送用例矩阵给前端（探索前先展示）----

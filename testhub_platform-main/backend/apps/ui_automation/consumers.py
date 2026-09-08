@@ -106,6 +106,49 @@ class UIExplorationConsumer(AsyncJsonWebsocketConsumer):
             logger.error(f"推送测试结果失败: {e}")
 
 
+class AIScreencastConsumer(AsyncJsonWebsocketConsumer):
+    """AI 智能测试（Adhoc 执行）实时投屏：ws/ui-automation/ai-screencast/<execution_id>/"""
+
+    async def connect(self):
+        try:
+            self.execution_id = self.scope["url_route"]["kwargs"]["execution_id"]
+            self.group_name = f"ui_ai_{self.execution_id}"
+            await self.channel_layer.group_add(self.group_name, self.channel_name)
+            await self.accept()
+            logger.info(f"AI投屏 WS 已连接: execution_id={self.execution_id}")
+        except Exception as e:
+            logger.error(f"AI投屏 WS 连接失败: {e}")
+            await self.close()
+
+    async def disconnect(self, close_code):
+        try:
+            if hasattr(self, 'group_name'):
+                await self.channel_layer.group_discard(self.group_name, self.channel_name)
+        except Exception:
+            pass
+
+    async def screenshot_update(self, event):
+        """接收后端 group_send 的截图，转发给前端"""
+        try:
+            await self.send_json({
+                'type': 'screenshot',
+                'image': event.get('image', ''),
+            })
+        except Exception as e:
+            logger.error(f"AI投屏推送截图失败: {e}")
+
+    async def ai_status(self, event):
+        """任务状态变更推送（开始/结束）"""
+        try:
+            await self.send_json({
+                'type': 'status',
+                'status': event.get('status', ''),
+                'message': event.get('message', ''),
+            })
+        except Exception as e:
+            logger.error(f"AI投屏推送状态失败: {e}")
+
+
 class ElementPickerConsumer(AsyncJsonWebsocketConsumer):
     """元素拾取实时投屏：ws/ui-automation/element-picker/<session_id>/"""
 

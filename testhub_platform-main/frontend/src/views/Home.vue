@@ -199,7 +199,7 @@ const handleNavigate = (type) => {
     'api': '/api-testing/dashboard',
     'ui': '/ui-automation/dashboard',
     'app': '/app-automation/dashboard',
-    'ai-intelligent': '/ai-intelligent-mode/testing',
+    'ai-intelligent': '/ai-intelligent-mode/projects',
     'assistant': '/ai-generation/assistant',
     'config': '/configuration/ai-model',
     'data': '/data-factory'

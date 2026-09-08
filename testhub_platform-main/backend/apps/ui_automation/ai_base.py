@@ -1534,6 +1534,13 @@ class BaseBrowserAgent:
         try:
             explicit_steps = self._extract_structured_steps(task_description)
             if len(explicit_steps) >= 2:
+                # 上传用例文件文本（含【用例N】）必须保留原始步骤粒度，禁止 LLM 合并，
+                # 否则 planned_tasks 与右侧用例明细步数不一致，划线进度错位
+                is_case_file_text = bool(re.search(r'【用例\d+】', str(task_description or '')))
+                if is_case_file_text:
+                    cleaned_steps = self._normalize_steps(explicit_steps, task_description)
+                    return [{'id': i + 1, 'description': s, 'status': 'pending'} for i, s in enumerate(cleaned_steps)]
+
                 if self._should_redecompose_explicit_steps(explicit_steps):
                     try:
                         steps = await self._model_break_down_task(task_description, mode='recompose')
@@ -2170,11 +2177,13 @@ class BaseBrowserAgent:
         }
 
     async def run_full_process(self, task_description: str, analysis_callback=None, step_callback=None,
-                               should_stop=None):
+                               should_stop=None, planned_tasks=None):
         # 先做执行前预检：失败立刻终止，避免拆任务后开浏览器再空转
         await self._preflight_check()
 
-        planned_tasks = await self.analyze_task(task_description)
+        # 文件模式可传入与右侧用例明细 1:1 的 planned_tasks，跳过 LLM 重新拆分，避免划线进度错位
+        if planned_tasks is None:
+            planned_tasks = await self.analyze_task(task_description)
         if analysis_callback:
             if asyncio.iscoroutinefunction(analysis_callback):
                 await analysis_callback(planned_tasks)

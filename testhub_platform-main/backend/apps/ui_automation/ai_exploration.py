@@ -372,15 +372,29 @@ def _finish_task(task_id, case_id, status, logs_collector=None, error=''):
 def run_exploration_sync(task_id):
     """同步入口（供后台线程调用）
 
-    默认使用 playwright_explore_engine（对齐 playwright-explore-to-test 技能流程）；
-    当任务 environment 包含 'browser-use' 或 '自主' 关键字时回退到 browser-use 引擎。
+    引擎选择：
+      - 功能用例驱动（case_driven）：强制走 browser-use 引擎（AI 智能测试流程）。
+        用例驱动场景下 AI 智能测试效果更好（LLM 每步实时决策，能按用例顺序逐步执行并应变）。
+      - 自主探索（autonomous）：默认走 playwright_explore_engine（对齐 playwright-explore-to-test 技能流程）；
+        当任务 environment 包含 'browser-use' 或 '自主' 关键字时也回退到 browser-use 引擎。
     """
     import sys
 
     task = AIExplorationTask.objects.get(id=task_id)
     env_hint = (task.environment or '').lower()
 
-    # 切换引擎：默认走 Playwright 结构化探索
+    # 功能用例驱动：强制使用 browser-use（AI 智能测试）引擎
+    if task.data_source == 'case_driven':
+        if sys.platform == 'win32':
+            loop = asyncio.ProactorEventLoop()
+            asyncio.set_event_loop(loop)
+            try:
+                return loop.run_until_complete(run_exploration(task_id))
+            finally:
+                loop.close()
+        return asyncio.run(run_exploration(task_id))
+
+    # 自主探索：environment 含 browser-use 关键字时走 browser-use 引擎
     use_browser_use = 'browser-use' in env_hint or 'browseruse' in env_hint
     if use_browser_use:
         if sys.platform == 'win32':

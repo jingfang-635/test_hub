@@ -96,6 +96,15 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
         ai_model_id = request.data.get('ai_model_id')
         if not start_url:
             return Response({'error': '起始URL不能为空'}, status=status.HTTP_400_BAD_REQUEST)
+        # 校验 URL 格式：必须是 http/https 开头的合法网址，避免把账号密码等非 URL 内容误填导致静默失败
+        from urllib.parse import urlparse
+        parsed = urlparse(str(start_url).strip())
+        if parsed.scheme not in ('http', 'https') or not parsed.netloc:
+            return Response(
+                {'error': '起始URL格式不正确，请输入以 http:// 或 https:// 开头的完整网址（如 https://example.com）。'
+                          '账号、密码等登录信息请填写在"自然语言意图"中'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
 
         # 查找AI模型配置
         ai_model_config = None

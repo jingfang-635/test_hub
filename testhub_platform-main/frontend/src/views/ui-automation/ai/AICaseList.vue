@@ -218,10 +218,14 @@ const deleteCase = async (id) => {
 // 执行用例
 const runCase = async (row) => {
   try {
-    await runAICase(row.id)
+    const response = await runAICase(row.id)
     ElMessage.success(t('uiAutomation.ai.caseList.messages.runSuccess'))
-    // 跳转到执行记录页面
-    router.push('/ai-intelligent-mode/execution-records')
+    const executionId = response.data?.execution_id
+    if (executionId) {
+      router.push(`/ui-automation/ai-testing/${executionId}`)
+    } else {
+      router.push('/ui-automation/ai-testing')
+    }
   } catch (error) {
     console.error('执行失败:', error)
     ElMessage.error(t('uiAutomation.ai.caseList.messages.runFailed'))

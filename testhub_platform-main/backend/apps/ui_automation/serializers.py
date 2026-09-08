@@ -902,17 +902,27 @@ class AIExecutionRecordSerializer(serializers.ModelSerializer):
     project_name = serializers.CharField(source='project.name', read_only=True)
     ai_case_name = serializers.CharField(source='ai_case.name', read_only=True)
     executed_by_name = serializers.CharField(source='executed_by.username', read_only=True)
+    source_file_url = serializers.SerializerMethodField()
 
     class Meta:
         model = AIExecutionRecord
         fields = [
             'id', 'project', 'project_id', 'project_name', 'ai_case', 'ai_case_id', 'ai_case_name', 'case_name',
+            'task_name', 'task_source', 'source_file', 'source_file_url',
             'task_description',
             'execution_mode', 'status', 'start_time', 'end_time', 'duration',
-            'logs', 'steps_completed', 'planned_tasks', 'executed_by', 'executed_by_name',
+            'logs', 'steps_completed', 'planned_tasks', 'parsed_cases', 'executed_by', 'executed_by_name',
             'gif_path', 'screenshots_sequence'
         ]
         read_only_fields = ('start_time', 'end_time', 'duration', 'executed_by', 'gif_path', 'screenshots_sequence')
+
+    def get_source_file_url(self, obj):
+        if obj.source_file:
+            try:
+                return obj.source_file.url
+            except Exception:
+                return None
+        return None
 
 
 

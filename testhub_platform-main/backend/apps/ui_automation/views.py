@@ -3769,6 +3769,12 @@ class AICaseViewSet(viewsets.ModelViewSet):
                     execution_record.status = 'stopped'
                     execution_record.logs += "\n[System] 任务已由用户停止。"
                 else:
+                    # 补齐 AI 漏标的前序步骤（如合并输入账号+密码只 mark 了一次）
+                    reconciled = reconcile_skipped_pending_tasks(execution_record.planned_tasks)
+                    if reconciled:
+                        execution_record.logs += (
+                            f"\n[System] 结束前补齐漏标子任务: {', '.join(map(str, reconciled))}"
+                        )
                     execution_record.status, task_summary = resolve_execution_status(execution_record.planned_tasks)
                     if execution_record.status == 'passed':
                         execution_record.logs += "\n执行完成。"
@@ -3892,6 +3898,34 @@ TERMINAL_TASK_STATUSES = {'completed', 'failed', 'skipped'}
 ACTIVE_TASK_STATUSES = {'pending', 'in_progress'}
 
 
+def build_planned_tasks_from_cases(cases):
+    """从上传解析的用例步骤构建 planned_tasks，与前端用例明细 1:1 对齐。
+
+    跳过 LLM 重新拆分/合并，避免右侧划线与日志/投屏进度错位。
+    """
+    tasks = []
+    if not isinstance(cases, list):
+        return tasks
+    for case in cases:
+        if not isinstance(case, dict):
+            continue
+        steps = case.get('steps') or []
+        if not steps:
+            expected = (case.get('expected') or '').strip()
+            name = (case.get('name') or '').strip() or f'用例{len(tasks) + 1}'
+            steps = [f'预期结果：{expected}' if expected else name]
+        for step in steps:
+            desc = str(step).strip() if step is not None else ''
+            if not desc:
+                continue
+            tasks.append({
+                'id': len(tasks) + 1,
+                'description': desc,
+                'status': 'pending',
+            })
+    return tasks
+
+
 def update_planned_task_status(planned_tasks, task_id, task_status):
     """更新子任务状态，返回是否命中任务。"""
     if not planned_tasks or task_id is None or not task_status:
@@ -3906,7 +3940,14 @@ def update_planned_task_status(planned_tasks, task_id, task_status):
 
 
 def backfill_prior_pending_tasks(planned_tasks, current_task_id):
-    """受限补齐：仅在强依赖场景下补齐紧邻前一步遗漏标记。"""
+    """补齐当前任务之前被 AI 漏标的前序步骤。
+
+    常见场景：同一 agent step 里连续输入账号+密码，却只 mark 了其中一个；
+    随后又 mark 了「点击登录」，导致「输入密码」一直 pending → 用例明细不划线、整单失败。
+
+    策略：当标记 task N 为 completed 时，把 id < N 且仍为 pending/in_progress 的
+    连续前序任务一并标为 completed（验证/断言类步骤除外，须显式标记）。
+    """
     if not planned_tasks or current_task_id is None:
         return []
 
@@ -3922,42 +3963,54 @@ def backfill_prior_pending_tasks(planned_tasks, current_task_id):
         except (TypeError, ValueError):
             continue
 
-    current_task = task_by_id.get(current_task_id_int)
-    previous_task = task_by_id.get(current_task_id_int - 1)
-    if not current_task or not previous_task:
+    if current_task_id_int not in task_by_id:
         return []
 
-    if previous_task.get('status', 'pending') not in ACTIVE_TASK_STATUSES:
-        return []
-
-    previous_desc = str(previous_task.get('description', '')).strip()
-    current_desc = str(current_task.get('description', '')).strip()
-
-    # 验证/检查类任务必须显式标记，禁止自动补齐
     verification_keywords = ['校验', '确认', '检查', '验证', '断言']
-    if any(keyword in previous_desc for keyword in verification_keywords):
+    backfilled_ids = []
+
+    # 从 N-1 向前连续补齐，遇到已终态则停下；验证类步骤跳过不强制改写
+    for tid in range(current_task_id_int - 1, 0, -1):
+        task = task_by_id.get(tid)
+        if not task:
+            continue
+        status = task.get('status', 'pending')
+        if status in TERMINAL_TASK_STATUSES:
+            # 已终态：继续往前看是否还有空洞（如 1 done, 2 pending, 3 done, 现 mark 5）
+            continue
+        if status not in ACTIVE_TASK_STATUSES:
+            continue
+        desc = str(task.get('description', '')).strip()
+        if any(keyword in desc for keyword in verification_keywords):
+            continue
+        task['status'] = 'completed'
+        backfilled_ids.append(tid)
+
+    backfilled_ids.reverse()
+    return backfilled_ids
+
+
+def reconcile_skipped_pending_tasks(planned_tasks):
+    """执行结束时再扫一遍：最高已完成 id 之前的非验证 pending 一律补齐。
+
+    防止 AI 漏 mark 导致整单被 resolve 成 failed。
+    """
+    if not planned_tasks:
         return []
 
-    dependency_pairs = [
-        (['访问', '打开', '进入'], ['搜索', '输入', '点击', '查看']),
-        (['搜索'], ['点击第', '点击第2条', '点击第二条', '查看详情']),
-        (['点击第', '点击第2条', '点击第二条', '查看详情'], ['关闭', '关闭该标签页', '关闭标签页']),
-        (['打开详情', '查看详情'], ['关闭', '返回']),
-    ]
+    max_completed_id = 0
+    for task in planned_tasks:
+        try:
+            tid = int(task.get('id'))
+        except (TypeError, ValueError):
+            continue
+        if task.get('status') == 'completed' and tid > max_completed_id:
+            max_completed_id = tid
 
-    def matches_any(text, keywords):
-        return any(keyword in text for keyword in keywords)
-
-    allowed = any(
-        matches_any(previous_desc, prev_keywords) and matches_any(current_desc, curr_keywords)
-        for prev_keywords, curr_keywords in dependency_pairs
-    )
-
-    if not allowed:
+    if max_completed_id <= 1:
         return []
 
-    previous_task['status'] = 'completed'
-    return [current_task_id_int - 1]
+    return backfill_prior_pending_tasks(planned_tasks, max_completed_id)
 
 
 def mark_first_active_task(planned_tasks, task_status):
@@ -4049,6 +4102,7 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['project', 'ai_case', 'status']
     ordering = ['-start_time']
+    pagination_class = StandardPagination
 
     def get_queryset(self):
         user = self.request.user
@@ -4100,9 +4154,21 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
     def run_adhoc(self, request):
         """执行临时 AI 任务"""
         project_id = request.data.get('project_id')
+        task_name = request.data.get('task_name', '')
+        task_source = request.data.get('task_source', 'text')  # 任务来源：text/file
         task_description = request.data.get('task_description')
         execution_mode = request.data.get('execution_mode', 'text')  # 默认文本模式
         enable_gif = request.data.get('enable_gif', True)  # GIF录制开关，默认开启
+        # 文件模式：前端上传解析出的用例结构，用于构建与右侧明细 1:1 的 planned_tasks
+        parsed_cases = request.data.get('parsed_cases')
+        # multipart 模式下 parsed_cases 会以字符串形式到达，需解析为 JSON
+        if isinstance(parsed_cases, str):
+            try:
+                parsed_cases = json.loads(parsed_cases)
+            except (ValueError, TypeError):
+                parsed_cases = None
+        # 文件模式：原始上传的 Excel 文档，用于后续下载
+        source_file = request.FILES.get('source_file')
 
         if not task_description:
             return Response({'error': '缺少任务描述参数'}, status=status.HTTP_400_BAD_REQUEST)
@@ -4115,15 +4181,23 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
             except UiProject.DoesNotExist:
                 return Response({'error': '项目不存在'}, status=status.HTTP_404_NOT_FOUND)
 
+        # 文件模式：用解析步骤直接生成 planned_tasks，跳过 LLM 重新拆分
+        preset_planned_tasks = build_planned_tasks_from_cases(parsed_cases) if parsed_cases else None
+
         # 创建执行记录
         execution_record = AIExecutionRecord.objects.create(
             project=project,
             case_name="Adhoc Task",
+            task_name=task_name,
+            task_source=task_source,
             task_description=task_description,
             execution_mode=execution_mode,
             status='running',
             executed_by=request.user,
-            logs="正在分析任务...\n"
+            logs="正在分析任务...\n" if not preset_planned_tasks else "已按用例文件步骤开始执行...\n",
+            planned_tasks=preset_planned_tasks or [],
+            parsed_cases=parsed_cases or [],
+            source_file=source_file,
         )
 
         # 异步执行
@@ -4258,7 +4332,9 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     should_stop=should_stop_async,  # 传递异步版本
                     execution_mode=execution_mode,
                     enable_gif=enable_gif,  # 传递GIF录制开关
-                    case_name=task_description[:50] if task_description else "Adhoc Task"  # 传递用例名称用于GIF文件命名
+                    case_name=task_description[:50] if task_description else "Adhoc Task",  # 传递用例名称用于GIF文件命名
+                    screencast_group=f"ui_ai_{execution_record.id}",  # 实时投屏：与 AI 探索测试同一套推送模式
+                    planned_tasks=preset_planned_tasks,  # 文件模式：与右侧用例明细 1:1，跳过 LLM 拆分
                 )
 
                 # 检查是否是手动停止 (使用同步版本)
@@ -4266,6 +4342,12 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     execution_record.status = 'stopped'
                     execution_record.logs += "\n[System] 任务已由用户停止。"
                 else:
+                    # 补齐 AI 漏标的前序步骤（如合并输入账号+密码只 mark 了一次）
+                    reconciled = reconcile_skipped_pending_tasks(execution_record.planned_tasks)
+                    if reconciled:
+                        execution_record.logs += (
+                            f"\n[System] 结束前补齐漏标子任务: {', '.join(map(str, reconciled))}"
+                        )
                     execution_record.status, task_summary = resolve_execution_status(execution_record.planned_tasks)
                     if execution_record.status == 'passed':
                         execution_record.logs += "\n执行完成。"
@@ -4338,6 +4420,25 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
             'message': 'AI 任务开始执行',
             'execution_id': execution_record.id
         })
+
+    @action(detail=True, methods=['get'], url_path='download_source_file')
+    def download_source_file(self, request, pk=None):
+        """下载文件模式上传的原始用例文档（Excel）"""
+        record = self.get_object()
+        if not record.source_file:
+            return Response({'error': '该记录没有原始用例文档'}, status=status.HTTP_404_NOT_FOUND)
+
+        file_path = record.source_file.path
+        if not os.path.exists(file_path):
+            return Response({'error': '原始用例文档不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        filename = os.path.basename(record.source_file.name)
+        response = FileResponse(
+            open(file_path, 'rb'),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+        )
+        response['Content-Disposition'] = f"attachment; filename*=UTF-8''{quote(filename)}"
+        return response
 
     @action(detail=True, methods=['post'], url_path='stop')
     def stop_task(self, request, pk=None):

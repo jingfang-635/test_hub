@@ -1092,11 +1092,13 @@ export function getAIExecutionRecordDetail(id) {
 }
 
 // 执行临时 AI 任务
-export function runAdhocAITask(data) {
+export function runAdhocAITask(data, isMultipart = false) {
   return request({
     url: '/ui-automation/ai-execution-records/run_adhoc/',
     method: 'post',
-    data
+    data,
+    // 发送 FormData 时不要手动指定 Content-Type，让 axios 自动带上 boundary
+    ...(isMultipart ? { headers: { 'Content-Type': undefined } } : {})
   })
 }
 

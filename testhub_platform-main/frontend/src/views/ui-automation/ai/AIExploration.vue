@@ -2,15 +2,30 @@
   <div class="exploration-page">
     <!-- 顶部 -->
     <div class="page-header">
-      <h1 class="page-title">AI探索测试</h1>
-      <div class="header-actions">
-        <el-button type="primary" @click="openCreateDialog">
-          <el-icon><Plus /></el-icon> 新建测试
-        </el-button>
-        <el-button @click="loadTasks" v-if="!currentTask">
-          <el-icon><Refresh /></el-icon> 刷新
-        </el-button>
-      </div>
+      <template v-if="!currentTask">
+        <h1 class="page-title">AI探索测试</h1>
+        <div class="header-actions">
+          <el-button type="primary" @click="openCreateDialog">
+            <el-icon><Plus /></el-icon> 新建测试
+          </el-button>
+          <el-button @click="loadTasks">
+            <el-icon><Refresh /></el-icon> 刷新
+          </el-button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="exec-header">
+          <el-button size="small" :icon="ArrowLeft" circle @click="exitTask" title="返回列表" />
+          <span class="exec-title" :title="currentTask.name">{{ currentTask.name }}</span>
+          <el-button
+            v-if="currentTask.status === 'running'"
+            class="exec-stop"
+            size="small"
+            type="danger"
+            @click="stopTask(currentTask)"
+          >停止执行</el-button>
+        </div>
+      </template>
     </div>
 
     <!-- 任务列表视图 -->
@@ -48,15 +63,6 @@
 
     <!-- 执行视图 -->
     <div v-else class="execution-view">
-      <div class="exec-header">
-        <el-button size="small" @click="exitTask">
-          <el-icon><ArrowLeft /></el-icon> 返回列表
-        </el-button>
-        <span class="exec-title">{{ currentTask.name }}</span>
-        <el-tag :type="statusTagType(currentTask.status)" size="small">{{ statusText(currentTask.status) }}</el-tag>
-        <el-button v-if="currentTask.status === 'running'" size="small" type="danger" @click="stopTask(currentTask)">停止执行</el-button>
-      </div>
-
       <el-row :gutter="16">
         <!-- 左：投屏区（第一阶段显示最新步骤截图，第二阶段接入WebSocket实时画面） -->
         <el-col :span="14">
@@ -97,8 +103,7 @@
               <div class="plan-list">
                 <div v-for="(pc, idx) in casePlan" :key="idx" class="plan-case">
                   <div class="plan-case-header">
-                    <span class="plan-case-id">{{ pc.id || `EX-${idx + 1}` }}</span>
-                    <span class="plan-case-name">{{ pc.name }}</span>
+                    <span class="plan-case-name" :title="caseDisplayName(pc.name, idx)">{{ caseDisplayName(pc.name, idx) }}</span>
                     <span class="plan-step-count">{{ pc.step_count || (pc.steps || []).length }} 步</span>
                   </div>
                   <div class="plan-steps">
@@ -116,17 +121,17 @@
             <!-- 实时探索步骤 -->
             <div class="section-title" style="margin-top: 12px;">
               实时探索步骤
-              <el-tag v-if="activeStep" size="small" type="warning">执行中</el-tag>
+              <el-tag v-if="currentTask.status === 'running'" size="small" type="warning">执行中</el-tag>
             </div>
             <div class="cases-list">
               <div v-if="cases.length === 0 && casePlan.length === 0" class="empty-tip">
                 <el-icon class="is-loading" v-if="currentTask.status === 'running'"><Loading /></el-icon>
                 {{ currentTask.status === 'running' ? 'AI 正在规划用例...' : '暂无用例' }}
               </div>
-              <div v-for="c in cases" :key="c.id" class="case-item" :class="{ 'case-active': activeCaseId === c.id }">
+              <div v-for="(c, cIdx) in cases" :key="c.id" class="case-item" :class="{ 'case-active': activeCaseId === c.id }">
                 <div class="case-header" @click="toggleExpand(c.id)">
                   <el-icon><Document /></el-icon>
-                  <span class="case-name">{{ c.name }}</span>
+                  <span class="case-name">{{ caseDisplayName(c.name, cIdx) }}</span>
                   <el-tag size="small" :type="statusTagType(c.status)">{{ statusText(c.status) }}</el-tag>
                   <span class="step-count">{{ (c.steps || []).length }} 步</span>
                   <el-button size="small" type="primary" link class="expand-btn" @click.stop="toggleExpand(c.id)">
@@ -173,7 +178,7 @@
     <el-dialog v-model="showCreateDialog" title="新建探索测试" width="620px" :close-on-click-modal="false">
       <el-form :model="createForm" label-width="100px">
         <el-form-item label="起始URL" required>
-          <el-input v-model="createForm.start_url" placeholder="https://example.com" />
+          <el-input v-model="createForm.start_url" placeholder="https://example.com（必须是完整网址，账号密码请填到下方意图中）" />
         </el-form-item>
         <el-form-item label="环境">
           <el-select v-model="createForm.environment" placeholder="请选择项目环境" clearable filterable style="width: 100%">
@@ -242,7 +247,7 @@
             v-model="createForm.intent_content"
             type="textarea"
             :rows="3"
-            placeholder="如：登录并验证首页核心功能"
+            placeholder="如：登录并验证首页核心功能。账号、密码等登录信息填在这里，如：登录，账号 15183871603，密码 123456"
           />
         </el-form-item>
         <el-form-item label="任务名称">
@@ -356,6 +361,13 @@ function isExpanded(id) {
 }
 function toggleExpand(id) {
   expandedCaseIds.value[id] = !expandedCaseIds.value[id]
+}
+
+/** 用例名若为空或纯数字（LLM 常写成 1/2），显示为「用例N」 */
+function caseDisplayName(name, idx) {
+  const n = (name || '').trim()
+  if (!n || /^\d+$/.test(n)) return `用例${(idx ?? 0) + 1}`
+  return n
 }
 
 // ===== 实时投屏 WebSocket =====
@@ -964,6 +976,25 @@ onUnmounted(() => {
   margin-bottom: 16px;
   .page-title { font-size: 20px; font-weight: 600; margin: 0; }
   .header-actions { display: flex; gap: 8px; }
+  .exec-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex: 1;
+    min-width: 0; /* 允许在 page-header 内收缩，避免把状态标签挤出视口 */
+    .exec-title {
+      flex: 1;
+      min-width: 0;
+      font-size: 16px;
+      font-weight: 600;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    .exec-stop {
+      flex-shrink: 0;
+    }
+  }
 }
 .task-list-wrap {
   background: #fff;
@@ -1081,15 +1112,6 @@ onUnmounted(() => {
   word-wrap: break-word;
   margin: 0;
 }
-.execution-view {
-  .exec-header {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 12px;
-    .exec-title { font-size: 16px; font-weight: 600; }
-  }
-}
 .panel {
   background: #fff;
   border-radius: 4px;
@@ -1188,7 +1210,7 @@ onUnmounted(() => {
       padding: 6px 8px;
       background: #f5f7fa;
       .plan-case-id { color: #409eff; font-size: 12px; font-weight: 600; font-family: Consolas, monospace; flex-shrink: 0; }
-      .plan-case-name { flex: 1; font-size: 13px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+      .plan-case-name { flex: 1; font-size: 13px; font-weight: 600; color: #303133; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
       .plan-step-count { color: #909399; font-size: 11px; flex-shrink: 0; }
     }
     .plan-steps { padding: 4px 8px; }

@@ -102,6 +102,10 @@
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
+            <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/ai-testing')" index="/ui-automation/ai-testing">
+              <el-icon><VideoPlay /></el-icon>
+              <span>{{ $t('menu.aiIntelligentTesting') }}</span>
+            </el-menu-item>
             <el-menu-item v-if="appStore.isMenuEnabled('/ui-automation/elements-enhanced')" index="/ui-automation/elements-enhanced">
               <el-icon><Aim /></el-icon>
               <span>{{ $t('menu.elementManagement') }}</span>
@@ -196,17 +200,9 @@
               <el-icon><Folder /></el-icon>
               <span>{{ $t('menu.projectAndVersion') }}</span>
             </el-menu-item>
-            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/testing')" index="/ai-intelligent-mode/testing">
-              <el-icon><VideoPlay /></el-icon>
-              <span>{{ $t('menu.aiIntelligentTesting') }}</span>
-            </el-menu-item>
             <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/cases')" index="/ai-intelligent-mode/cases">
               <el-icon><Document /></el-icon>
               <span>{{ $t('menu.aiCaseManagement') }}</span>
-            </el-menu-item>
-            <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/execution-records')" index="/ai-intelligent-mode/execution-records">
-              <el-icon><Timer /></el-icon>
-              <span>{{ $t('menu.aiExecutionRecords') }}</span>
             </el-menu-item>
             <el-menu-item v-if="appStore.isMenuEnabled('/ai-intelligent-mode/exploration')" index="/ai-intelligent-mode/exploration">
               <el-icon><Compass /></el-icon>
@@ -410,6 +406,10 @@ const activeMenu = computed(() => {
   if (/^\/app-automation\/devices\/\d+\/remote/.test(route.path)) {
     return '/app-automation/devices'
   }
+  // AI 测试详情归属 AI 智能测试菜单高亮
+  if (/^\/ui-automation\/ai-testing\/\d+/.test(route.path)) {
+    return '/ui-automation/ai-testing'
+  }
   return route.path
 })
 
@@ -474,6 +474,7 @@ const breadcrumbTitle = computed(() => {
     '/ui-automation/reports': t('menu.testReport'),
     '/ui-automation/scheduled-tasks': t('menu.scheduledTasks'),
     '/ui-automation/notification-logs': t('menu.notificationList'),
+    '/ui-automation/ai-testing': t('menu.aiIntelligentTesting'),
 
     // APP自动化测试
     '/app-automation/dashboard': '数据看板',
@@ -491,7 +492,6 @@ const breadcrumbTitle = computed(() => {
 
     // AI 智能模式
     '/ai-intelligent-mode/projects': t('menu.projectAndVersion'),
-    '/ai-intelligent-mode/testing': t('menu.aiIntelligentTesting'),
     '/ai-intelligent-mode/cases': t('menu.aiCaseManagement'),
     '/ai-intelligent-mode/execution-records': t('menu.aiExecutionRecords'),
     '/ai-intelligent-mode/exploration': 'AI探索测试',
@@ -513,6 +513,9 @@ const breadcrumbTitle = computed(() => {
     '/configuration/module-switch': t('menu.moduleSwitchConfig'),
     
     '/profile': t('nav.profile')
+  }
+  if (/^\/ui-automation\/ai-testing\/\d+/.test(route.path)) {
+    return t('menu.aiIntelligentTesting')
   }
   return routeMap[route.path] || route.meta.title || ''
 })

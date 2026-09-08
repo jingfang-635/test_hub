@@ -1068,6 +1068,20 @@ class AIExecutionRecord(models.Model):
     project = models.ForeignKey(UiProject, on_delete=models.CASCADE, null=True, blank=True, verbose_name='所属项目')
     ai_case = models.ForeignKey(AICase, on_delete=models.SET_NULL, null=True, blank=True, verbose_name='关联AI用例')
     case_name = models.CharField(max_length=200, verbose_name='用例名称快照')
+    task_name = models.CharField(max_length=200, blank=True, default='', verbose_name='任务名称')
+    task_source = models.CharField(
+        max_length=20,
+        choices=[('text', '文本描述'), ('file', '用例文档')],
+        default='text',
+        verbose_name='任务来源',
+    )
+    source_file = models.FileField(
+        upload_to='ui-automation/ai-source-files/',
+        null=True,
+        blank=True,
+        verbose_name='原始用例文档',
+        help_text='文件模式上传的原始 Excel 文档，用于下载',
+    )
     task_description = models.TextField(blank=True, default='', verbose_name='任务描述', help_text='用户输入的原始任务描述')
     execution_mode = models.CharField(max_length=20, choices=[('text', '文本模式')], default='text', verbose_name='执行模式')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
@@ -1077,6 +1091,7 @@ class AIExecutionRecord(models.Model):
     logs = models.TextField(blank=True, default='', verbose_name='执行日志')
     steps_completed = models.JSONField(default=list, verbose_name='已完成步骤')
     planned_tasks = models.JSONField(default=list, verbose_name='规划任务') # 规划的任务列表 [{'id': 1, 'description': '...', 'status': 'pending'}]
+    parsed_cases = models.JSONField(default=list, verbose_name='解析用例树', help_text='文件模式上传解析的用例结构，用于详情页还原用例明细')
     executed_by = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, verbose_name='执行人')
     gif_path = models.CharField(max_length=500, null=True, blank=True, verbose_name='GIF录制路径')
     screenshots_sequence = models.JSONField(default=list, verbose_name='截图序列')

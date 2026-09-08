@@ -270,6 +270,16 @@ const routes = [
         component: () => import('@/views/projects/ProjectDetail.vue')
       },
       {
+        path: 'ai-testing',
+        name: 'UiAITesting',
+        component: UiAIExecutionRecords
+      },
+      {
+        path: 'ai-testing/:id',
+        name: 'UiAITestingDetail',
+        component: UiAITesting
+      },
+      {
         path: 'elements-enhanced',
         name: 'UiElementsEnhanced',
         component: UiElementManagerEnhanced
@@ -333,7 +343,7 @@ const routes = [
     children: [
       {
         path: '',
-        redirect: 'testing'
+        redirect: 'projects'
       },
       {
         path: 'projects',
@@ -347,8 +357,11 @@ const routes = [
       },
       {
         path: 'testing',
-        name: 'AITesting',
-        component: UiAITesting
+        redirect: '/ui-automation/ai-testing'
+      },
+      {
+        path: 'testing/:id',
+        redirect: (to) => `/ui-automation/ai-testing/${to.params.id}`
       },
       {
         path: 'cases',
@@ -357,8 +370,7 @@ const routes = [
       },
       {
         path: 'execution-records',
-        name: 'AIExecutionRecords',
-        component: UiAIExecutionRecords
+        redirect: '/ui-automation/ai-testing'
       },
       {
         path: 'exploration',

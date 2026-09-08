@@ -1,79 +1,46 @@
 <template>
   <div class="page-container">
     <div class="page-header">
-      <h1 class="page-title">{{ $t('uiAutomation.ai.title') }}</h1>
+      <div class="header-left">
+        <el-button class="back-btn" @click="goBack" text>
+          <el-icon><ArrowLeft /></el-icon>
+        </el-button>
+        <h1 class="page-title">{{ pageTitle }}</h1>
+      </div>
+      <div class="header-actions">
+        <el-button
+          type="danger"
+          @click="handleStop"
+          :disabled="!running || analyzing"
+          v-if="running"
+        >
+          <el-icon><SwitchButton /></el-icon>
+          {{ $t('uiAutomation.ai.stopExecution') }}
+        </el-button>
+      </div>
     </div>
 
     <div class="card-container">
       <el-row :gutter="20">
-        <el-col :span="12">
-          <div class="section-title">{{ $t('uiAutomation.ai.taskInput') }}</div>
-          <el-form :model="taskForm" label-position="top">
-            <el-form-item :label="$t('uiAutomation.ai.taskDescription')" required>
-              <el-input
-                v-model="taskForm.description"
-                type="textarea"
-                :rows="10"
-                :placeholder="$t('uiAutomation.ai.taskPlaceholder')"
-                maxlength="2000"
-                show-word-limit
+        <el-col :span="14">
+          <div class="screen-panel">
+            <div class="section-title">{{ $t('uiAutomation.ai.screencast') }}</div>
+            <div class="screen-area" ref="screenAreaRef">
+              <img
+                v-if="liveScreenshot"
+                :src="liveScreenshot"
+                class="screen-img"
+                ref="screenImgRef"
+                @load="onScreenImgLoad"
               />
-            </el-form-item>
+              <div v-else class="empty-screen">
+                <el-icon v-if="running" class="is-loading"><Loading /></el-icon>
+                <span>{{ running ? $t('uiAutomation.ai.waitingScreen') : $t('uiAutomation.ai.noScreen') }}</span>
+              </div>
+            </div>
+          </div>
 
-            <el-form-item :label="$t('uiAutomation.ai.gifRecording')">
-              <el-switch
-                v-model="taskForm.enableGif"
-                :active-text="$t('uiAutomation.ai.on')"
-                :inactive-text="$t('uiAutomation.ai.off')"
-              />
-              <span style="margin-left: 10px; color: #909399; font-size: 12px;">
-                {{ $t('uiAutomation.ai.gifTip') }}
-              </span>
-            </el-form-item>
-
-            <el-form-item>
-              <el-button
-                type="primary"
-                @click="handleRun"
-                :loading="running"
-                :disabled="!taskForm.description"
-              >
-                <el-icon><VideoPlay /></el-icon>
-                {{ $t('uiAutomation.ai.startExecution') }}
-              </el-button>
-              <el-button
-                type="danger"
-                @click="handleStop"
-                :disabled="!running || analyzing"
-                v-if="running"
-              >
-                <el-icon><SwitchButton /></el-icon>
-                {{ $t('uiAutomation.ai.stopExecution') }}
-              </el-button>
-              <el-button
-                type="success"
-                @click="handleSaveAsCase"
-                :disabled="!taskForm.description"
-              >
-                <el-icon><DocumentAdd /></el-icon>
-                {{ $t('uiAutomation.ai.saveAsCase') }}
-              </el-button>
-            </el-form-item>
-          </el-form>
-
-          <el-alert
-            :title="$t('uiAutomation.ai.tip')"
-            type="info"
-            :closable="false"
-            style="margin-top: 20px;"
-          >
-            <template #default>
-              <div>{{ $t('uiAutomation.ai.tipContent1') }}</div>
-              <div>{{ $t('uiAutomation.ai.tipContent2') }}</div>
-            </template>
-          </el-alert>
-
-          <div class="section-title" style="margin-top: 20px;">{{ $t('uiAutomation.ai.executionLogs') }}</div>
+          <div class="section-title" style="margin-top: 16px;">{{ $t('uiAutomation.ai.executionLogs') }}</div>
           <div class="log-container" ref="logContainer">
             <div v-if="!logs && !running" class="empty-logs">
               {{ $t('uiAutomation.ai.noLogs') }}
@@ -82,10 +49,51 @@
           </div>
         </el-col>
 
-        <el-col :span="12">
-          <div class="section-title">{{ $t('uiAutomation.ai.taskDetails') }}</div>
+        <el-col :span="10">
+          <div class="section-title">
+            {{ showParsedCases ? $t('uiAutomation.ai.caseDetails') : $t('uiAutomation.ai.taskDetails') }}
+          </div>
           <div class="task-list-container">
-            <div v-if="analyzing" class="analyzing-state">
+            <div v-if="showParsedCases">
+              <div
+                v-for="c in displayCases"
+                :key="c.id"
+                class="case-group"
+                :class="c.status"
+              >
+                <div class="case-header">
+                  <div class="task-status-icon">
+                    <el-icon v-if="c.status === 'completed'" color="#67C23A"><CircleCheckFilled /></el-icon>
+                    <el-icon v-else-if="c.status === 'in_progress'" class="is-loading" color="#409EFF"><Loading /></el-icon>
+                    <el-icon v-else-if="c.status === 'failed'" color="#F56C6C"><CircleClose /></el-icon>
+                    <el-icon v-else color="#909399"><DocumentAdd /></el-icon>
+                  </div>
+                  <div class="case-header-text">
+                    <div class="case-name" :class="c.status">{{ c.id }}. {{ c.name }}</div>
+                    <div v-if="c.precondition" class="case-meta">{{ $t('uiAutomation.ai.precondition') }}：{{ c.precondition }}</div>
+                    <div v-if="c.expected" class="case-meta">{{ $t('uiAutomation.ai.expectedResult') }}：{{ c.expected }}</div>
+                  </div>
+                </div>
+                <div
+                  v-for="(task, tIdx) in c.tasks"
+                  :key="task.id"
+                  class="task-item nested"
+                  :class="task.status"
+                >
+                  <div class="task-status-icon">
+                    <el-icon v-if="task.status === 'completed'" color="#67C23A"><CircleCheckFilled /></el-icon>
+                    <el-icon v-else-if="task.status === 'in_progress'" class="is-loading" color="#409EFF"><Loading /></el-icon>
+                    <el-icon v-else-if="task.status === 'failed'" color="#F56C6C"><CircleClose /></el-icon>
+                    <el-icon v-else color="#909399"><CircleCheck /></el-icon>
+                  </div>
+                  <div class="task-content">
+                    <span class="task-id">{{ tIdx + 1 }}.</span>
+                    <span class="task-desc">{{ task.description }}</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div v-else-if="analyzing" class="analyzing-state">
               <el-icon class="is-loading"><Loading /></el-icon>
               <span>{{ $t('uiAutomation.ai.analyzing') }}</span>
             </div>
@@ -114,143 +122,160 @@
         </el-col>
       </el-row>
     </div>
-
-    <!-- 保存为用例对话框 -->
-    <el-dialog v-model="showSaveDialog" :title="$t('uiAutomation.ai.saveAsCaseTitle')" width="500px" :close-on-click-modal="false">
-      <el-form :model="saveForm" :rules="saveRules" ref="saveFormRef" label-width="80px">
-        <el-form-item :label="$t('uiAutomation.ai.caseName')" prop="name">
-          <el-input v-model="saveForm.name" :placeholder="$t('uiAutomation.ai.caseNamePlaceholder')" />
-        </el-form-item>
-        <el-form-item :label="$t('uiAutomation.common.description')" prop="description">
-          <el-input v-model="saveForm.description" type="textarea" :placeholder="$t('uiAutomation.ai.caseDescPlaceholder')" />
-        </el-form-item>
-      </el-form>
-      <template #footer>
-        <span class="dialog-footer">
-          <el-button @click="showSaveDialog = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
-          <el-button type="primary" @click="confirmSaveCase" :loading="saving">{{ $t('uiAutomation.common.save') }}</el-button>
-        </span>
-      </template>
-    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, nextTick, computed } from 'vue'
+import { ref, computed, nextTick, onMounted, onBeforeUnmount } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { VideoPlay, DocumentAdd, CircleCheckFilled, CircleCheck, Loading, SwitchButton } from '@element-plus/icons-vue'
-import { useI18n } from 'vue-i18n'
 import {
-  runAdhocAITask,
-  createAICase,
-  getAIExecutionRecordDetail,
-  stopAITask
-} from '@/api/ui_automation'
+  ArrowLeft, CircleCheckFilled, CircleCheck, Loading,
+  SwitchButton, CircleClose, DocumentAdd
+} from '@element-plus/icons-vue'
+import { useI18n } from 'vue-i18n'
+import { getAIExecutionRecordDetail, stopAITask } from '@/api/ui_automation'
+import {
+  buildDisplayCases as buildCaseList,
+  syncDisplayCasesStatus as syncCaseStatus
+} from '@/utils/ai-task-progress'
 
 const { t } = useI18n()
+const route = useRoute()
+const router = useRouter()
 
 const running = ref(false)
 const analyzing = ref(false)
-const saving = ref(false)
 const logs = ref('')
 const plannedTasks = ref([])
+const displayCases = ref([])
+const caseName = ref('')
+const taskName = ref('')
 const currentExecutionId = ref(null)
 const logContainer = ref(null)
+let pollInterval = null
 
-const taskForm = reactive({
-  description: '',
-  enableGif: true  // GIF录制开关，默认开启
-})
+const wsSocket = ref(null)
+const liveScreenshot = ref('')
+const screenAreaRef = ref(null)
+const screenImgRef = ref(null)
+const screenScale = ref({ x: 1, y: 1 })
 
-const showSaveDialog = ref(false)
-const saveForm = reactive({
-  name: '',
-  description: ''
-})
-const saveFormRef = ref(null)
+const pageTitle = computed(() => taskName.value || caseName.value || t('uiAutomation.ai.title'))
+const showParsedCases = computed(() => displayCases.value.length > 0)
 
-const saveRules = computed(() => ({
-  name: [{ required: true, message: t('uiAutomation.ai.rules.nameRequired'), trigger: 'blur' }]
-}))
+const buildDisplayCases = (cases) => buildCaseList(cases, (k) => t(`uiAutomation.ai.${k}`))
 
-// 执行任务
-const handleRun = async () => {
-  running.value = true
-  analyzing.value = true
-  logs.value = t('uiAutomation.ai.messages.initAgent')
-  plannedTasks.value = []
+const syncDisplayCasesStatus = (planned) => {
+  syncCaseStatus(displayCases.value, planned)
+}
 
-  try {
-    const response = await runAdhocAITask({
-      task_description: taskForm.description,
-      execution_mode: 'text',  // 始终使用文本模式
-      enable_gif: taskForm.enableGif  // 传递GIF录制开关状态
-    })
+function goBack() {
+  router.push('/ui-automation/ai-testing')
+}
 
-    // analyzing.value = false // 移除过早设置，改为在轮询获取到任务列表后再取消
+function connectScreencast(executionId) {
+  disconnectScreencast()
+  const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const wsUrl = `${protocol}://${window.location.host}/ws/ui-automation/ai-screencast/${executionId}/`
+  const ws = new WebSocket(wsUrl)
+  ws.onmessage = (event) => {
+    try {
+      const data = JSON.parse(event.data)
+      if (data.type === 'screenshot' && data.image) {
+        liveScreenshot.value = data.image
+      }
+    } catch (err) {
+      console.error('AI投屏 WS 消息解析失败', err)
+    }
+  }
+  ws.onerror = () => {}
+  wsSocket.value = ws
+}
 
-    currentExecutionId.value = response.data.execution_id
-    ElMessage.success(t('uiAutomation.ai.messages.startSuccess'))
+function disconnectScreencast() {
+  if (wsSocket.value) {
+    try { wsSocket.value.close() } catch {}
+    wsSocket.value = null
+  }
+  liveScreenshot.value = ''
+}
 
-    // 开始轮询日志
-    pollLogs()
-
-  } catch (error) {
-    console.error('执行失败:', error)
-    ElMessage.error(t('uiAutomation.ai.messages.startFailed') + ': ' + (error.response?.data?.error || error.message))
-    running.value = false
-    analyzing.value = false
+function onScreenImgLoad(e) {
+  const img = e.target
+  if (img && img.naturalWidth) {
+    screenScale.value = { x: img.clientWidth / img.naturalWidth, y: img.clientHeight / img.naturalHeight }
   }
 }
 
-// 停止任务
 const handleStop = async () => {
   if (!currentExecutionId.value) return
-
   try {
     await stopAITask(currentExecutionId.value)
     ElMessage.warning(t('uiAutomation.ai.messages.stopping'))
-    // 不立即设置 running = false，等待轮询检测到状态变化
   } catch (error) {
     console.error('停止失败:', error)
     ElMessage.error(t('uiAutomation.ai.messages.stopFailed'))
   }
 }
 
-// 轮询日志
-const pollLogs = () => {
-  const pollInterval = setInterval(async () => {
+const applyRecord = (record) => {
+  logs.value = record.logs || ''
+  plannedTasks.value = record.planned_tasks || []
+  caseName.value = record.case_name || ''
+  taskName.value = record.task_name || ''
+
+  // 文件模式：用后端保存的用例树还原右侧用例明细（与执行时一致）
+  const parsedCases = Array.isArray(record.parsed_cases) ? record.parsed_cases : []
+  if (parsedCases.length) {
+    displayCases.value = buildDisplayCases(parsedCases)
+  }
+
+  if (showParsedCases.value) {
+    syncDisplayCasesStatus(plannedTasks.value)
+    analyzing.value = false
+  } else if (plannedTasks.value.length > 0) {
+    analyzing.value = false
+  }
+
+  nextTick(() => {
+    if (logContainer.value) {
+      logContainer.value.scrollTop = logContainer.value.scrollHeight
+    }
+  })
+
+  const terminal = ['passed', 'failed', 'stopped'].includes(record.status)
+  if (terminal) {
+    stopPolling()
+    running.value = false
+    analyzing.value = false
+    disconnectScreencast()
+  }
+  return terminal
+}
+
+const stopPolling = () => {
+  if (pollInterval) {
+    clearInterval(pollInterval)
+    pollInterval = null
+  }
+}
+
+const startPolling = () => {
+  stopPolling()
+  pollInterval = setInterval(async () => {
     if (!currentExecutionId.value) {
-      clearInterval(pollInterval)
+      stopPolling()
       return
     }
-    
     try {
       const response = await getAIExecutionRecordDetail(currentExecutionId.value)
-      const record = response.data
-      
-      logs.value = record.logs || ''
-      plannedTasks.value = record.planned_tasks || []
-      
-      // 如果获取到了任务列表，则取消“分析中”状态
-      if (plannedTasks.value.length > 0) {
-        analyzing.value = false
-      }
-      
-      // 滚动到底部
-      nextTick(() => {
-        if (logContainer.value) {
-          logContainer.value.scrollTop = logContainer.value.scrollHeight
-        }
-      })
-      
-      if (record.status === 'passed' || record.status === 'failed' || record.status === 'stopped') {
-        clearInterval(pollInterval)
-        running.value = false
-        analyzing.value = false // 确保结束时必然取消分析状态
-        if (record.status === 'passed') {
+      const terminal = applyRecord(response.data)
+      if (terminal) {
+        const status = response.data.status
+        if (status === 'passed') {
           ElMessage.success(t('uiAutomation.ai.messages.executionSuccess'))
-        } else if (record.status === 'stopped') {
+        } else if (status === 'stopped') {
           ElMessage.warning(t('uiAutomation.ai.messages.taskStopped'))
         } else {
           ElMessage.error(t('uiAutomation.ai.messages.executionFailed'))
@@ -258,42 +283,47 @@ const pollLogs = () => {
       }
     } catch (error) {
       console.error('获取日志失败:', error)
-      // 不停止轮询，可能是临时网络问题
     }
-  }, 2000) // 每2秒轮询一次
+  }, 2000)
 }
 
-// 保存为用例
-const handleSaveAsCase = () => {
-  showSaveDialog.value = true
-  saveForm.name = ''
-  saveForm.description = ''
-}
+const loadExecution = async () => {
+  const id = route.params.id
+  if (!id) {
+    goBack()
+    return
+  }
+  currentExecutionId.value = id
 
-const confirmSaveCase = async () => {
-  if (!saveFormRef.value) return
+  try {
+    const response = await getAIExecutionRecordDetail(id)
+    const record = response.data
+    const terminal = applyRecord(record)
 
-  await saveFormRef.value.validate(async (valid) => {
-    if (valid) {
-      saving.value = true
-      try {
-        await createAICase({
-          name: saveForm.name,
-          description: saveForm.description,
-          task_description: taskForm.description
-        })
-
-        ElMessage.success(t('uiAutomation.ai.messages.saveSuccess'))
-        showSaveDialog.value = false
-      } catch (error) {
-        console.error('保存失败:', error)
-        ElMessage.error(t('uiAutomation.ai.messages.saveFailed'))
-      } finally {
-        saving.value = false
-      }
+    if (!terminal && (record.status === 'running' || record.status === 'pending')) {
+      running.value = true
+      analyzing.value = !showParsedCases.value && plannedTasks.value.length === 0
+      connectScreencast(id)
+      startPolling()
+    } else {
+      running.value = false
+      analyzing.value = false
     }
-  })
+  } catch (error) {
+    console.error('加载执行详情失败:', error)
+    ElMessage.error(t('uiAutomation.ai.executionRecords.messages.loadFailed'))
+    goBack()
+  }
 }
+
+onMounted(() => {
+  loadExecution()
+})
+
+onBeforeUnmount(() => {
+  stopPolling()
+  disconnectScreencast()
+})
 </script>
 
 <style lang="scss" scoped>
@@ -306,11 +336,29 @@ const confirmSaveCase = async () => {
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
-  
+
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    .back-btn {
+      padding: 0;
+      margin: 0;
+      font-size: 20px;
+      height: auto;
+    }
+  }
+
   .page-title {
     font-size: 20px;
     font-weight: 600;
     margin: 0;
+  }
+
+  .header-actions {
+    display: flex;
+    gap: 8px;
   }
 }
 
@@ -330,55 +378,133 @@ const confirmSaveCase = async () => {
   border-left: 4px solid #409eff;
 }
 
+.screen-panel {
+  .screen-area {
+    background: #1e1e1e;
+    border-radius: 4px;
+    min-height: 400px;
+    max-height: 560px;
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    position: relative;
+
+    .screen-img {
+      max-width: 100%;
+      max-height: 560px;
+      object-fit: contain;
+      display: block;
+    }
+
+    .empty-screen {
+      color: #909399;
+      text-align: center;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 8px;
+      .el-icon { font-size: 24px; }
+    }
+  }
+}
+
 .task-list-container {
   background-color: #f5f7fa;
   border-radius: 4px;
   padding: 15px;
-  margin-bottom: 20px;
   height: calc(100vh - 200px);
   overflow-y: auto;
-  
+
+  .case-group {
+    margin-bottom: 12px;
+    background: #fff;
+    border-radius: 4px;
+    border: 1px solid #e4e7ed;
+    overflow: hidden;
+
+    &:last-child { margin-bottom: 0; }
+    &.completed { border-color: #c2e7b0; }
+    &.in_progress { border-color: #b3d8ff; }
+    &.failed { border-color: #fbc4c4; }
+
+    .case-header {
+      display: flex;
+      align-items: center;
+      padding: 10px 12px;
+      background: #fafafa;
+      border-bottom: 1px solid #ebeef5;
+
+      .task-status-icon {
+        margin-right: 10px;
+        margin-top: 2px;
+        font-size: 16px;
+        display: flex;
+        align-items: flex-start;
+      }
+
+      .case-header-text {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .case-name {
+        font-weight: 600;
+        &.completed { color: #67c23a; text-decoration: line-through; }
+        &.in_progress { color: #409eff; }
+        &.failed { color: #f56c6c; }
+      }
+    }
+
+    .case-meta {
+      margin-top: 4px;
+      font-size: 12px;
+      color: #909399;
+      line-height: 1.4;
+      word-break: break-word;
+    }
+  }
+
   .task-item {
     display: flex;
     align-items: flex-start;
     padding: 10px;
     border-bottom: 1px solid #e4e7ed;
     transition: all 0.3s;
-    
-    &:last-child {
-      border-bottom: none;
+
+    &.nested {
+      padding-left: 28px;
+      border-bottom-color: #f0f2f5;
+      &:last-child { border-bottom: none; }
     }
-    
+
+    &:last-child { border-bottom: none; }
+
     &.completed {
       background-color: #f0f9eb;
-      .task-desc {
-        color: #67c23a;
-        text-decoration: line-through;
-      }
+      .task-desc { color: #67c23a; text-decoration: line-through; }
     }
-    
+
     &.in_progress {
       background-color: #ecf5ff;
-      .task-desc {
-        color: #409eff;
-        font-weight: bold;
-      }
+      .task-desc { color: #409eff; font-weight: bold; }
     }
-    
+
+    &.failed {
+      background-color: #fef0f0;
+      .task-desc { color: #f56c6c; }
+    }
+
     .task-status-icon {
       margin-right: 10px;
       margin-top: 2px;
       font-size: 16px;
     }
-    
+
     .task-content {
       flex: 1;
       line-height: 1.5;
-      
-      .task-id {
-        font-weight: bold;
-        margin-right: 5px;
-      }
+      .task-id { font-weight: bold; margin-right: 5px; }
     }
   }
 }
@@ -400,28 +526,24 @@ const confirmSaveCase = async () => {
   justify-content: center;
   height: 100%;
   color: #409eff;
-  
-  .el-icon {
-    font-size: 24px;
-    margin-bottom: 10px;
-  }
+  .el-icon { font-size: 24px; margin-bottom: 10px; }
 }
 
 .log-container {
   background-color: #1e1e1e;
   border-radius: 4px;
-  height: 300px;
+  height: 220px;
   overflow-y: auto;
   padding: 15px;
   color: #fff;
   font-family: 'Consolas', 'Monaco', monospace;
-  
+
   .empty-logs {
     color: #909399;
     text-align: center;
-    margin-top: 100px;
+    margin-top: 70px;
   }
-  
+
   .log-content {
     margin: 0;
     white-space: pre-wrap;
