@@ -24,7 +24,12 @@ _FRONTEND_INDEX = os.path.join(getattr(settings, 'FRONTEND_DIST', ''), 'index.ht
 def _serve_frontend_index(request):
     """SPA 回退视图：所有非 API 路由返回前端 index.html，由 Vue Router 处理。"""
     if os.path.exists(_FRONTEND_INDEX):
-        return FileResponse(open(_FRONTEND_INDEX, 'rb'), content_type='text/html')
+        response = FileResponse(open(_FRONTEND_INDEX, 'rb'), content_type='text/html')
+        # index.html 禁止缓存：避免浏览器缓存旧入口(引用已删除的旧 hash 资源)导致白屏/旧页面
+        response['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+        response['Pragma'] = 'no-cache'
+        response['Expires'] = '0'
+        return response
     return HttpResponseNotFound('<h1>Frontend not built</h1>')
 
 

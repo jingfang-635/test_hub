@@ -22,7 +22,7 @@ class TestCaseListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = TestCasePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['priority', 'test_type', 'project']
+    filterset_fields = ['priority', 'test_type', 'project', 'id']
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'updated_at', 'priority']
     ordering = ['-created_at']
@@ -42,13 +42,18 @@ class TestCaseListCreateView(generics.ListCreateAPIView):
         ).select_related(
             'author', 'assignee', 'project'
         ).prefetch_related(
-            'versions'
+            'versions', 'step_details'
         ).distinct()
 
         # 用例类型多选存储为 JSON 数组，按“包含某类型”筛选
         case_type = self.request.query_params.get('case_type')
         if case_type:
             qs = qs.filter(case_type__contains=[case_type])
+
+        # 用例编号筛选：支持精确或部分匹配（编号即主键 id）
+        case_number = self.request.query_params.get('id', '').strip()
+        if case_number:
+            qs = qs.filter(id__icontains=case_number)
 
         return qs
     def get_user_accessible_projects(self, user):
@@ -135,6 +140,77 @@ class TestCaseDetailView(generics.RetrieveUpdateDestroyAPIView):
         else:
             # 没有指定项目，保持原项目不变
             serializer.save()
+
+
+# ========== 用例详情 - UI自动化 tab 只读步骤详情（含元素/选择器/输入值） ==========
+
+class TestCaseUiStepDetailView(generics.RetrieveAPIView):
+    """返回用例对应的 UI自动化用例（{标题}-AI生成步骤）的结构化只读步骤。
+
+    数据源为 UI自动化模块的 TestCaseStep（含动作类型/页面/元素/选择器/输入值/截图），
+    供用例详情「UI自动化」tab 的只读步骤卡片展示，不做任何写入。
+    """
+    permission_classes = [permissions.IsAuthenticated]
+
+    def get(self, request, pk):
+        user = request.user
+
+        # 权限校验：仅允许访问用户可访问项目下的用例
+        accessible_projects = Project.objects.filter(
+            models.Q(owner=user) | models.Q(members=user)
+        ).distinct()
+        try:
+            testcase = TestCase.objects.select_related('project').get(pk=pk, project__in=accessible_projects)
+        except TestCase.DoesNotExist:
+            return Response({'error': '用例不存在或无权访问'}, status=status.HTTP_404_NOT_FOUND)
+
+        from apps.ui_automation.models import (
+            UiProject as UiProjectModel, TestCase as UiTestCase, TestCaseStep as UiTestCaseStep,
+        )
+
+        # 定位关联的 UI自动化项目与用例（命名规则见 sync_ai_execution_to_cases）
+        ui_project = UiProjectModel.objects.filter(hub_project=testcase.project).first()
+        if not ui_project:
+            return Response({'steps': []})
+
+        ui_case = UiTestCase.objects.filter(
+            project=ui_project, name=f'{testcase.title or ""}-AI生成步骤'
+        ).order_by('-id').first()
+        if not ui_case:
+            return Response({'steps': []})
+
+        steps = UiTestCaseStep.objects.filter(test_case=ui_case).select_related(
+            'element', 'element__locator_strategy'
+        ).order_by('step_number')
+
+        def element_data(el):
+            if not el:
+                return None
+            return {
+                'id': el.id,
+                'name': el.name,
+                'locator_strategy': el.locator_strategy.name if el.locator_strategy_id else '',
+                'locator_value': el.locator_value,
+                'backup_locators': el.backup_locators or [],
+                'screenshot': el.screenshot.url if el.screenshot else '',
+                'page': el.page,
+            }
+
+        data = []
+        for s in steps:
+            data.append({
+                'id': s.id,
+                'step_number': s.step_number,
+                'action_type': s.action_type,
+                'description': s.description,
+                'page_filter': s.page_filter,
+                'element': element_data(s.element),
+                'input_value': s.input_value,
+                'wait_time': s.wait_time,
+                'assert_type': s.assert_type,
+                'assert_value': s.assert_value,
+            })
+        return Response({'steps': data})
 
 
 # ========== Excel 批量导入 ==========

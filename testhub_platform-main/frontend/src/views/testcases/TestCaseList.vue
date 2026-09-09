@@ -28,7 +28,7 @@
     <div class="card-container">
       <div class="filter-bar">
         <el-row :gutter="20">
-          <el-col :span="5">
+          <el-col :span="4">
             <el-input
               v-model="searchText"
               :placeholder="$t('testcase.searchPlaceholder')"
@@ -39,6 +39,14 @@
                 <el-icon><Search /></el-icon>
               </template>
             </el-input>
+          </el-col>
+          <el-col :span="3">
+            <el-input
+              v-model="caseNumberFilter"
+              :placeholder="$t('testcase.caseNumberFilter')"
+              clearable
+              @input="handleFilter"
+            />
           </el-col>
           <el-col :span="4">
             <el-select v-model="projectFilter" :placeholder="$t('testcase.relatedProject')" clearable @change="handleFilter">
@@ -186,14 +194,14 @@
                 <el-button class="back-btn" :icon="ArrowLeft" circle size="small" @click="backToList" />
                 <h2 class="detail-title">{{ selectedCase.id }}：{{ selectedCase.title }}</h2>
               </div>
-              <div class="detail-actions">
-                <el-button size="small" @click="editTestCase(selectedCase)">{{ $t('common.edit') }}</el-button>
-                <el-button size="small" type="danger" @click="deleteTestCase(selectedCase)">{{ $t('common.delete') }}</el-button>
-              </div>
             </div>
             <div class="detail-body">
               <el-tabs v-model="detailActiveTab">
                 <el-tab-pane :label="$t('testcase.tabBasic')" name="basic">
+                  <div class="detail-actions">
+                    <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('common.edit') }}</el-button>
+                    <el-button size="small" type="danger" @click="deleteTestCase(selectedCase)">{{ $t('common.delete') }}</el-button>
+                  </div>
                   <el-descriptions :column="2" border size="small">
                     <el-descriptions-item :label="$t('testcase.preconditions')" :span="2">
                       <div class="html-content" v-html="selectedCase.preconditions || $t('testcase.none')"></div>
@@ -225,15 +233,89 @@
                 </el-tab-pane>
                 <el-tab-pane :label="$t('testcase.tabUi')" name="ui">
                   <div class="tab-actions">
-                    <el-button type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.goEdit') }}</el-button>
-                    <el-button @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                    <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.edit') }}</el-button>
+                    <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
                   </div>
-                  <el-empty :description="$t('testcase.tabEmpty')" />
+                  <div v-if="uiSteps.length > 0" class="ui-steps">
+                    <div class="ui-steps-header">
+                      <el-tag type="success" size="small">{{ $t('testcase.aiGeneratedSteps') }}</el-tag>
+                      <span class="ui-steps-tip">{{ $t('testcase.aiGeneratedStepsTip') }}</span>
+                    </div>
+                    <!-- 只读步骤卡片（样式与 UI自动化-用例管理 详情一致，仅展示不可编辑） -->
+                    <div class="readonly-steps">
+                      <div class="steps-header">
+                        <h4>{{ $t('uiAutomation.testCase.testSteps') }}</h4>
+                        <el-button size="small" text @click="toggleAllSteps">
+                          {{ allStepsExpanded ? $t('uiAutomation.testCase.foldAll') : $t('uiAutomation.testCase.expandAll') }}
+                        </el-button>
+                      </div>
+                      <div
+                        v-for="(step, index) in uiSteps"
+                        :key="step.step_number ?? index"
+                        class="step-item"
+                        :class="{ expanded: stepExpanded[index] }"
+                      >
+                        <div class="step-header" @click="toggleStep(index)">
+                          <div class="step-desc-row">
+                            <span class="step-number">{{ index + 1 }}</span>
+                            <span class="step-desc-pill">{{ step.action }}</span>
+                          </div>
+                          <span class="step-right">
+                            <el-icon><component :is="stepExpanded[index] ? ArrowUp : ArrowDown" /></el-icon>
+                          </span>
+                        </div>
+                        <div v-if="stepExpanded[index]" class="step-content">
+                          <div class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.testSteps') }}</label>
+                            <span class="step-param-text">{{ step.action }}</span>
+                          </div>
+                          <div v-if="detailFor(index).action_type" class="step-param">
+                            <label>{{ actionTypeLabel(detailFor(index).action_type) }}</label>
+                            <span class="step-param-text">{{ detailFor(index).description }}</span>
+                          </div>
+                          <div v-if="detailFor(index).page_filter" class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.selectPage') }}</label>
+                            <span class="step-param-text">{{ detailFor(index).page_filter }}</span>
+                          </div>
+                          <div v-if="detailFor(index).element" class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.selectElement') }}</label>
+                            <span class="step-param-text">{{ detailFor(index).element.name }}</span>
+                          </div>
+                          <div v-if="detailFor(index).element" class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.selector') }}</label>
+                            <span class="step-param-text">
+                              {{ detailFor(index).element.locator_strategy }}：{{ detailFor(index).element.locator_value }}
+                            </span>
+                          </div>
+                          <div v-if="detailFor(index).element && detailFor(index).element.backup_locators && detailFor(index).element.backup_locators.length" class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.backupSelectors') }}</label>
+                            <span class="step-param-text">
+                              {{ detailFor(index).element.backup_locators.map(b => `${b.strategy}：${b.value}`).join('；') }}
+                            </span>
+                          </div>
+                          <div v-if="detailFor(index).input_value" class="step-param">
+                            <label>{{ detailFor(index).action_type === 'fill' ? $t('uiAutomation.testCase.textValue') : $t('uiAutomation.testCase.inputValue') }}</label>
+                            <span class="step-param-text">{{ detailFor(index).input_value }}</span>
+                          </div>
+                          <div v-if="detailFor(index).assert_type" class="step-param">
+                            <label>{{ $t('uiAutomation.testCase.assertType') }}</label>
+                            <span class="step-param-text">{{ assertTypeLabel(detailFor(index).assert_type) }}：{{ detailFor(index).assert_value }}</span>
+                          </div>
+                          <div v-if="step.expected" class="step-param">
+                            <label>{{ $t('testcase.expectedResult') }}</label>
+                            <span class="step-param-text">{{ step.expected }}</span>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                  <el-empty v-else :description="$t('testcase.tabEmpty')" />
+                  <div v-if="uiSteps.length > 0" class="tab-updated-at">{{ $t('testcase.updatedAt') }}：{{ formatUpdatedAt(selectedCase.updated_at) }}</div>
                 </el-tab-pane>
                 <el-tab-pane :label="$t('testcase.tabApi')" name="api">
                   <div class="tab-actions">
-                    <el-button type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.goEdit') }}</el-button>
-                    <el-button @click="handleAiGenerateSteps('api')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                    <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.edit') }}</el-button>
+                    <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('api')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
                   </div>
                   <el-empty :description="$t('testcase.tabEmpty')" />
                 </el-tab-pane>
@@ -250,20 +332,23 @@
 
 <script setup>
 import { ref, onMounted, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
+import { Plus, Search, Download, Upload, ArrowLeft, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
 
 const { t } = useI18n()
 const router = useRouter()
+const route = useRoute()
 const loading = ref(false)
+const aiGenerating = ref(false)
 const allTestcases = ref([])
 const projects = ref([])
 const searchText = ref('')
+const caseNumberFilter = ref('')
 const projectFilter = ref('')
 const priorityFilter = ref('')
 const caseTypeFilter = ref('')
@@ -312,6 +397,7 @@ const fetchTestCases = async () => {
           page,
           page_size: pageSize,
           search: searchText.value,
+          id: caseNumberFilter.value,
           project: projectFilter.value,
           priority: priorityFilter.value,
           case_type: caseTypeFilter.value,
@@ -419,6 +505,7 @@ const handleNodeClick = (data) => {
     selectedCase.value = data.case
     detailActiveTab.value = 'basic'
     viewMode.value = 'detail'
+    fetchUiDetailSteps()
   } else {
     listCases.value = collectCases(data)
     listTitle.value = data.label
@@ -433,6 +520,7 @@ const handleNodeClick = (data) => {
 // 点击"全部项目"：取消所有筛选并显示全部用例
 const showAllCases = () => {
   searchText.value = ''
+  caseNumberFilter.value = ''
   projectFilter.value = ''
   priorityFilter.value = ''
   allProjectsActive.value = true
@@ -447,6 +535,7 @@ const viewCaseDetail = (row) => {
   selectedCase.value = row
   detailActiveTab.value = 'basic'
   viewMode.value = 'detail'
+  fetchUiDetailSteps()
 }
 
 // 返回列表
@@ -459,8 +548,177 @@ const editTestCase = (testcase) => {
   router.push(`/ai-generation/testcases/${testcase.id}/edit`)
 }
 
-const handleAiGenerateSteps = () => {
-  ElMessage.info(t('testcase.aiGenerateStepsTodo'))
+// 将当前用例解析为 AI 任务描述
+const buildTaskDescription = () => {
+  const c = selectedCase.value
+  if (!c) return ''
+  const parts = []
+  if (c.title) parts.push(`测试用例：${c.title}`)
+  if (c.description) parts.push(`用例描述：${c.description}`)
+  if (c.preconditions) parts.push(`前置条件：${c.preconditions}`)
+  if (c.steps) parts.push(`操作步骤：\n${c.steps}`)
+  if (c.expected_result) parts.push(`预期结果：${c.expected_result}`)
+  return parts.join('\n')
+}
+
+// UI自动化 tab 展示的回显步骤（AI 智能测试完成后写入 TestCaseStep.step_details）
+const uiSteps = computed(() => {
+  const steps = selectedCase.value?.step_details
+  if (Array.isArray(steps) && steps.length > 0) {
+    return [...steps].sort((a, b) => (a.step_number ?? 0) - (b.step_number ?? 0))
+  }
+  return []
+})
+
+// 只读步骤卡片：展开/折叠状态（默认折叠，仅展开查看详情，不可编辑）
+const stepExpanded = ref({})
+const allStepsExpanded = computed(() => {
+  return uiSteps.value.length > 0 && uiSteps.value.every((_, i) => stepExpanded.value[i])
+})
+const toggleStep = (index) => {
+  stepExpanded.value[index] = !stepExpanded.value[index]
+}
+const toggleAllSteps = () => {
+  const target = !allStepsExpanded.value
+  const next = {}
+  uiSteps.value.forEach((_, i) => { next[i] = target })
+  stepExpanded.value = next
+}
+
+// 结构化步骤详情（来自 UI自动化模块的用例步骤，只读）：动作类型/页面/元素/选择器/输入值等
+const uiDetailSteps = ref([])
+const detailFor = (index) => {
+  const s = uiSteps.value[index]
+  const n = s?.step_number ?? index + 1
+  return uiDetailSteps.value.find(d => d.step_number === n) || {}
+}
+const actionTypeLabel = (v) => {
+  const map = {
+    click: t('uiAutomation.testCase.actionClick'),
+    fill: t('uiAutomation.testCase.actionFill'),
+    getText: t('uiAutomation.testCase.actionGetText'),
+    waitFor: t('uiAutomation.testCase.actionWaitFor'),
+    hover: t('uiAutomation.testCase.actionHover'),
+    scroll: t('uiAutomation.testCase.actionScroll'),
+    screenshot: t('uiAutomation.testCase.actionScreenshot'),
+    assert: t('uiAutomation.testCase.actionAssert'),
+    wait: t('uiAutomation.testCase.actionWait'),
+    switchTab: t('uiAutomation.testCase.actionSwitchTab'),
+    navigateUrl: t('uiAutomation.testCase.actionNavigateUrl'),
+  }
+  return map[v] || v
+}
+const assertTypeLabel = (v) => {
+  const map = {
+    textContains: t('uiAutomation.testCase.assertTextContains'),
+    textEquals: t('uiAutomation.testCase.assertTextEquals'),
+    isVisible: t('uiAutomation.testCase.assertIsVisible'),
+    exists: t('uiAutomation.testCase.assertExists'),
+    hasAttribute: t('uiAutomation.testCase.assertHasAttribute'),
+    urlContains: t('uiAutomation.testCase.assertUrlContains'),
+  }
+  return map[v] || v
+}
+
+// 拉取结构化步骤详情（无 UI 自动化数据时静默忽略）
+const fetchUiDetailSteps = async () => {
+  if (!selectedCase.value?.id) return
+  try {
+    const response = await api.get(`/testcases/${selectedCase.value.id}/ui_step_details/`)
+    uiDetailSteps.value = response.data?.steps || []
+  } catch (error) {
+    uiDetailSteps.value = []
+  }
+}
+
+// 重新拉取当前选中用例详情，刷新回显步骤
+const refreshSelectedCase = async () => {
+  if (!selectedCase.value?.id) return
+  try {
+    const response = await api.get(`/testcases/${selectedCase.value.id}/`)
+    selectedCase.value = response.data
+  } catch (error) {
+    // 忽略刷新失败，保持现有数据
+  }
+}
+
+const handleAiGenerateSteps = async () => {
+  if (!selectedCase.value) return
+  aiGenerating.value = true
+  try {
+    // 校验是否已配置 AI 智能模式模型
+    const modelRes = await api.get('/ui-automation/ai-models/')
+    const configs = Array.isArray(modelRes.data) ? modelRes.data : []
+    const hasActive = configs.some((c) => c.is_active)
+    if (!hasActive) {
+      let goConfig = false
+      await ElMessageBox.confirm(
+        t('uiAutomation.ai.messages.noModelConfigured'),
+        t('uiAutomation.ai.tip'),
+        {
+          confirmButtonText: t('uiAutomation.ai.messages.goToConfig'),
+          cancelButtonText: t('common.cancel'),
+          type: 'warning',
+        }
+      ).then(() => { goConfig = true }).catch(() => {})
+      if (goConfig) router.push('/configuration/ai-mode')
+      return
+    }
+
+    const taskName = `${selectedCase.value.title || '用例'}-AI生成步骤`
+    const taskDescription = buildTaskDescription() || selectedCase.value.title || ''
+
+    // 调用 UI自动化模块的 AI 智能测试流程（run_adhoc 后台线程执行）
+    const response = await api.post('/ui-automation/ai-execution-records/run_adhoc/', {
+      task_name: taskName,
+      task_source: 'text',
+      task_description: taskDescription,
+      execution_mode: 'text',
+      enable_gif: false,
+      hub_testcase_id: selectedCase.value.id,
+    })
+    const executionId = response?.data?.execution_id
+    // 面板模式：不跳转，留在本面板。后台执行完成后轮询刷新选中用例，回显步骤
+    ElMessage.success(t('testcase.aiGenerateStepsStarted'))
+    if (executionId) {
+      pollEcho(executionId)
+    } else {
+      refreshSelectedCase()
+    }
+  } catch (error) {
+    ElMessage.error(error?.response?.data?.error || t('testcase.aiGenerateStepsFailed'))
+  } finally {
+    aiGenerating.value = false
+  }
+}
+
+let echoPollTimer = null
+// 轮询等待 AI 执行完成，期间定期刷新选中用例以回显步骤；超时自动停止
+const pollEcho = (executionId, maxSeconds = 300) => {
+  if (echoPollTimer) clearInterval(echoPollTimer)
+  const deadline = Date.now() + maxSeconds * 1000
+  echoPollTimer = setInterval(async () => {
+    try {
+      const res = await api.get(`/ui-automation/ai-execution-records/${executionId}/`)
+      const status = res?.data?.status
+      // 执行结束（passed/failed/stopped），刷新一次后停止轮询
+      if (status && ['passed', 'failed', 'stopped', 'completed', 'error'].includes(status)) {
+        clearInterval(echoPollTimer)
+        echoPollTimer = null
+        await refreshSelectedCase()
+        return
+      }
+      // 仍在执行中，轻量刷新选中用例
+      await refreshSelectedCase()
+    } catch (e) {
+      // 单次查询失败忽略
+    }
+    if (Date.now() > deadline) {
+      clearInterval(echoPollTimer)
+      echoPollTimer = null
+      await refreshSelectedCase()
+    }
+  }, 3000)
 }
 
 const deleteTestCase = async (testcase) => {
@@ -523,6 +781,13 @@ const getCaseTypeText = (type) => {
 
 const formatDate = (dateString) => {
   return dayjs(dateString).format('YYYY-MM-DD HH:mm')
+}
+
+// 更新时间：日期与时分之间留2个空格的间隔
+const formatUpdatedAt = (dateString) => {
+  const d = dayjs(dateString)
+  if (!dateString || !d.isValid()) return ''
+  return `${d.format('YYYY-MM-DD')}\u00A0\u00A0${d.format('HH:mm')}`
 }
 
 // 将HTML的<br>标签转换为换行符（用于Excel导出）
@@ -955,7 +1220,10 @@ onMounted(() => {
 }
 
 .detail-actions {
-  flex-shrink: 0;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-bottom: 12px;
 }
 
 .detail-title-wrap {
@@ -993,6 +1261,156 @@ onMounted(() => {
 
   .el-button--primary {
     box-shadow: none;
+  }
+}
+
+.tab-updated-at {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+  font-size: 12px;
+  color: #909399;
+}
+
+.ui-steps {
+  margin-top: 8px;
+}
+
+.ui-steps-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 8px;
+}
+
+.ui-steps-tip {
+  font-size: 12px;
+  color: #909399;
+}
+
+// ===== 只读步骤卡片（样式对齐 UI自动化-用例管理 详情页，仅展示不可编辑） =====
+.readonly-steps {
+  margin-top: 4px;
+
+  .steps-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 10px;
+
+    h4 {
+      margin: 0;
+      font-size: 14px;
+      font-weight: 600;
+      color: #303133;
+    }
+  }
+
+  .step-item {
+    border: 1px solid #e6e6e6;
+    border-radius: 6px;
+    margin-bottom: 10px;
+    background: white;
+    transition: all 0.3s;
+  }
+
+  .step-item:hover {
+    border-color: #409eff;
+  }
+
+  .step-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: #fafafa;
+    border-radius: 6px;
+    gap: 8px;
+    cursor: pointer;
+  }
+
+  .step-item.expanded .step-header {
+    border-radius: 6px 6px 0 0;
+  }
+
+  .step-desc-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    flex: 1;
+  }
+
+  .step-number {
+    background: #409eff;
+    color: white;
+    width: 24px;
+    height: 24px;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: bold;
+    flex-shrink: 0;
+  }
+
+  // 描述胶囊：白底圆角边框，只读时与编辑态视觉一致
+  .step-desc-pill {
+    display: inline-block;
+    max-width: 100%;
+    padding: 5px 12px;
+    border: 1px solid #dcdfe6;
+    border-radius: 16px;
+    background: #fff;
+    font-size: 14px;
+    font-weight: 500;
+    color: #303133;
+    line-height: 20px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  .step-right {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    color: #909399;
+    flex-shrink: 0;
+  }
+
+  .step-content {
+    padding: 15px;
+    border-top: 1px solid #e6e6e6;
+  }
+
+  .step-param {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+    gap: 10px;
+
+    &:last-child {
+      margin-bottom: 0;
+    }
+
+    label {
+      width: 120px;
+      flex-shrink: 0;
+      font-weight: 500;
+      color: #333;
+      line-height: 24px;
+    }
+  }
+
+  .step-param-text {
+    flex: 1;
+    color: #303133;
+    font-size: 14px;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-all;
   }
 }
 

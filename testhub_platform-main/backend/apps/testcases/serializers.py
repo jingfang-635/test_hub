@@ -91,13 +91,14 @@ class TestCaseListSerializer(serializers.ModelSerializer):
     project = serializers.SerializerMethodField()
     versions = serializers.SerializerMethodField()
     case_type = CaseTypeField(read_only=True)
+    step_details = TestCaseStepSerializer(many=True, read_only=True)
 
     class Meta:
         model = TestCase
         fields = [
             'id', 'title', 'description', 'preconditions', 'steps', 'expected_result',
             'priority', 'test_type', 'case_type', 'l1', 'l2', 'l3',
-            'author', 'assignee', 'project', 'versions', 'tags', 'created_at', 'updated_at'
+            'author', 'assignee', 'project', 'versions', 'tags', 'created_at', 'updated_at', 'step_details'
         ]
         read_only_fields = ['id', 'created_at', 'updated_at']
     

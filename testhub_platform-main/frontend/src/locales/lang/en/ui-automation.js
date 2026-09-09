@@ -508,6 +508,7 @@ export default {
     taskSource: 'Task Source',
     taskSourceText: 'Text Description',
     taskSourceFile: 'Case File',
+    taskSourceCaseConversion: 'Case Conversion',
     taskDescription: 'Task Description',
     taskPlaceholder: 'Describe the task in natural language, e.g.:\n1. Visit https://www.baidu.com\n2. Search \'TestHub\'\n3. Click the first search result',
     caseFile: 'Case File',

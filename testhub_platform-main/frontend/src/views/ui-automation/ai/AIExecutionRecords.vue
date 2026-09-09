@@ -472,7 +472,8 @@ const getStatusText = (status) => {
 const getTaskSourceText = (source) => {
   const map = {
     text: t('uiAutomation.ai.taskSourceText'),
-    file: t('uiAutomation.ai.taskSourceFile')
+    file: t('uiAutomation.ai.taskSourceFile'),
+    case_conversion: t('uiAutomation.ai.taskSourceCaseConversion')
   }
   return map[source] || source || '-'
 }

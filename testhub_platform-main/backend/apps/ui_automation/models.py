@@ -1071,7 +1071,7 @@ class AIExecutionRecord(models.Model):
     task_name = models.CharField(max_length=200, blank=True, default='', verbose_name='任务名称')
     task_source = models.CharField(
         max_length=20,
-        choices=[('text', '文本描述'), ('file', '用例文档')],
+        choices=[('text', '文本描述'), ('file', '用例文档'), ('case_conversion', '用例转换')],
         default='text',
         verbose_name='任务来源',
     )

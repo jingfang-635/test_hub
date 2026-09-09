@@ -46,53 +46,6 @@
           <h2 class="list-title">{{ listTitle }}</h2>
           <span class="list-count">{{ t('testcase.caseCount', { count: filteredCases.length }) }}</span>
         </div>
-        <!-- 筛选栏 -->
-        <div class="filter-bar">
-          <el-input
-            v-model="filterCaseNumber"
-            :placeholder="$t('testcase.caseNumber')"
-            clearable
-            size="small"
-            class="filter-item"
-          />
-          <el-input
-            v-model="filterCaseTitle"
-            :placeholder="$t('testcase.caseTitle')"
-            clearable
-            size="small"
-            class="filter-item"
-          />
-          <el-select
-            v-model="filterPriority"
-            :placeholder="$t('testcase.priority')"
-            clearable
-            size="small"
-            class="filter-item filter-select"
-          >
-            <el-option label="P0" value="P0" />
-            <el-option label="P1" value="P1" />
-            <el-option label="P2" value="P2" />
-            <el-option label="P3" value="P3" />
-          </el-select>
-          <el-select
-            v-model="filterStatus"
-            :placeholder="$t('execution.executionStatus')"
-            clearable
-            size="small"
-            class="filter-item filter-select"
-          >
-            <el-option :label="$t('execution.untested')" value="untested" />
-            <el-option :label="$t('execution.passed')" value="passed" />
-            <el-option :label="$t('execution.failed')" value="failed" />
-            <el-option :label="$t('execution.blocked')" value="blocked" />
-            <el-option :label="$t('execution.retest')" value="retest" />
-            <el-option :label="$t('execution.na')" value="na" />
-          </el-select>
-          <el-button
-            size="small"
-            @click="resetFilters"
-          >{{ $t('common.reset') }}</el-button>
-        </div>
         <div class="list-table-wrapper">
           <el-table
             :data="pagedCases"
@@ -302,7 +255,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="comments" :label="$t('execution.comments')" show-overflow-tooltip />
-        <el-table-column prop="executed_by.username" :label="$t('execution.executedBy')" width="120" />
         <el-table-column prop="executed_at" :label="$t('execution.executedAt')" width="180">
           <template #default="scope">
             {{ formatDate(scope.row.executed_at) }}
@@ -322,7 +274,12 @@ import { ArrowLeft, ArrowRight, Clock, Edit } from '@element-plus/icons-vue'
 import axios from 'axios'
 
 const props = defineProps({
-  cases: { type: Array, default: () => [] }
+  cases: { type: Array, default: () => [] },
+  // 筛选条件由父组件（测试计划详情页）传入，筛选栏显示在进度条与用例列表之间
+  filterCaseNumber: { type: String, default: '' },
+  filterCaseTitle: { type: String, default: '' },
+  filterPriority: { type: String, default: '' },
+  filterStatus: { type: String, default: '' }
 })
 const emit = defineEmits(['changed'])
 
@@ -343,37 +300,24 @@ const pageSize = ref(20)
 const historyDialogVisible = ref(false)
 const currentCaseHistory = ref([])
 
-// 筛选状态
-const filterCaseNumber = ref('')
-const filterCaseTitle = ref('')
-const filterPriority = ref('')
-const filterStatus = ref('')
-
-const resetFilters = () => {
-  filterCaseNumber.value = ''
-  filterCaseTitle.value = ''
-  filterPriority.value = ''
-  filterStatus.value = ''
-}
-
 const filteredCases = computed(() => {
   return listCases.value.filter(c => {
-    if (filterCaseNumber.value) {
+    if (props.filterCaseNumber) {
       const num = String(c.testcase_id || '')
-      if (!num.toLowerCase().includes(filterCaseNumber.value.toLowerCase())) return false
+      if (!num.toLowerCase().includes(props.filterCaseNumber.toLowerCase())) return false
     }
-    if (filterCaseTitle.value) {
+    if (props.filterCaseTitle) {
       const title = String(c.testcase || '')
-      if (!title.toLowerCase().includes(filterCaseTitle.value.toLowerCase())) return false
+      if (!title.toLowerCase().includes(props.filterCaseTitle.toLowerCase())) return false
     }
-    if (filterPriority.value && c.case_priority !== filterPriority.value) return false
-    if (filterStatus.value && (c.status || 'untested') !== filterStatus.value) return false
+    if (props.filterPriority && c.case_priority !== props.filterPriority) return false
+    if (props.filterStatus && (c.status || 'untested') !== props.filterStatus) return false
     return true
   })
 })
 
 // 筛选条件变化时重置到第一页
-watch([filterCaseNumber, filterCaseTitle, filterPriority, filterStatus], () => {
+watch([() => props.filterCaseNumber, () => props.filterCaseTitle, () => props.filterPriority, () => props.filterStatus], () => {
   currentPage.value = 1
 })
 
@@ -621,7 +565,7 @@ const getStatusColor = (status) => {
   flex: 1;
   display: flex;
   overflow: hidden;
-  padding: 16px;
+  padding: 0;
   gap: 16px;
 }
 
@@ -757,29 +701,6 @@ const getStatusColor = (status) => {
   .list-count {
     color: #909399;
     font-size: 13px;
-  }
-}
-
-.filter-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 12px;
-  flex-shrink: 0;
-  flex-wrap: wrap;
-
-  .filter-item {
-    width: 180px;
-  }
-
-  .filter-select {
-    width: 140px;
-  }
-
-  :deep(.el-input__wrapper),
-  :deep(.el-select__wrapper) {
-    border-radius: 20px;
-    background: #fff;
   }
 }
 

@@ -1,18 +1,12 @@
 <template>
   <div class="execution-detail">
-    <!-- 返回按钮 -->
-    <div class="detail-header">
-      <el-button class="back-button" :icon="ArrowLeft" @click="$router.back()">
-        {{ $t('common.back') }}
-      </el-button>
-    </div>
-
     <!-- 测试执行区域 -->
     <div v-if="testPlan.test_runs && testPlan.test_runs.length > 0">
       <div v-for="run in testPlan.test_runs" :key="run.id" class="test-run-card">
         <!-- 美化的运行头部 -->
         <div class="run-header">
           <div class="run-title-section">
+            <el-button class="back-button" :icon="ArrowLeft" circle @click="$router.back()" />
             <h2 class="run-title">{{ testPlan.name }}</h2>
             <el-tag :type="getRunStatusType(run.progress)" size="large" class="run-status-tag">
               {{ getRunStatusText(run.progress) }}
@@ -72,8 +66,63 @@
           </el-progress>
         </div>
 
+        <!-- 筛选栏：位于进度条与用例列表之间 -->
+        <div class="filter-bar">
+          <el-input
+            v-model="filterCaseNumber"
+            :placeholder="$t('testcase.caseNumber')"
+            clearable
+            size="small"
+            class="filter-item"
+          />
+          <el-input
+            v-model="filterCaseTitle"
+            :placeholder="$t('testcase.caseTitle')"
+            clearable
+            size="small"
+            class="filter-item"
+          />
+          <el-select
+            v-model="filterPriority"
+            :placeholder="$t('testcase.priority')"
+            clearable
+            size="small"
+            class="filter-item filter-select"
+          >
+            <el-option label="P0" value="P0" />
+            <el-option label="P1" value="P1" />
+            <el-option label="P2" value="P2" />
+            <el-option label="P3" value="P3" />
+          </el-select>
+          <el-select
+            v-model="filterStatus"
+            :placeholder="$t('execution.executionStatus')"
+            clearable
+            size="small"
+            class="filter-item filter-select"
+          >
+            <el-option :label="$t('execution.untested')" value="untested" />
+            <el-option :label="$t('execution.passed')" value="passed" />
+            <el-option :label="$t('execution.failed')" value="failed" />
+            <el-option :label="$t('execution.blocked')" value="blocked" />
+            <el-option :label="$t('execution.retest')" value="retest" />
+            <el-option :label="$t('execution.na')" value="na" />
+          </el-select>
+          <el-button
+            size="small"
+            @click="resetFilters"
+          >{{ $t('common.reset') }}</el-button>
+        </div>
+
         <!-- 用例列表：左侧 L1/L2/L3 树 + 右侧列表/详情（与用例库一致） -->
-        <RunCaseTree :cases="run.run_cases" @changed="fetchTestPlan" />
+        <RunCaseTree
+          :cases="run.run_cases"
+          :filter-case-number="filterCaseNumber"
+          :filter-case-title="filterCaseTitle"
+          :filter-priority="filterPriority"
+          :filter-status="filterStatus"
+          @changed="fetchTestPlan"
+        />
       </div>
     </div>
   </div>
@@ -95,6 +144,19 @@ const { t } = useI18n()
 
 const route = useRoute()
 const testPlan = ref({})
+
+// 筛选状态（筛选栏显示在进度条与用例列表之间）
+const filterCaseNumber = ref('')
+const filterCaseTitle = ref('')
+const filterPriority = ref('')
+const filterStatus = ref('')
+
+const resetFilters = () => {
+  filterCaseNumber.value = ''
+  filterCaseTitle.value = ''
+  filterPriority.value = ''
+  filterStatus.value = ''
+}
 
 const fetchTestPlan = async () => {
   try {
@@ -137,29 +199,24 @@ onMounted(() => {
   min-height: 100vh;
 }
 
-.detail-header {
-  display: flex;
-  justify-content: flex-end;
-  margin-bottom: 16px;
-}
-
 .back-button {
-  background: #722ed1;
-  border-color: #722ed1;
-  color: #fff;
+  background: transparent;
+  border-color: transparent;
+  color: #303133;
+  flex-shrink: 0;
 }
 
 .back-button:hover,
 .back-button:focus {
-  background: #8547e0;
-  border-color: #8547e0;
-  color: #fff;
+  background: #f5f7fa;
+  border-color: transparent;
+  color: #303133;
 }
 
 .back-button:active {
-  background: #5b1fa8;
-  border-color: #5b1fa8;
-  color: #fff;
+  background: #ebeef5;
+  border-color: transparent;
+  color: #303133;
 }
 
 .test-run-card {
@@ -186,6 +243,9 @@ onMounted(() => {
   font-size: 20px;
   font-weight: 600;
   color: #303133;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
 }
 
 .run-status-tag {
@@ -266,6 +326,29 @@ onMounted(() => {
   padding: 16px;
   background: #f8f9fa;
   border-radius: 8px;
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 12px;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+
+  .filter-item {
+    width: 180px;
+  }
+
+  .filter-select {
+    width: 140px;
+  }
+
+  :deep(.el-input__wrapper),
+  :deep(.el-select__wrapper) {
+    border-radius: 20px;
+    background: #fff;
+  }
 }
 
 .progress-text {

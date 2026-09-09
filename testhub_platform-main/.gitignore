@@ -107,3 +107,5 @@ media/knowledge_docs/*
 agent_history.gif
 # 忽略临时测试脚本
 backend/_run_delete_test.py
+# 忽略运行时错误日志
+*.err

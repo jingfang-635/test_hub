@@ -34,7 +34,10 @@
                 @load="onScreenImgLoad"
               />
               <div v-else class="empty-screen">
-                <el-icon v-if="running && screencastStatus !== 'error'" class="is-loading"><Loading /></el-icon>
+                <el-icon
+                  v-if="running && !isCaseConversion && screencastStatus !== 'error'"
+                  class="is-loading"
+                ><Loading /></el-icon>
                 <span>{{ screenPlaceholderText }}</span>
               </div>
             </div>
@@ -153,6 +156,7 @@ const caseName = ref('')
 const taskName = ref('')
 const currentExecutionId = ref(null)
 const logContainer = ref(null)
+const isCaseConversion = ref(false) // 用例转换任务：执行中无需投屏
 let pollInterval = null
 
 const wsSocket = ref(null)
@@ -165,6 +169,7 @@ const screenScale = ref({ x: 1, y: 1 })
 const pageTitle = computed(() => taskName.value || caseName.value || t('uiAutomation.ai.title'))
 const showParsedCases = computed(() => displayCases.value.length > 0)
 const screenPlaceholderText = computed(() => {
+  if (isCaseConversion.value) return t('uiAutomation.ai.noScreen')
   if (!running.value) return t('uiAutomation.ai.noScreen')
   if (screencastStatus.value === 'error') return t('uiAutomation.ai.screencastWsError')
   return t('uiAutomation.ai.waitingScreen')
@@ -243,6 +248,7 @@ const applyRecord = (record) => {
   plannedTasks.value = record.planned_tasks || []
   caseName.value = record.case_name || ''
   taskName.value = record.task_name || ''
+  isCaseConversion.value = record.task_source === 'case_conversion'
 
   // 文件模式：用后端保存的用例树还原右侧用例明细（与执行时一致）
   const parsedCases = Array.isArray(record.parsed_cases) ? record.parsed_cases : []
@@ -322,7 +328,10 @@ const loadExecution = async () => {
     if (!terminal && (record.status === 'running' || record.status === 'pending')) {
       running.value = true
       analyzing.value = !showParsedCases.value && plannedTasks.value.length === 0
-      connectScreencast(id)
+      // 用例转换任务：执行中无需投屏，直接轮询日志/状态
+      if (!isCaseConversion.value) {
+        connectScreencast(id)
+      }
       startPolling()
     } else {
       running.value = false

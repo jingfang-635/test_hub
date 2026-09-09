@@ -320,10 +320,18 @@ class TestRunCaseViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['get'])
     def history(self, request, pk=None):
         """
-        获取用例执行历史记录
+        获取用例执行历史记录（跨测试计划：同一测试用例在所有测试计划中的执行历史）
         """
         run_case = self.get_object()
-        history = run_case.history.all().order_by('-executed_at')
+        # 同一测试用例可能被分配到多个测试计划，每个计划对应不同的 TestRunCase。
+        # 历史记录挂在 TestRunCase 上，因此需汇总该用例在所有 TestRunCase 下的历史。
+        history = TestRunCaseHistory.objects.filter(
+            run_case__testcase=run_case.testcase
+        ).select_related(
+            'version', 'executed_by',
+            'run_case__test_run__test_plan__version',
+            'run_case__testcase'
+        ).prefetch_related('run_case__testcase__versions').order_by('-executed_at')
         serializer = TestRunCaseHistorySerializer(history, many=True)
         return Response(serializer.data)
 

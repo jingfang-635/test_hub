@@ -3926,6 +3926,354 @@ def build_planned_tasks_from_cases(cases):
     return tasks
 
 
+def echo_steps_to_hub_testcase(hub_testcase_id, planned_tasks):
+    """将 AI 智能测试执行产生的步骤回显到「用例详情 - UI自动化」页面。
+
+    以规划任务（planned_tasks）为数据源（含 AI 执行过程中的状态），把已完成/失败
+    的步骤写入主项目测试用例的 step_details（TestCaseStep），供用例详情 UI 自动化 tab 回显。
+    返回写入的步骤数量。
+    """
+    from apps.testcases.models import TestCase, TestCaseStep as HubTestCaseStep
+
+    if not hub_testcase_id or not planned_tasks:
+        return 0
+
+    try:
+        testcase = TestCase.objects.get(pk=hub_testcase_id)
+    except TestCase.DoesNotExist:
+        return 0
+
+    completed = []
+    for task in planned_tasks:
+        desc = str(task.get('description', '')).strip()
+        if not desc:
+            continue
+        status = str(task.get('status', '') or '').strip().lower()
+        # 执行过的步骤才回显（跳过 pending/in_progress 的未执行步骤）
+        if status in ('completed', 'failed', 'skipped'):
+            completed.append(desc)
+
+    if not completed:
+        return 0
+
+    # 采用全量覆盖策略：先用旧步骤删除，再重建，保证与执行结果一致
+    HubTestCaseStep.objects.filter(testcase=testcase).delete()
+    created = []
+    for i, desc in enumerate(completed, start=1):
+        created.append(HubTestCaseStep(
+            testcase=testcase,
+            step_number=i,
+            action=desc,
+            expected='',
+        ))
+    HubTestCaseStep.objects.bulk_create(created)
+    return len(created)
+
+
+# ============================== AI 生成步骤 → 用例录制并双端同步 ==============================
+
+def _dom_element_to_locator(el):
+    """把 browser-use 交互相元素映射为可被 _parse_playwright_locator 解析的定位表达式。
+
+    兼容 UI自动化「录制步骤 → 用例」的解析器，使 AI 生成步骤能以同样的格式进入元素库。
+    """
+    if el is None:
+        return ''
+    attrs = getattr(el, 'attributes', None) or {}
+    node = (getattr(el, 'node_name', '') or '').lower()
+    ax_name = getattr(el, 'ax_name', None) or ''
+    xpath = getattr(el, 'x_path', '') or ''
+
+    testid = attrs.get('data-testid') or attrs.get('data-test') or attrs.get('data-cy')
+    if testid:
+        return f'page.get_by_test_id("{testid}")'
+    if attrs.get('id'):
+        return f'page.locator("#{attrs.get("id")}")'
+    if attrs.get('placeholder'):
+        return f'page.get_by_placeholder("{attrs.get("placeholder")}")'
+    if attrs.get('name'):
+        return f'page.locator("[name={attrs.get("name")}]")'
+    if attrs.get('aria-label'):
+        return f'page.get_by_label("{attrs.get("aria-label")}")'
+    if ax_name:
+        return f'page.get_by_label("{ax_name}")'
+    if attrs.get('role'):
+        return f'page.get_by_role("{attrs.get("role")}")'
+    if xpath:
+        return f'page.locator("xpath={xpath}")'
+    return node or ''
+
+
+def _extract_ai_history_actions(history):
+    """从 AI 执行历史提取 (action, interacted_element) 列表，供录制用例。
+
+    过滤掉纯状态标记动作（mark_task_* / done 等），仅保留真实浏览器操作。
+    """
+    actions = []
+    if not history:
+        return actions
+    model_actions = getattr(history, 'model_actions', None)
+    if not callable(model_actions):
+        logger.warning('_extract_ai_history_actions: history 类型 %s 无 model_actions()，无法录制', type(history).__name__)
+        return actions
+    try:
+        items = model_actions()
+    except Exception as e:
+        logger.warning('_extract_ai_history_actions: 调用 model_actions() 失败: %s', e)
+        return actions
+
+    for item in items or []:
+        if not isinstance(item, dict):
+            continue
+        el = item.get('interacted_element')
+        acted = {k: v for k, v in item.items() if k != 'interacted_element'}
+        if not acted:
+            continue
+        # 仅保留真实操作；标记类动作（mark_task_* / update_task_status / done）单独出现时跳过
+        MARKER_ACTIONS = ('mark_task_complete', 'mark_task_failed', 'mark_task_skipped',
+                          'update_task_status', 'done', 'structured_output')
+        if all(k in MARKER_ACTIONS for k in acted):
+            continue
+        # 混合动作（真实操作+标记动作）时，剔除标记部分，仅保留真实操作
+        real = {k: v for k, v in acted.items() if k not in MARKER_ACTIONS}
+        actions.append({
+            'action': real or acted,
+            'interacted_element': el,
+        })
+    return actions
+
+
+def _ai_actions_to_case_steps(project, user, actions, default_page='main'):
+    """把 AI 执行历史上的操作+定位器转换为用例步骤(DTO 结构)，并同步创建元素。
+
+    与 codegen_pipeline_service.map_parse_to_case_steps 产出结构保持一致。
+    返回 (steps, created_element_ids)。
+    """
+    from .codegen_pipeline_service import (
+        _get_or_create_element_from_locator,
+        _element_step_extras,
+        _build_step_description,
+        _page_name_from_url,
+    )
+
+    mapped = []
+    element_cache = {}
+    created_ids = []
+    current_page = default_page or 'main'
+
+    def _action_key(action_dict):
+        # browser-use 动作序列化形如 {click_element: {...}} 或 {go_to_url: {...}}
+        for k, v in action_dict.items():
+            if isinstance(v, dict) and v:
+                return k
+        for k, v in action_dict.items():
+            if v not in ('', None):
+                return k
+        return next((k for k in action_dict if k), None)
+
+    for item in actions:
+        action_dict = item.get('action') or {}
+        el = item.get('interacted_element')
+        key = _action_key(action_dict)
+        if not key:
+            continue
+        params = action_dict.get(key) or {}
+        action_l = key.lower()
+
+        # 导航：定位器无目标，直接记录 URL
+        if action_l in ('go_to_url', 'navigate'):
+            url = params.get('url', '') if isinstance(params, dict) else str(params)
+            if url:
+                current_page = _page_name_from_url(url) or current_page
+            mapped.append({
+                'action_type': 'navigateUrl',
+                'page_filter': current_page,
+                'element_id': None,
+                'input_value': url,
+                'wait_time': 1000,
+                'assert_type': '',
+                'assert_value': '',
+                'description': _build_step_description(action='navigate', url=url)[:500],
+                'raw': '',
+                **_element_step_extras(None),
+            })
+            continue
+
+        # 映射为 UI 用例步骤操作类型（select 映射为 fill，与现有录制步骤转换保持一致）
+        # 兼容 browser-use 新旧版本动作名：
+        #   新版: navigate/input/click/scroll/select_dropdown_option/extract/switch_tab/close_tab
+        #   旧版: go_to_url/input_text/click_element/scroll_down|scroll_up/select_option/extract_content
+        if action_l in ('input_text', 'input', 'fill'):
+            ui_action = 'fill'
+        elif action_l in ('click_element', 'click'):
+            ui_action = 'click'
+        elif action_l in ('select_option', 'select', 'select_dropdown', 'select_dropdown_option'):
+            ui_action = 'fill'
+        elif action_l in ('hover_element', 'hover'):
+            ui_action = 'hover'
+        elif action_l in ('scroll_down', 'scroll_up', 'scroll_to_text', 'scroll'):
+            ui_action = 'scroll'
+        elif action_l in ('extract_content', 'get_text', 'get_text_list', 'assert', 'extract', 'read_content'):
+            ui_action = 'assert'
+        elif action_l in ('switch_tab', 'open_new_tab', 'close_tab', 'new_tab'):
+            ui_action = 'switchTab'
+        else:
+            # 无法映射的动作跳过
+            continue
+
+        locator = _dom_element_to_locator(el)
+        input_value = ''
+        if ui_action == 'fill':
+            # 新版 select_dropdown_option 用 text 字段；input 用 text 字段
+            input_value = params.get('text', '') if isinstance(params, dict) else str(params)
+
+        # 创建/复用元素（与录制步骤一致：按定位器入库）
+        element = None
+        if locator and ui_action in ('click', 'fill', 'hover', 'scroll'):
+            element, created = _get_or_create_element_from_locator(
+                project=project,
+                user=user,
+                locator=locator,
+                action=ui_action,
+                page_name=current_page,
+                cache=element_cache,
+                idx=len(mapped),
+            )
+            if created and element:
+                created_ids.append(element.id)
+
+        desc = _build_step_description(
+            action=ui_action,
+            locator=locator,
+            value=input_value,
+            element_name=element.name if element else '',
+            element_type=element.element_type if element else '',
+        )[:500]
+
+        mapped.append({
+            'action_type': ui_action,
+            'page_filter': current_page,
+            'element_id': element.id if element else None,
+            'input_value': input_value,
+            'wait_time': 1000,
+            'assert_type': '',
+            'assert_value': '',
+            'description': desc,
+            'raw': '',
+            **_element_step_extras(element),
+        })
+
+    return mapped, created_ids
+
+
+def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
+    """「AI生成步骤」执行完成后，将执行中用到的操作+定位器 录制成用例并同步到两个页面：
+
+    1. UI自动化测试模块「用例管理」列表（ui_test_cases / ui_test_case_steps / ui_elements）；
+    2. 主项目「用例库」的 UI自动化页面（testcases，case_type 含 'ui'，并回显 step_details）。
+
+    返回 (ui_testcase_id, hub_testcase_id)；无可录制操作时返回 (None, None)。
+    """
+    if not hub_testcase_id:
+        logger.info('sync_ai_execution_to_cases: 无 hub_testcase_id，跳过')
+        return None, None
+
+    from apps.testcases.models import TestCase as HubTestCase
+    from apps.testcases.models import TestCaseStep as HubTestCaseStep
+    from .models import TestCase as UiTestCase, TestCaseStep as UiTestCaseStep
+
+    try:
+        hub_case = HubTestCase.objects.select_related('project').get(pk=hub_testcase_id)
+    except HubTestCase.DoesNotExist:
+        logger.info('sync_ai_execution_to_cases: 用例 #%s 不存在，跳过', hub_testcase_id)
+        return None, None
+
+    hub_project = hub_case.project
+    user = execution_record.executed_by
+
+    # 确保关联的 UI自动化 项目
+    if not hub_project:
+        logger.info('sync_ai_execution_to_cases: 用例 %s 无关联项目，跳过同步', hub_case.id)
+        return None, None
+    result, err = ensure_ui_project_for_hub(user, hub_project.id)
+    if err or not result:
+        logger.info('sync_ai_execution_to_cases: 无法定位 UI自动化 项目: %s', err)
+        return None, None
+    ui_project, _created = result
+
+    # 1) 从执行历史提取操作 + 定位器转成用例步骤
+    actions = _extract_ai_history_actions(history)
+    if not actions:
+        logger.info(
+            'sync_ai_execution_to_cases: 执行 #%s 历史无可录制操作（history=%s），跳过',
+            execution_record.id, type(history).__name__ if history else None,
+        )
+        return None, None
+
+    steps, _created_ids = _ai_actions_to_case_steps(ui_project, user, actions, default_page='main')
+    if not steps:
+        logger.info(
+            'sync_ai_execution_to_cases: 执行 #%s 的 %s 个动作均无法映射为用例步骤，跳过',
+            execution_record.id, len(actions),
+        )
+        return None, None
+
+    # 2) 创建/更新 UI自动化 TestCase
+    base_name = hub_case.title or 'AI生成步骤'
+    ui_title = f'{base_name}-AI生成步骤'
+    existing_ui = UiTestCase.objects.filter(project=ui_project, name=ui_title).first()
+    if existing_ui:
+        UiTestCaseStep.objects.filter(test_case=existing_ui).delete()
+        ui_case = existing_ui
+    else:
+        ui_case = UiTestCase(
+            project=ui_project,
+            name=ui_title,
+            description=f'由「AI生成步骤」自动录制（源用例：{hub_case.title}）',
+            status='draft',
+            priority='medium',
+            created_by=user,
+        )
+        ui_case.save()
+
+    ui_step_rows = []
+    for i, s in enumerate(steps, start=1):
+        ui_step_rows.append(UiTestCaseStep(
+            test_case=ui_case,
+            step_number=i,
+            action_type=(s.get('action_type') or 'click')[:20],
+            page_filter=(s.get('page_filter') or '')[:200],
+            element_id=s.get('element_id') or None,
+            input_value=(s.get('input_value') or ''),
+            wait_time=int(s.get('wait_time') or 1000),
+            assert_type=(s.get('assert_type') or '')[:20],
+            assert_value=(s.get('assert_value') or ''),
+            description=(s.get('description') or '')[:500],
+        ))
+    if ui_step_rows:
+        UiTestCaseStep.objects.bulk_create(ui_step_rows)
+
+    # 3) 同步到用例库（主项目 testcases，case_type 含 ui）
+    case_type = list(hub_case.case_type or []) if hub_case.case_type else []
+    if 'ui' not in case_type:
+        case_type.append('ui')
+    hub_case.case_type = case_type
+    hub_case.save(update_fields=['case_type', 'updated_at'])
+
+    # 回显 locator 化的步骤描述到用例库 step_details
+    descs = [s.get('description') or '' for s in steps if s.get('description')]
+    if descs:
+        HubTestCaseStep.objects.filter(testcase=hub_case).delete()
+        HubTestCaseStep.objects.bulk_create([
+            HubTestCaseStep(testcase=hub_case, step_number=i, action=d, expected='')
+            for i, d in enumerate(descs, start=1)
+        ])
+
+    logger.info('sync_ai_execution_to_cases: 已同步 UI用例=%s 步骤=%s, 用例库=%s',
+                ui_case.id, len(ui_step_rows), hub_case.id)
+    return ui_case.id, hub_case.id
+
+
 def update_planned_task_status(planned_tasks, task_id, task_status):
     """更新子任务状态，返回是否命中任务。"""
     if not planned_tasks or task_id is None or not task_status:
@@ -4159,6 +4507,11 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         task_description = request.data.get('task_description')
         execution_mode = request.data.get('execution_mode', 'text')  # 默认文本模式
         enable_gif = request.data.get('enable_gif', True)  # GIF录制开关，默认开启
+        # 「用例详情 - AI生成步骤」：关联的主平台测试用例 id，执行完成后把步骤回显到该用例的 UI 自动化页
+        hub_testcase_id = request.data.get('hub_testcase_id')
+        # 「用例转换」：由「用例详情 - AI生成步骤」发起的临时执行，任务来源固定标记为用例转换
+        if hub_testcase_id:
+            task_source = 'case_conversion'
         # 文件模式：前端上传解析出的用例结构，用于构建与右侧明细 1:1 的 planned_tasks
         parsed_cases = request.data.get('parsed_cases')
         # multipart 模式下 parsed_cases 会以字符串形式到达，需解析为 JSON
@@ -4382,7 +4735,6 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 self._process_gif_recording(execution_record, history)
 
                 safe_save(execution_record)
-
             except Exception as e:
                 error_message = str(e)
                 failed_task_id = None if is_infrastructure_failure(error_message) else mark_first_active_task(execution_record.planned_tasks, 'failed')
@@ -4408,6 +4760,25 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     logger.error(f"保存失败状态时出错: {e}")
                     pass
             finally:
+                # 「用例详情 - AI生成步骤」：无论成功/失败/停止，都尽量把已生成的步骤回显到用例 UI 自动化页
+                if hub_testcase_id:
+                    try:
+                        echoed = echo_steps_to_hub_testcase(hub_testcase_id, execution_record.planned_tasks)
+                        if echoed:
+                            logger.info(f"已回显 {echoed} 个AI生成步骤到用例 #{hub_testcase_id}")
+                    except Exception as echo_err:
+                        logger.error(f"回显AI生成步骤到用例 #{hub_testcase_id} 失败: {echo_err}")
+                    # 「用例详情 - AI生成步骤」：把执行历史里的操作+定位器录制成用例，同步到
+                    # UI自动化「用例管理」列表与「用例库」UI自动化页面
+                    try:
+                        _history = locals().get('history') or None
+                        ui_case_id, hub_id = sync_ai_execution_to_cases(
+                            hub_testcase_id, execution_record, _history
+                        )
+                        if ui_case_id:
+                            logger.info(f"已录制AI生成步骤到UI用例 #{ui_case_id}（用例库 #{hub_id}）")
+                    except Exception as sync_err:
+                        logger.error(f"录制AI生成步骤到用例失败: {sync_err}", exc_info=True)
                 # 清理停止信号
                 if execution_record.id in STOP_SIGNALS:
                     del STOP_SIGNALS[execution_record.id]
@@ -4418,7 +4789,8 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
 
         return Response({
             'message': 'AI 任务开始执行',
-            'execution_id': execution_record.id
+            'execution_id': execution_record.id,
+            'hub_testcase_id': hub_testcase_id,
         })
 
     @action(detail=True, methods=['get'], url_path='download_source_file')

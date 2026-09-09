@@ -508,6 +508,7 @@ export default {
     taskSource: '任务来源：',
     taskSourceText: '文本描述',
     taskSourceFile: '用例文档',
+    taskSourceCaseConversion: '用例转换',
     taskDescription: '任务描述',
     taskPlaceholder: '请用自然语言描述要执行的任务，例如：\n1. 访问 https://www.baidu.com\n2. 搜索 \'TestHub\'\n3. 点击第一条搜索结果',
     caseFile: '用例文档',

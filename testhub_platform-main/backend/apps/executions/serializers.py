@@ -12,11 +12,23 @@ class TestRunCaseHistorySerializer(serializers.ModelSerializer):
         fields = ('id', 'status', 'actual_result', 'comments', 'version', 'executed_by', 'executed_at')
 
     def get_version(self, obj):
-        # 历史记录显示测试计划关联的版本，兼容历史数据未存版本的情况
-        plan = obj.run_case.test_run.test_plan if obj.run_case and obj.run_case.test_run else None
-        if plan and plan.version:
-            return plan.version.name
-        return obj.version.name if obj.version else None
+        # 历史记录显示版本，优先级：测试计划关联版本 > 历史记录自身版本 > 测试执行关联版本 > 用例关联版本
+        run_case = obj.run_case
+        if run_case:
+            test_run = run_case.test_run
+            test_plan = test_run.test_plan if test_run else None
+            if test_plan and test_plan.version:
+                return test_plan.version.name
+        if obj.version:
+            return obj.version.name
+        if run_case:
+            if test_run and test_run.version:
+                return test_run.version.name
+            # 兜底：取用例关联的第一个版本
+            case_version = run_case.testcase.versions.first()
+            if case_version:
+                return case_version.name
+        return None
 
 class TestRunCaseSimpleSerializer(serializers.ModelSerializer):
     testcase = serializers.StringRelatedField()
