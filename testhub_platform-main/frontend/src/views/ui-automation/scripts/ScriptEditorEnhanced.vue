@@ -71,6 +71,14 @@
             </el-select>
           </div>
           <div class="toolbar-right">
+            <el-button size="small" @click="goToRecording">
+              <el-icon><VideoCamera /></el-icon>
+              {{ $t('uiAutomation.scriptEditor.recording') }}
+            </el-button>
+            <el-button size="small" type="success" @click="runScript" :loading="running">
+              <el-icon><VideoPlay /></el-icon>
+              {{ $t('uiAutomation.scriptEditor.playback') }}
+            </el-button>
             <el-button size="small" @click="formatCode">
               <el-icon><Operation /></el-icon>
               {{ $t('uiAutomation.scriptEditor.format') }}
@@ -177,7 +185,7 @@ import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  Search, Plus, View, Document, Check, Delete, Operation, Folder
+  Search, Plus, View, Document, Check, Delete, Operation, Folder, VideoCamera, VideoPlay
 } from '@element-plus/icons-vue'
 
 import {
@@ -208,6 +216,7 @@ const executionLogs = ref([])
 
 const cursorPosition = reactive({ line: 1, column: 1 })
 const saving = ref(false)
+const running = ref(false)
 
 // 标签页控制
 const rightActiveTab = ref('logs')
@@ -514,6 +523,33 @@ const clearCode = () => {
   addLog('info', t('uiAutomation.scriptEditor.messages.codeCleared'))
 }
 
+const goToRecording = () => {
+  // 跳转到录制页面
+  window.location.href = '/ui-automation/playwright-recording'
+}
+
+const runScript = async () => {
+  if (!scriptContent.value.trim()) {
+    ElMessage.warning(t('uiAutomation.scriptEditor.messages.emptyScript'))
+    return
+  }
+
+  try {
+    running.value = true
+    addLog('info', t('uiAutomation.scriptEditor.messages.scriptRunning'))
+    
+    // TODO: 调用后端 API 运行脚本
+    // 这里需要实现脚本运行逻辑，可以复用 ScriptList.vue 中的运行功能
+    ElMessage.info(t('uiAutomation.scriptEditor.messages.scriptRunningNotImplemented'))
+  } catch (error) {
+    console.error('Failed to run script:', error)
+    ElMessage.error(t('uiAutomation.scriptEditor.messages.scriptRunFailed'))
+    addLog('error', t('uiAutomation.scriptEditor.messages.scriptRunFailed'))
+  } finally {
+    running.value = false
+  }
+}
+
 const clearLogs = () => {
   executionLogs.value = []
 }
@@ -662,6 +698,12 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 10px;
+}
+
+.toolbar-right .el-button {
+  display: flex;
+  align-items: center;
+  gap: 4px;
 }
 
 .code-editor-container {

@@ -16,6 +16,8 @@ export default {
   closePlan: 'Close',
   activatePlan: 'Activate',
   viewHistory: 'History',
+  prevCase: 'Previous',
+  nextCase: 'Next',
 
   // Table columns
   serialNumber: 'No.',
@@ -41,6 +43,7 @@ export default {
   failed: 'Failed',
   blocked: 'Blocked',
   retest: 'Retest',
+  na: 'NA',
   completed: 'Completed',
   notStarted: 'Not Started',
   inProgress: 'In Progress',
@@ -85,6 +88,7 @@ export default {
   keywordPlaceholder: 'Search by title/ID',
   allPriority: 'All priorities',
   allTestType: 'All types',
+  allVersion: 'All versions',
   selectedTestcasesCount: '{count} test case(s) selected',
 
   confirmSelect: 'Confirm Selection',

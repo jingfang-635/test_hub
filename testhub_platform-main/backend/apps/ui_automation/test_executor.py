@@ -9,9 +9,8 @@ from datetime import datetime
 from django.utils import timezone
 from django.db import connection
 
-# 设置 Playwright 浏览器安装路径（与 playwright_engine.py 保持一致）
-# 避免使用默认的 C:\Users\...\AppData\Local\ms-playwright（可能有沙箱限制）
-os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'ms-playwright'))
+# 使用默认浏览器路径（用户目录下 ms-playwright）
+# 如需自定义路径，设置环境变量 PLAYWRIGHT_BROWSERS_PATH
 
 # playwright 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
 try:

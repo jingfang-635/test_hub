@@ -29,14 +29,8 @@ from .models import TestExecution, TestScript
 
 logger = logging.getLogger(__name__)
 
-# 与 playwright_engine / test_executor 保持一致
-os.environ.setdefault(
-    'PLAYWRIGHT_BROWSERS_PATH',
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'ms-playwright',
-    ),
-)
+# 使用默认浏览器路径（用户目录下 ms-playwright）
+# 如需自定义路径，设置环境变量 PLAYWRIGHT_BROWSERS_PATH
 
 BROWSER_LAUNCH_MAP = {
     'chrome': 'chromium',

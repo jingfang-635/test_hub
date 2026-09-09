@@ -34,14 +34,8 @@ from django.conf import settings
 
 logger = logging.getLogger('django')
 
-# 与 element_picker_service / playwright_engine 一致的浏览器路径
-os.environ.setdefault(
-    'PLAYWRIGHT_BROWSERS_PATH',
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'ms-playwright',
-    ),
-)
+# 使用默认浏览器路径（用户目录下 ms-playwright）
+# 如需自定义路径，设置环境变量 PLAYWRIGHT_BROWSERS_PATH
 
 try:
     from playwright.async_api import async_playwright, Page, BrowserContext

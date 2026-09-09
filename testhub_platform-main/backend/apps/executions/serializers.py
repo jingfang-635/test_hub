@@ -20,9 +20,28 @@ class TestRunCaseHistorySerializer(serializers.ModelSerializer):
 
 class TestRunCaseSimpleSerializer(serializers.ModelSerializer):
     testcase = serializers.StringRelatedField()
+    testcase_id = serializers.ReadOnlyField(source='testcase.id')
+    l1 = serializers.CharField(source='testcase.l1', read_only=True)
+    l2 = serializers.CharField(source='testcase.l2', read_only=True)
+    l3 = serializers.CharField(source='testcase.l3', read_only=True)
+    case_priority = serializers.CharField(source='testcase.priority', read_only=True)
+    test_type = serializers.CharField(source='testcase.test_type', read_only=True)
+    preconditions = serializers.CharField(source='testcase.preconditions', read_only=True)
+    steps = serializers.CharField(source='testcase.steps', read_only=True)
+    expected_result = serializers.CharField(source='testcase.expected_result', read_only=True)
+    description = serializers.CharField(source='testcase.description', read_only=True)
+    project_name = serializers.CharField(source='testcase.project.name', read_only=True)
+    versions = serializers.SerializerMethodField()
+
     class Meta:
         model = TestRunCase
-        fields = ('id', 'testcase', 'status')
+        fields = ('id', 'testcase', 'testcase_id', 'status', 'comments', 'l1', 'l2', 'l3',
+                  'case_priority', 'test_type', 'preconditions', 'steps',
+                  'expected_result', 'description', 'project_name', 'versions')
+
+    def get_versions(self, obj):
+        versions = obj.testcase.versions.all()
+        return [{'id': v.id, 'name': v.name, 'is_baseline': v.is_baseline} for v in versions]
 
 class TestRunCaseDetailSerializer(serializers.ModelSerializer):
     testcase = serializers.StringRelatedField()

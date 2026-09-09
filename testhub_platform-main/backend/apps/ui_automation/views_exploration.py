@@ -9,6 +9,7 @@ from rest_framework import viewsets, status
 from rest_framework.decorators import action
 from rest_framework.parsers import MultiPartParser, FormParser
 from rest_framework.response import Response
+from rest_framework.permissions import IsAuthenticated
 
 from .models import AIExplorationTask, AIExplorationCase, AIExplorationStep
 from .ai_exploration import run_exploration_sync, EXPLORATION_STOP_SIGNALS
@@ -67,8 +68,9 @@ def _serialize_step(step):
 
 
 class AIExplorationTaskViewSet(viewsets.ModelViewSet):
-    """AI探索测试任务"""
+    """AI 探索测试任务"""
     queryset = AIExplorationTask.objects.all().order_by('-start_time')
+    permission_classes = [IsAuthenticated]
 
     def list(self, request):
         tasks = self.get_queryset()[:50]
@@ -236,6 +238,7 @@ class AIExplorationTaskViewSet(viewsets.ModelViewSet):
 class AIExplorationStepViewSet(viewsets.ModelViewSet):
     """探索步骤（可视化编排时更新坐标）"""
     queryset = AIExplorationStep.objects.all()
+    permission_classes = [IsAuthenticated]
 
     def retrieve(self, request, pk=None):
         return Response(_serialize_step(self.get_object()))

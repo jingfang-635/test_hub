@@ -16,6 +16,8 @@ export default {
   closePlan: '关闭',
   activatePlan: '激活',
   viewHistory: '历史',
+  prevCase: '上一条',
+  nextCase: '下一条',
 
   // Table columns
   serialNumber: '序号',
@@ -41,6 +43,7 @@ export default {
   failed: '失败',
   blocked: '阻塞',
   retest: '重测',
+  na: 'NA',
   completed: '已完成',
   notStarted: '未开始',
   inProgress: '进行中',
@@ -85,6 +88,7 @@ export default {
   keywordPlaceholder: '按标题/编号搜索',
   allPriority: '全部优先级',
   allTestType: '全部类型',
+  allVersion: '全部版本',
   selectedTestcasesCount: '已选择 {count} 条用例',
   confirmSelect: '确认选择',
 

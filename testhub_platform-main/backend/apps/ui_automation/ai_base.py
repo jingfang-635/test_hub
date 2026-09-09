@@ -1106,22 +1106,56 @@ class BaseBrowserAgent:
             return "执行操作"
 
     def _find_chrome_path(self):
-        """定位本机 Chrome/Chromium 可执行文件，供预检与 BrowserProfile 复用。"""
+        """定位本机 Chrome/Edge/Chromium 可执行文件，供预检与 BrowserProfile 复用。"""
         import platform
         import glob
 
         system = platform.system()
-        chrome_path = None
 
         if system == 'Windows':
             paths = [
+                # Google Chrome
                 r"C:\Program Files\Google\Chrome\Application\chrome.exe",
                 r"C:\Program Files (x86)\Google\Chrome\Application\chrome.exe",
-                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe")
+                os.path.expanduser(r"~\AppData\Local\Google\Chrome\Application\chrome.exe"),
+                # Microsoft Edge（Chromium 内核，可作为替代）
+                r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe",
+                r"C:\Program Files\Microsoft\Edge\Application\msedge.exe",
+                os.path.expanduser(r"~\AppData\Local\Microsoft\Edge\Application\msedge.exe"),
             ]
             for p in paths:
                 if os.path.exists(p):
                     return p
+
+            # 注册表 App Paths
+            try:
+                import winreg
+                for app in ('chrome.exe', 'msedge.exe'):
+                    try:
+                        with winreg.OpenKey(
+                            winreg.HKEY_LOCAL_MACHINE,
+                            rf"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\{app}",
+                        ) as key:
+                            value, _ = winreg.QueryValueEx(key, None)
+                            if value and os.path.exists(value):
+                                return value
+                    except OSError:
+                        continue
+            except ImportError:
+                pass
+
+            # Playwright 自带 Chromium
+            local_app = os.environ.get('LOCALAPPDATA', '')
+            user_profile = os.path.expanduser('~')
+            playwright_globs = [
+                os.path.join(local_app, 'ms-playwright', 'chromium-*', 'chrome-win*', 'chrome.exe'),
+                os.path.join(user_profile, 'AppData', 'Local', 'ms-playwright', 'chromium-*', 'chrome-win*', 'chrome.exe'),
+            ]
+            for pattern in playwright_globs:
+                matches = sorted(glob.glob(pattern), reverse=True)
+                for match in matches:
+                    if os.path.exists(match):
+                        return match
             return None
 
         if system == 'Linux':
@@ -1156,12 +1190,13 @@ class BaseBrowserAgent:
         if system == 'Darwin':
             mac_paths = [
                 '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+                '/Applications/Microsoft Edge.app/Contents/MacOS/Microsoft Edge',
                 '/Applications/Chromium.app/Contents/MacOS/Chromium',
             ]
             for p in mac_paths:
                 if os.path.exists(p):
                     return p
-        return chrome_path
+        return None
 
     async def _verify_execution_llm(self):
         """轻量连通性检查：确认执行模型可调用。"""
@@ -1192,9 +1227,12 @@ class BaseBrowserAgent:
             errors.append("未配置 AI 模型 Base URL（角色 browser_use_text）")
 
         chrome_path = self._find_chrome_path()
-        # Windows 依赖本机 Chrome；Linux 可由 browser-use 自行拉取，仅告警
+        # Windows 依赖本机 Chrome/Edge；Linux 可由 browser-use 自行拉取，仅告警
         if platform.system() == 'Windows' and not chrome_path:
-            errors.append("未找到 Chrome 浏览器，请先安装 Google Chrome")
+            errors.append(
+                "未找到可用浏览器，请安装 Google Chrome 或 Microsoft Edge"
+                "（也可执行: python -m playwright install chromium）"
+            )
         elif not chrome_path:
             logger.warning("⚠️ 预检未找到预装浏览器，将尝试由 browser-use 自动处理")
 

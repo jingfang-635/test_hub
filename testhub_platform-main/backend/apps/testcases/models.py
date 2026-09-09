@@ -4,6 +4,11 @@ from apps.users.models import User
 from apps.projects.models import Project
 from apps.versions.models import Version
 
+
+def default_case_types():
+    return ['manual']
+
+
 class TestCase(models.Model):
     """测试用例模型"""
     PRIORITY_CHOICES = [
@@ -24,6 +29,7 @@ class TestCase(models.Model):
         ('ui', 'UI'),
         ('api', '接口'),
     ]
+    CASE_TYPE_VALUES = {'manual', 'ui', 'api'}
 
     TYPE_CHOICES = [
         ('functional', '功能测试'),
@@ -44,7 +50,7 @@ class TestCase(models.Model):
     priority = models.CharField(max_length=20, choices=PRIORITY_CHOICES, default='P2', verbose_name='优先级')
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')
     test_type = models.CharField(max_length=20, choices=TYPE_CHOICES, default='functional', verbose_name='测试类型')
-    case_type = models.CharField(max_length=20, choices=CASE_TYPE_CHOICES, default='manual', verbose_name='用例类型')
+    case_type = models.JSONField(default=default_case_types, verbose_name='用例类型')
     l1 = models.CharField(max_length=500, blank=True, default='', verbose_name='L1')
     l2 = models.CharField(max_length=500, blank=True, default='', verbose_name='L2')
     l3 = models.CharField(max_length=500, blank=True, default='', verbose_name='L3')
@@ -53,7 +59,7 @@ class TestCase(models.Model):
     assignee = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True, related_name='assigned_testcases', verbose_name='指派人')
     created_at = models.DateTimeField(default=timezone.now, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
-    
+
     def __str__(self):
         return self.title
     

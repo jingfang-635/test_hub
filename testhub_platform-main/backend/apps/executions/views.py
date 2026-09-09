@@ -115,14 +115,28 @@ class TestPlanViewSet(viewsets.ModelViewSet):
                     'detail': '请选择有效的项目'
                 }, status=status.HTTP_400_BAD_REQUEST)
             
-            # 获取指定项目的测试用例
+            # 获取指定项目的测试用例，附带版本信息
             testcases = TestCase.objects.filter(
                 project_id__in=project_ids,
                 status__in=['draft', 'active']  # 包含草稿和激活状态的测试用例
-            ).values('id', 'title', 'priority', 'test_type', 'project__name')
-            
+            ).select_related('project').prefetch_related('versions')
+
+            results = []
+            for tc in testcases:
+                version_ids = [v.id for v in tc.versions.all()]
+                version_names = [v.name for v in tc.versions.all()]
+                results.append({
+                    'id': tc.id,
+                    'title': tc.title,
+                    'priority': tc.priority,
+                    'test_type': tc.test_type,
+                    'project__name': tc.project.name,
+                    'version_ids': version_ids,
+                    'version_names': version_names,
+                })
+
             return Response({
-                'results': list(testcases)
+                'results': results
             })
             
         except ValueError:

@@ -91,7 +91,12 @@
           </el-col>
           <el-col :span="6">
             <el-form-item :label="$t('testcase.caseType')" prop="case_type">
-              <el-select v-model="form.case_type" :placeholder="$t('testcase.selectCaseType')">
+              <el-select
+                v-model="form.case_type"
+                :placeholder="$t('testcase.selectCaseType')"
+                multiple
+                clearable
+              >
                 <el-option :label="$t('testcase.caseTypeManual')" value="manual" />
                 <el-option :label="$t('testcase.caseTypeUi')" value="ui" />
                 <el-option :label="$t('testcase.caseTypeApi')" value="api" />
@@ -177,7 +182,7 @@ const form = reactive({
   project_id: null,
   priority: 'P2',
   test_type: 'functional',
-  case_type: 'manual',
+  case_type: ['manual'],
   preconditions: '',
   steps: '',
   expected_result: '',
@@ -209,7 +214,7 @@ const rules = {
     { required: true, message: computed(() => t('testcase.testTypeRequired')), trigger: 'change' }
   ],
   case_type: [
-    { required: true, message: computed(() => t('testcase.caseTypeRequired')), trigger: 'change' }
+    { required: true, type: 'array', min: 1, message: computed(() => t('testcase.caseTypeRequired')), trigger: 'change' }
   ],
   version_ids: [
     { required: true, type: 'array', message: computed(() => t('testcase.versionsRequired')), trigger: 'change' }
@@ -290,6 +295,16 @@ const onVersionChange = () => {
   // Version change handling logic if needed
 }
 
+const normalizeCaseTypes = (value) => {
+  if (Array.isArray(value)) {
+    return value.length ? value : ['manual']
+  }
+  if (typeof value === 'string' && value.trim()) {
+    return value.split(/[,，、;；]/).map(v => v.trim()).filter(Boolean)
+  }
+  return ['manual']
+}
+
 const fetchTestCase = async () => {
   try {
     const response = await api.get(`/testcases/${route.params.id}/`)
@@ -301,7 +316,7 @@ const fetchTestCase = async () => {
     form.project_id = testcase.project?.id || null
     form.priority = testcase.priority
     form.test_type = testcase.test_type
-    form.case_type = testcase.case_type || 'manual'
+    form.case_type = normalizeCaseTypes(testcase.case_type)
     form.l1 = testcase.l1 || ''
     form.l2 = testcase.l2 || ''
     form.l3 = testcase.l3 || ''

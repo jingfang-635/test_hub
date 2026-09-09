@@ -9,8 +9,8 @@ import os
 from datetime import datetime
 from typing import Dict, List, Optional, Tuple
 
-# 设置 Playwright 浏览器安装路径（自定义路径）
-os.environ.setdefault('PLAYWRIGHT_BROWSERS_PATH', os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'ms-playwright'))
+# 使用默认浏览器路径（用户目录下 ms-playwright）
+# 如需自定义路径，设置环境变量 PLAYWRIGHT_BROWSERS_PATH
 
 # playwright 是 optional 依赖，Vercel 等 Serverless 环境可能未安装
 try:

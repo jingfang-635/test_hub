@@ -206,6 +206,12 @@
               <el-option :label="$t('testcase.security')" value="security" />
             </el-select>
           </el-form-item>
+          <el-form-item :label="$t('execution.version')">
+            <el-select v-model="testcaseFilters.version" :placeholder="$t('execution.allVersion')" clearable style="width: 140px">
+              <el-option :label="$t('execution.allVersion')" value="" />
+              <el-option v-for="v in availableTestcaseVersions" :key="v.id" :label="v.name" :value="v.id" />
+            </el-select>
+          </el-form-item>
           <el-form-item>
             <el-button type="primary" @click="applyTestcaseFilters">{{ $t('common.search') }}</el-button>
             <el-button @click="resetTestcaseFilters">{{ $t('common.reset') }}</el-button>
@@ -361,17 +367,20 @@ const initialAssignedTestcases = ref([])
 const syncingTestcaseSelection = ref(false)
 const assigning = ref(false)
 const assigningPlanId = ref(null)
+const assignProjectIds = ref([])
 const testcasePage = ref(1)
 const testcasePageSize = ref(20)
 const testcaseFilters = reactive({
   keyword: '',
   priority: '',
-  test_type: ''
+  test_type: '',
+  version: ''
 })
 const appliedTestcaseFilters = reactive({
   keyword: '',
   priority: '',
-  test_type: ''
+  test_type: '',
+  version: ''
 })
 
 // 分页
@@ -434,12 +443,25 @@ const filteredSelectorTestcases = computed(() => {
   if (appliedTestcaseFilters.test_type) {
     list = list.filter(item => item.test_type === appliedTestcaseFilters.test_type)
   }
+  if (appliedTestcaseFilters.version) {
+    const vid = appliedTestcaseFilters.version
+    list = list.filter(item => (item.version_ids || []).includes(vid))
+  }
   return list
 })
 
 const paginatedTestcases = computed(() => {
   const start = (testcasePage.value - 1) * testcasePageSize.value
   return filteredSelectorTestcases.value.slice(start, start + testcasePageSize.value)
+})
+
+const availableTestcaseVersions = computed(() => {
+  const projectIds = assignProjectIds.value
+  if (!projectIds || projectIds.length === 0) return []
+  const projSet = new Set(projectIds)
+  return (versions.value || []).filter(v =>
+    (v.projects || []).some(p => projSet.has(p.id))
+  )
 })
 
 const fetchTestPlans = async () => {
@@ -623,11 +645,12 @@ const openAssignTestcases = async (plan) => {
       return
     }
 
+    assignProjectIds.value = projectIds
     await loadTestcasesByProjects(projectIds)
 
     testcasePage.value = 1
-    Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
-    Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
+    Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '', version: '' })
+    Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '', version: '' })
     tempSelectedTestcases.value = filteredTestcases.value.filter(item => assignedIds.has(item.id))
     initialAssignedTestcases.value = tempSelectedTestcases.value.slice()
 
@@ -648,8 +671,8 @@ const applyTestcaseFilters = () => {
 }
 
 const resetTestcaseFilters = () => {
-  Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '' })
-  Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '' })
+  Object.assign(testcaseFilters, { keyword: '', priority: '', test_type: '', version: '' })
+  Object.assign(appliedTestcaseFilters, { keyword: '', priority: '', test_type: '', version: '' })
   testcasePage.value = 1
   // 清除筛选后恢复为弹窗打开时已分配的用例，并刷新列表与勾选显示
   tempSelectedTestcases.value = initialAssignedTestcases.value.slice()
@@ -732,6 +755,7 @@ const confirmTestcaseSelection = async () => {
 const onTestcaseSelectorClosed = () => {
   tempSelectedTestcases.value = []
   assigningPlanId.value = null
+  assignProjectIds.value = []
   filteredTestcases.value = []
 }
 

@@ -500,6 +500,7 @@ export default {
     newTest: 'New Test',
     screencast: 'Real-time Screencast',
     waitingScreen: 'Waiting for screen...',
+    screencastWsError: 'Screencast connection failed. Ensure Redis is running and the backend supports WebSocket, then retry',
     noScreen: 'No screen yet',
     taskInput: 'Task Input',
     taskName: 'Task Name',
@@ -1118,6 +1119,8 @@ export default {
     usageCount: 'Usage Count',
     insertCode: 'Insert Code',
     validateElement: 'Validate Element',
+    recording: 'Recording',
+    playback: 'Playback',
     format: 'Format',
     clear: 'Clear',
     saveScript: 'Save Script',
@@ -1142,7 +1145,10 @@ export default {
       saveFailed: 'Failed to save script',
       validatePassed: 'Element validation passed',
       validateFailed: 'Element validation failed',
-      switchLanguage: 'Switched to {lang} language'
+      switchLanguage: 'Switched to {lang} language',
+      scriptRunning: 'Script is running...',
+      scriptRunningNotImplemented: 'Script running feature is in development...',
+      scriptRunFailed: 'Failed to run script'
     }
   },
 

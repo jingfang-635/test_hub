@@ -141,7 +141,7 @@
                 <el-table-column prop="test_type" :label="$t('testcase.testType')" width="110">
                   <template #default="{ row }">{{ getTypeText(row.test_type) }}</template>
                 </el-table-column>
-                <el-table-column prop="case_type" :label="$t('testcase.caseType')" width="90">
+                <el-table-column prop="case_type" :label="$t('testcase.caseType')" width="140">
                   <template #default="{ row }">{{ getCaseTypeText(row.case_type) }}</template>
                 </el-table-column>
                 <el-table-column prop="project.name" :label="$t('testcase.relatedProject')" width="140">
@@ -512,7 +512,13 @@ const getCaseTypeText = (type) => {
     ui: t('testcase.caseTypeUi'),
     api: t('testcase.caseTypeApi')
   }
-  return textMap[type] || '-'
+  const values = Array.isArray(type)
+    ? type
+    : (typeof type === 'string' && type.trim()
+      ? type.split(/[,，、;；]/).map(v => v.trim()).filter(Boolean)
+      : [])
+  if (!values.length) return '-'
+  return values.map(v => textMap[v] || v).join('、')
 }
 
 const formatDate = (dateString) => {

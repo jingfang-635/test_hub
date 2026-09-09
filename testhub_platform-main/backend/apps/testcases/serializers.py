@@ -4,6 +4,49 @@ from apps.users.serializers import UserSerializer
 from apps.versions.serializers import VersionSimpleSerializer
 from apps.projects.models import Project
 
+
+VALID_CASE_TYPES = TestCase.CASE_TYPE_VALUES
+
+
+class CaseTypeField(serializers.Field):
+    """用例类型多选：API 使用列表，入库为 JSON 数组。"""
+
+    default_error_messages = {
+        'invalid': '用例类型格式无效',
+        'empty': '请至少选择一种用例类型',
+        'invalid_choice': '无效的用例类型: {value}',
+    }
+
+    def to_representation(self, value):
+        if not value:
+            return []
+        if isinstance(value, list):
+            return value
+        if isinstance(value, str):
+            return [v.strip() for v in value.replace('、', ',').split(',') if v.strip()]
+        return []
+
+    def to_internal_value(self, data):
+        if data is None:
+            self.fail('empty')
+        if isinstance(data, str):
+            data = [v.strip() for v in data.replace('、', ',').split(',') if v.strip()]
+        if not isinstance(data, list):
+            self.fail('invalid')
+        if not data:
+            self.fail('empty')
+        normalized = []
+        seen = set()
+        for item in data:
+            item = str(item).strip()
+            if item not in VALID_CASE_TYPES:
+                self.fail('invalid_choice', value=item)
+            if item not in seen:
+                seen.add(item)
+                normalized.append(item)
+        return normalized
+
+
 class TestCaseStepSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCaseStep
@@ -35,7 +78,8 @@ class TestCaseSerializer(serializers.ModelSerializer):
     step_details = TestCaseStepSerializer(many=True, read_only=True)
     attachments = TestCaseAttachmentSerializer(many=True, read_only=True)
     comments = TestCaseCommentSerializer(many=True, read_only=True)
-    
+    case_type = CaseTypeField(required=False)
+
     class Meta:
         model = TestCase
         fields = '__all__'
@@ -46,6 +90,7 @@ class TestCaseListSerializer(serializers.ModelSerializer):
     assignee = serializers.SerializerMethodField()
     project = serializers.SerializerMethodField()
     versions = serializers.SerializerMethodField()
+    case_type = CaseTypeField(read_only=True)
 
     class Meta:
         model = TestCase
@@ -76,6 +121,7 @@ class TestCaseCreateSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text="关联版本ID列表"
     )
+    case_type = CaseTypeField(required=False)
 
     class Meta:
         model = TestCase
@@ -128,6 +174,7 @@ class TestCaseUpdateSerializer(serializers.ModelSerializer):
         allow_empty=True,
         help_text="关联版本ID列表"
     )
+    case_type = CaseTypeField(required=False)
 
     class Meta:
         model = TestCase

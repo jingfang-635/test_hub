@@ -91,7 +91,12 @@
           </el-col>
           <el-col :span="6">
             <el-form-item :label="$t('testcase.caseType')" prop="case_type">
-              <el-select v-model="form.case_type" :placeholder="$t('testcase.selectCaseType')">
+              <el-select
+                v-model="form.case_type"
+                :placeholder="$t('testcase.selectCaseType')"
+                multiple
+                clearable
+              >
                 <el-option :label="$t('testcase.caseTypeManual')" value="manual" />
                 <el-option :label="$t('testcase.caseTypeUi')" value="ui" />
                 <el-option :label="$t('testcase.caseTypeApi')" value="api" />
@@ -172,7 +177,7 @@ const form = reactive({
   priority: 'P2',
   test_type: 'functional',
   preconditions: '',
-  case_type: 'manual',
+  case_type: ['manual'],
   steps: '',
   expected_result: '',
   l1: '',
@@ -203,7 +208,7 @@ const rules = {
     { required: true, message: computed(() => t('testcase.testTypeRequired')), trigger: 'change' }
   ],
   case_type: [
-    { required: true, message: computed(() => t('testcase.caseTypeRequired')), trigger: 'change' }
+    { required: true, type: 'array', min: 1, message: computed(() => t('testcase.caseTypeRequired')), trigger: 'change' }
   ],
   version_ids: [
     { required: true, type: 'array', message: computed(() => t('testcase.versionsRequired')), trigger: 'change' }
@@ -264,6 +269,9 @@ const fetchProjectVersions = async (projectId) => {
 const onProjectChange = (projectId) => {
   form.version_ids = []
   fetchProjectVersions(projectId)
+  // 选择项目后自动填充 L1 为项目名
+  const project = projects.value.find(p => p.id === projectId)
+  form.l1 = project ? project.name : ''
   // 项目变化后重新校验 L1（依赖项目名）
   formRef.value && formRef.value.validateField('l1')
 }

@@ -1,5 +1,12 @@
 <template>
   <div class="execution-detail">
+    <!-- 返回按钮 -->
+    <div class="detail-header">
+      <el-button class="back-button" :icon="ArrowLeft" @click="$router.back()">
+        {{ $t('common.back') }}
+      </el-button>
+    </div>
+
     <!-- 测试执行区域 -->
     <div v-if="testPlan.test_runs && testPlan.test_runs.length > 0">
       <div v-for="run in testPlan.test_runs" :key="run.id" class="test-run-card">
@@ -11,7 +18,7 @@
               {{ getRunStatusText(run.progress) }}
             </el-tag>
           </div>
-          
+
           <!-- 美化的统计卡片 -->
           <div class="stats-cards">
             <div class="stat-card total">
@@ -54,8 +61,8 @@
 
         <!-- 进度条 -->
         <div class="progress-section">
-          <el-progress 
-            :percentage="run.progress.progress" 
+          <el-progress
+            :percentage="run.progress.progress"
             :stroke-width="12"
             :color="getProgressColor(run.progress.progress)"
             :show-text="true">
@@ -65,109 +72,10 @@
           </el-progress>
         </div>
 
-        <!-- 批量操作按钮 -->
-        <div v-if="selectedCases.length > 0" class="batch-actions">
-          <el-button
-            type="danger"
-            :icon="Delete"
-            @click="batchDeleteCases"
-            :disabled="isDeleting">
-            {{ $t('execution.batchDelete') }} ({{ selectedCases.length }})
-          </el-button>
-        </div>
-
-        <!-- 优化的用例表格 -->
-        <el-table
-          ref="tableRef"
-          :data="paginatedCases(run.run_cases)"
-          style="width: 100%"
-          class="execution-table"
-          @selection-change="handleSelectionChange"
-          :row-key="(row) => row.id">
-          <el-table-column type="selection" width="55" :reserve-selection="true" />
-          <el-table-column
-            type="index"
-            :label="$t('execution.serialNumber')"
-            width="80"
-            :index="getSerialNumber" />
-          <el-table-column prop="testcase" :label="$t('execution.testCase')" min-width="250" />
-          <el-table-column :label="$t('execution.executionStatus')" width="150">
-            <template #default="scope">
-              <el-select
-                v-model="scope.row.status"
-                @change="updateCaseStatus(scope.row)"
-                size="small">
-                <el-option :label="$t('execution.untested')" value="untested" />
-                <el-option :label="$t('execution.passed')" value="passed" />
-                <el-option :label="$t('execution.failed')" value="failed" />
-                <el-option :label="$t('execution.blocked')" value="blocked" />
-                <el-option :label="$t('execution.retest')" value="retest" />
-              </el-select>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('execution.comments')" min-width="250">
-            <template #default="scope">
-              <el-input
-                v-model="scope.row.comments"
-                :placeholder="$t('execution.commentsPlaceholder')"
-                type="textarea"
-                :rows="2"
-                size="small"
-                @blur="updateCaseDetails(scope.row)">
-              </el-input>
-            </template>
-          </el-table-column>
-          <el-table-column :label="$t('execution.actions')" width="120" fixed="right">
-            <template #default="scope">
-              <el-button
-                size="small"
-                type="primary"
-                :icon="Clock"
-                @click="viewCaseHistory(scope.row)">
-                {{ $t('execution.viewHistory') }}
-              </el-button>
-            </template>
-          </el-table-column>
-        </el-table>
-
-        <!-- 分页组件 -->
-        <div v-if="run.run_cases && run.run_cases.length > 0" class="pagination-container">
-          <el-pagination
-            v-model:current-page="currentPage"
-            v-model:page-size="pageSize"
-            :page-sizes="[10, 20, 50, 100]"
-            :total="run.run_cases.length"
-            layout="total, sizes, prev, pager, next, jumper"
-            @current-change="handlePageChange"
-            @size-change="handleSizeChange">
-          </el-pagination>
-        </div>
+        <!-- 用例列表：左侧 L1/L2/L3 树 + 右侧列表/详情（与用例库一致） -->
+        <RunCaseTree :cases="run.run_cases" @changed="fetchTestPlan" />
       </div>
     </div>
-
-    <!-- 历史记录对话框 -->
-    <el-dialog
-      :title="$t('execution.executionHistory')"
-      v-model="historyDialogVisible"
-      width="80%">
-      <el-table :data="currentCaseHistory" style="width: 100%">
-        <el-table-column prop="version" :label="$t('execution.version')" width="120" />
-        <el-table-column prop="status" :label="$t('execution.status')" width="100">
-          <template #default="scope">
-            <el-tag :type="getStatusType(scope.row.status)">
-              {{ getStatusText(scope.row.status) }}
-            </el-tag>
-          </template>
-        </el-table-column>
-        <el-table-column prop="comments" :label="$t('execution.comments')" show-overflow-tooltip />
-        <el-table-column prop="executed_by.username" :label="$t('execution.executedBy')" width="120" />
-        <el-table-column prop="executed_at" :label="$t('execution.executedAt')" width="180">
-          <template #default="scope">
-            {{ formatDate(scope.row.executed_at) }}
-          </template>
-        </el-table-column>
-      </el-table>
-    </el-dialog>
   </div>
 </template>
 
@@ -175,24 +83,18 @@
 import { ref, onMounted } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { ElMessage, ElMessageBox } from 'element-plus'
+import { ElMessage } from 'element-plus'
 import {
-  Delete, Clock, Document, CircleCheck, CircleClose,
-  WarningFilled, QuestionFilled
+  Document, CircleCheck, CircleClose,
+  WarningFilled, QuestionFilled, ArrowLeft
 } from '@element-plus/icons-vue'
 import axios from 'axios'
+import RunCaseTree from './RunCaseTree.vue'
 
 const { t } = useI18n()
 
 const route = useRoute()
 const testPlan = ref({})
-const historyDialogVisible = ref(false)
-const currentCaseHistory = ref([])
-const selectedCases = ref([])
-const currentPage = ref(1)
-const pageSize = ref(10)
-const isDeleting = ref(false)
-const tableRef = ref(null)
 
 const fetchTestPlan = async () => {
   try {
@@ -202,141 +104,6 @@ const fetchTestPlan = async () => {
   } catch (error) {
     ElMessage.error(t('execution.fetchDetailFailed'))
   }
-}
-
-const updateCaseStatus = async (runCase) => {
-  try {
-    await axios.patch(`/api/executions/run_cases/${runCase.id}/update_status/`, {
-      status: runCase.status,
-      comments: runCase.comments || ''
-    })
-    await fetchTestPlan() // 刷新数据以更新进度和最后执行时间
-    ElMessage.success(t('execution.statusUpdateSuccess'))
-  } catch (error) {
-    ElMessage.error(t('execution.statusUpdateFailed'))
-  }
-}
-
-const updateCaseDetails = async (runCase) => {
-  try {
-    await axios.patch(`/api/executions/run_cases/${runCase.id}/update_status/`, {
-      status: runCase.status,
-      comments: runCase.comments || ''
-    })
-    ElMessage.success(t('execution.detailsUpdateSuccess'))
-  } catch (error) {
-    ElMessage.error(t('execution.detailsUpdateFailed'))
-  }
-}
-
-const viewCaseHistory = async (runCase) => {
-  try {
-    const response = await axios.get(`/api/executions/run_cases/${runCase.id}/history/`)
-    currentCaseHistory.value = response.data
-    historyDialogVisible.value = true
-  } catch (error) {
-    ElMessage.error(t('execution.fetchHistoryFailed'))
-  }
-}
-
-// 处理选择变化
-const handleSelectionChange = (selection) => {
-  selectedCases.value = selection
-}
-
-// 批量删除
-const batchDeleteCases = async () => {
-  if (selectedCases.value.length === 0) {
-    ElMessage.warning(t('execution.selectCasesFirst'))
-    return
-  }
-
-  try {
-    await ElMessageBox.confirm(
-      t('execution.batchDeleteCasesConfirm', { count: selectedCases.value.length }),
-      t('common.warning'),
-      {
-        confirmButtonText: t('common.confirm'),
-        cancelButtonText: t('common.cancel'),
-        type: 'warning'
-      }
-    )
-
-    isDeleting.value = true
-    let successCount = 0
-    let failCount = 0
-
-    for (const runCase of selectedCases.value) {
-      try {
-        await axios.delete(`/api/executions/run_cases/${runCase.id}/`)
-        successCount++
-      } catch (error) {
-        console.error(`删除用例 ${runCase.id} 失败:`, error)
-        failCount++
-      }
-    }
-
-    if (successCount > 0) {
-      if (failCount > 0) {
-        ElMessage.success(t('execution.batchDeleteCasesPartialSuccess', { successCount, failCount }))
-      } else {
-        ElMessage.success(t('execution.batchDeleteCasesSuccess', { successCount }))
-      }
-    } else {
-      ElMessage.error(t('execution.batchDeleteFailed'))
-    }
-
-    selectedCases.value = []
-    await fetchTestPlan()
-
-  } catch (error) {
-    if (error !== 'cancel') {
-      console.error('批量删除失败:', error)
-      ElMessage.error(t('execution.batchDeleteFailed'))
-    }
-  } finally {
-    isDeleting.value = false
-  }
-}
-
-// 分页相关
-const paginatedCases = (cases) => {
-  if (!cases) return []
-  const start = (currentPage.value - 1) * pageSize.value
-  const end = start + pageSize.value
-  return cases.slice(start, end)
-}
-
-const getSerialNumber = (index) => {
-  return (currentPage.value - 1) * pageSize.value + index + 1
-}
-
-const handlePageChange = () => {
-  selectedCases.value = []
-  // 清空表格选择
-  if (tableRef.value) {
-    tableRef.value.clearSelection()
-  }
-}
-
-const handleSizeChange = () => {
-  currentPage.value = 1
-  selectedCases.value = []
-  // 清空表格选择
-  if (tableRef.value) {
-    tableRef.value.clearSelection()
-  }
-}
-
-const formatDate = (dateString) => {
-  if (!dateString) return '-'
-  return new Date(dateString).toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit'
-  })
 }
 
 const getProgressColor = (percentage) => {
@@ -358,28 +125,6 @@ const getRunStatusText = (progress) => {
   return t('execution.inProgress')
 }
 
-const getStatusType = (status) => {
-  const typeMap = {
-    'untested': 'info',
-    'passed': 'success',
-    'failed': 'danger',
-    'blocked': 'warning',
-    'retest': 'primary'
-  }
-  return typeMap[status] || 'info'
-}
-
-const getStatusText = (status) => {
-  const textMap = {
-    'untested': t('execution.untested'),
-    'passed': t('execution.passed'),
-    'failed': t('execution.failed'),
-    'blocked': t('execution.blocked'),
-    'retest': t('execution.retest')
-  }
-  return textMap[status] || status
-}
-
 onMounted(() => {
   fetchTestPlan()
 })
@@ -392,7 +137,31 @@ onMounted(() => {
   min-height: 100vh;
 }
 
-/* 测试运行卡片 */
+.detail-header {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.back-button {
+  background: #722ed1;
+  border-color: #722ed1;
+  color: #fff;
+}
+
+.back-button:hover,
+.back-button:focus {
+  background: #8547e0;
+  border-color: #8547e0;
+  color: #fff;
+}
+
+.back-button:active {
+  background: #5b1fa8;
+  border-color: #5b1fa8;
+  color: #fff;
+}
+
 .test-run-card {
   background: white;
   border-radius: 12px;
@@ -423,7 +192,6 @@ onMounted(() => {
   font-weight: 600;
 }
 
-/* 美化的统计卡片 */
 .stats-cards {
   display: grid;
   grid-template-columns: repeat(5, 1fr);
@@ -493,9 +261,8 @@ onMounted(() => {
   opacity: 0.9;
 }
 
-/* 进度条区域 */
 .progress-section {
-  margin-bottom: 24px;
+  margin-bottom: 16px;
   padding: 16px;
   background: #f8f9fa;
   border-radius: 8px;
@@ -504,25 +271,5 @@ onMounted(() => {
 .progress-text {
   font-weight: 600;
   font-size: 14px;
-}
-
-/* 批量操作 */
-.batch-actions {
-  margin-bottom: 16px;
-  display: flex;
-  justify-content: flex-end;
-}
-
-/* 表格样式 */
-.execution-table {
-  border-radius: 8px;
-  overflow: hidden;
-}
-
-/* 分页 */
-.pagination-container {
-  margin-top: 20px;
-  display: flex;
-  justify-content: flex-end;
 }
 </style>

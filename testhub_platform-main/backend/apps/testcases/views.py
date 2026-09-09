@@ -22,7 +22,7 @@ class TestCaseListCreateView(generics.ListCreateAPIView):
     permission_classes = [permissions.IsAuthenticated]
     pagination_class = TestCasePagination
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['priority', 'test_type', 'case_type', 'project']
+    filterset_fields = ['priority', 'test_type', 'project']
     search_fields = ['title', 'description']
     ordering_fields = ['created_at', 'updated_at', 'priority']
     ordering = ['-created_at']
@@ -37,14 +37,20 @@ class TestCaseListCreateView(generics.ListCreateAPIView):
         accessible_projects = Project.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
-        return TestCase.objects.filter(
+        qs = TestCase.objects.filter(
             project__in=accessible_projects
         ).select_related(
             'author', 'assignee', 'project'
         ).prefetch_related(
             'versions'
         ).distinct()
-    
+
+        # 用例类型多选存储为 JSON 数组，按“包含某类型”筛选
+        case_type = self.request.query_params.get('case_type')
+        if case_type:
+            qs = qs.filter(case_type__contains=[case_type])
+
+        return qs
     def get_user_accessible_projects(self, user):
         """获取用户有权限访问的项目"""
         return Project.objects.filter(
@@ -155,6 +161,22 @@ CASE_TYPE_MAP = {
     'UI': 'ui', 'ui': 'ui',
     '接口': 'api', 'api': 'api',
 }
+
+
+def parse_case_types(raw_value):
+    """解析导入的用例类型（支持多选，分隔符：,，、;；）"""
+    text = str(raw_value or '').strip()
+    if not text:
+        return None
+    parts = [p.strip() for p in re.split(r'[,，、;；]', text) if p.strip()]
+    result = []
+    seen = set()
+    for part in parts:
+        mapped = CASE_TYPE_MAP.get(part)
+        if mapped and mapped not in seen:
+            seen.add(mapped)
+            result.append(mapped)
+    return result or None
 
 
 @api_view(['POST'])
@@ -282,7 +304,7 @@ def import_testcases_view(request):
         test_type_val = str(case.get('test_type', '')).strip()
         test_type = TYPE_MAP.get(test_type_val, 'functional') if test_type_val else None
         case_type_val = str(case.get('case_type', '')).strip()
-        case_type = CASE_TYPE_MAP.get(case_type_val, 'manual') if case_type_val else None
+        case_type = parse_case_types(case_type_val)
 
         prepared.append({
             'row': idx,
@@ -383,7 +405,7 @@ def import_testcases_view(request):
                         steps=str(case.get('steps', '')).strip()[:1000],
                         expected_result=str(case.get('expected_result', '')).strip(),
                         priority=priority or 'P2',
-                        case_type=case_type or 'manual',
+                        case_type=case_type or ['manual'],
                         test_type=test_type or 'functional',
                         l1=str(case.get('l1', '')).strip()[:500],
                         l2=str(case.get('l2', '')).strip()[:500],

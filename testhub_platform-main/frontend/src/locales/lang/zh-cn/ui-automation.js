@@ -500,6 +500,7 @@ export default {
     newTest: '新建测试',
     screencast: '实时投屏',
     waitingScreen: '等待采集画面...',
+    screencastWsError: '投屏连接失败，请确认 Redis 已启动且后端支持 WebSocket 后重试',
     noScreen: '暂无画面',
     taskInput: '任务输入',
     taskName: '任务名称',
@@ -1120,6 +1121,8 @@ export default {
     usageCount: '使用次数',
     insertCode: '插入代码',
     validateElement: '验证元素',
+    recording: '录制',
+    playback: '回放',
     format: '格式化',
     clear: '清空',
     saveScript: '保存脚本',
@@ -1144,7 +1147,10 @@ export default {
       saveFailed: '脚本保存失败',
       validatePassed: '元素验证通过',
       validateFailed: '元素验证失败',
-      switchLanguage: '切换到{lang}语言'
+      switchLanguage: '切换到{lang}语言',
+      scriptRunning: '脚本正在运行中...',
+      scriptRunningNotImplemented: '脚本运行功能开发中...',
+      scriptRunFailed: '脚本运行失败'
     }
   },
 

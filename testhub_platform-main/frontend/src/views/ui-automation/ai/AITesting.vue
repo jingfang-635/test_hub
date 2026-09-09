@@ -34,8 +34,8 @@
                 @load="onScreenImgLoad"
               />
               <div v-else class="empty-screen">
-                <el-icon v-if="running" class="is-loading"><Loading /></el-icon>
-                <span>{{ running ? $t('uiAutomation.ai.waitingScreen') : $t('uiAutomation.ai.noScreen') }}</span>
+                <el-icon v-if="running && screencastStatus !== 'error'" class="is-loading"><Loading /></el-icon>
+                <span>{{ screenPlaceholderText }}</span>
               </div>
             </div>
           </div>
@@ -157,12 +157,18 @@ let pollInterval = null
 
 const wsSocket = ref(null)
 const liveScreenshot = ref('')
+const screencastStatus = ref('idle') // idle | connecting | connected | error
 const screenAreaRef = ref(null)
 const screenImgRef = ref(null)
 const screenScale = ref({ x: 1, y: 1 })
 
 const pageTitle = computed(() => taskName.value || caseName.value || t('uiAutomation.ai.title'))
 const showParsedCases = computed(() => displayCases.value.length > 0)
+const screenPlaceholderText = computed(() => {
+  if (!running.value) return t('uiAutomation.ai.noScreen')
+  if (screencastStatus.value === 'error') return t('uiAutomation.ai.screencastWsError')
+  return t('uiAutomation.ai.waitingScreen')
+})
 
 const buildDisplayCases = (cases) => buildCaseList(cases, (k) => t(`uiAutomation.ai.${k}`))
 
@@ -176,20 +182,32 @@ function goBack() {
 
 function connectScreencast(executionId) {
   disconnectScreencast()
+  screencastStatus.value = 'connecting'
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws'
   const wsUrl = `${protocol}://${window.location.host}/ws/ui-automation/ai-screencast/${executionId}/`
   const ws = new WebSocket(wsUrl)
+  ws.onopen = () => {
+    screencastStatus.value = 'connected'
+  }
   ws.onmessage = (event) => {
     try {
       const data = JSON.parse(event.data)
       if (data.type === 'screenshot' && data.image) {
         liveScreenshot.value = data.image
+        screencastStatus.value = 'connected'
       }
     } catch (err) {
       console.error('AI投屏 WS 消息解析失败', err)
     }
   }
-  ws.onerror = () => {}
+  ws.onerror = () => {
+    screencastStatus.value = 'error'
+  }
+  ws.onclose = () => {
+    if (!liveScreenshot.value && running.value) {
+      screencastStatus.value = 'error'
+    }
+  }
   wsSocket.value = ws
 }
 
@@ -199,6 +217,7 @@ function disconnectScreencast() {
     wsSocket.value = null
   }
   liveScreenshot.value = ''
+  screencastStatus.value = 'idle'
 }
 
 function onScreenImgLoad(e) {

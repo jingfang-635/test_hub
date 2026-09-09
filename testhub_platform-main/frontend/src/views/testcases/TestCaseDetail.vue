@@ -128,7 +128,13 @@ const getCaseTypeText = (caseType) => {
     ui: t('testcase.caseTypeUi'),
     api: t('testcase.caseTypeApi')
   }
-  return textMap[caseType] || '-'
+  const values = Array.isArray(caseType)
+    ? caseType
+    : (typeof caseType === 'string' && caseType.trim()
+      ? caseType.split(/[,，、;；]/).map(v => v.trim()).filter(Boolean)
+      : [])
+  if (!values.length) return '-'
+  return values.map(v => textMap[v] || v).join('、')
 }
 
 const formatDate = (dateString) => {

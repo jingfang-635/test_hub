@@ -12,13 +12,8 @@ from typing import Any
 
 logger = logging.getLogger(__name__)
 
-os.environ.setdefault(
-    'PLAYWRIGHT_BROWSERS_PATH',
-    os.path.join(
-        os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))),
-        'ms-playwright',
-    ),
-)
+# 使用默认浏览器路径（用户目录下 ms-playwright）
+# 如需自定义路径，设置环境变量 PLAYWRIGHT_BROWSERS_PATH
 
 # 用户维度单会话
 _SESSIONS: dict[str, 'ElementPickerSession'] = {}

@@ -479,11 +479,11 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
         logger.info(f"模型类型: {config.model_type}")
         logger.info(f"模型名称: {config.model_name}")
         logger.info(f"API URL: {config.base_url}")
-        logger.info(f"API Key前缀: {config.api_key[:10]}..." if len(config.api_key) > 10 else f"API Key: {config.api_key}")
+        logger.info(f"API Key 前缀：{config.api_key[:10]}..." if config.api_key and len(config.api_key) > 10 else f"API Key: {config.api_key if config.api_key else '未设置'}")
 
         base_url = config.base_url
         if not base_url:
-            # 使用默认Base URL
+            # 使用默认 Base URL
             provider = config.model_type
             if provider == 'openai':
                 base_url = 'https://api.openai.com/v1'
@@ -497,6 +497,13 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
         if not base_url:
             return Response(
                 {'error': 'Base URL is required'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        # 验证 API Key
+        if not config.api_key:
+            return Response(
+                {'error': 'API Key 未设置，请先配置 API Key'},
                 status=status.HTTP_400_BAD_REQUEST
             )
 

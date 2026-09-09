@@ -1,0 +1,15 @@
+# ============================================
+# TestHub - Optional Dependencies for AI Features
+# ============================================
+
+# AI Browser Automation (Browser-Use)
+browser-use>=0.1.0
+
+# LangChain OpenAI Integration
+langchain-openai>=0.1.0
+
+# Optional: LangChain Core (if needed by browser-use)
+langchain-core>=0.2.0
+
+# Optional: PyPDF2 for PDF document parsing
+PyPDF2>=3.0
