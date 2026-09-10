@@ -22,6 +22,7 @@ import shutil
 import subprocess
 import glob
 import uuid
+import asyncio
 
 from .models import (
     UiProject, LocatorStrategy, Element, TestScript, TestSuite,
@@ -193,6 +194,79 @@ def ensure_ui_project_for_hub(user, hub_project_id):
             ui_project.save(update_fields=sync_fields)
 
     return (ui_project, created), None
+
+
+def _resolve_hub_testcase_env(hub_testcase_id):
+    """「AI生成步骤」：解析用例关联项目的环境配置（初始访问 URL + 关联 UiProject）。
+
+    base_url 取主项目默认环境（is_default 优先）的 base_url；未配置环境时返回 None。
+    返回 {'ui_project_id': int|None, 'base_url': str}。
+    """
+    from apps.projects.models import ProjectEnvironment
+    from apps.testcases.models import TestCase as HubTestCase
+
+    if not hub_testcase_id:
+        return None
+    try:
+        case = HubTestCase.objects.filter(pk=hub_testcase_id).only('project_id').first()
+        if not case or not case.project_id:
+            return None
+        hub_project_id = case.project_id
+
+        base_url = ''
+        envs = ProjectEnvironment.objects.filter(project_id=hub_project_id).order_by(
+            '-is_default', 'id',
+        ).only('base_url')
+        for env in envs:
+            u = (env.base_url or '').strip()
+            if u:
+                base_url = u
+                break
+        if not base_url:
+            return None
+
+        ui_project = UiProject.objects.filter(hub_project_id=hub_project_id).only('id').first()
+        return {
+            'ui_project_id': ui_project.id if ui_project else None,
+            'base_url': base_url,
+        }
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('解析用例 #%s 关联项目环境配置失败: %s', hub_testcase_id, exc)
+        return None
+
+
+def _ensure_ai_login_state(ui_project_id, base_url):
+    """「AI生成步骤」：准备可注入 AI 浏览器会话的项目登录态（storage_state 文件路径）。
+
+    与 Playwright 录制/执行共用同一份项目级登录态文件：已保存则直接复用
+    （失效时静默重登刷新）；缺失且配置了环境登录凭证时先 headless 静默登录生成。
+    返回 (storage_path|None, log_message)。
+    """
+    from .auth_state import auth_path_for_project, ensure_project_auth_state
+    from .codegen_service import codegen_recorder
+
+    if not ui_project_id:
+        return None, ''
+    try:
+        auth_file = auth_path_for_project(ui_project_id)
+        if not auth_file:
+            return None, ''
+        login_username, login_password = codegen_recorder._resolve_project_login(ui_project_id)
+        storage = ensure_project_auth_state(
+            ui_project_id,
+            base_url=base_url,
+            username=login_username,
+            password=login_password,
+        )
+        if storage:
+            return storage, '\n[System] 已复用项目登录态（storage_state），本次执行免登录。'
+        if login_username and login_password:
+            return None, '\n[System] 静默登录未成功，本次AI执行不复用登录态。'
+        # 未配置登录凭证且无已保存登录态：交给 AI 按步骤文本自行处理
+        return None, ''
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('准备AI执行登录态失败: %s', exc)
+        return None, ''
 
 
 class UiProjectEnsureView(views.APIView):
@@ -3670,8 +3744,24 @@ class AICaseViewSet(viewsets.ModelViewSet):
         from .ai_agent import run_full_process_sync
 
         def run_task():
-            # 注册停止信号
-            STOP_SIGNALS[execution_record.id] = False
+            # 注册停止信号（若 stop 已抢先置位，不要覆盖为 False）
+            STOP_SIGNALS.setdefault(execution_record.id, False)
+            if STOP_SIGNALS.get(execution_record.id) or AIExecutionRecord.objects.filter(
+                id=execution_record.id, status='stopped'
+            ).exists():
+                execution_record.status = 'stopped'
+                execution_record.end_time = timezone.now()
+                if execution_record.start_time:
+                    execution_record.duration = (
+                        execution_record.end_time - execution_record.start_time
+                    ).total_seconds()
+                execution_record.logs = (execution_record.logs or '') + "\n[System] 任务已由用户停止。"
+                try:
+                    execution_record.save(update_fields=['status', 'end_time', 'duration', 'logs'])
+                except Exception:
+                    pass
+                _unregister_running_agent(execution_record.id)
+                return
 
             # 关键修复：关闭旧连接，避免子线程共享主线程的连接
             try:
@@ -3714,6 +3804,9 @@ class AICaseViewSet(viewsets.ModelViewSet):
             try:
                 def should_stop():
                     return STOP_SIGNALS.get(execution_record.id, False)
+
+                def on_agent_ready(agent):
+                    _register_running_agent(execution_record.id, agent)
 
                 async def on_analysis_complete(planned_tasks):
                     execution_record.planned_tasks = planned_tasks
@@ -3761,11 +3854,12 @@ class AICaseViewSet(viewsets.ModelViewSet):
                     ai_case.task_description,
                     analysis_callback=on_analysis_complete,
                     step_callback=on_step_update,
-                    should_stop=should_stop
+                    should_stop=should_stop,
+                    on_agent_ready=on_agent_ready,
                 )
 
                 # 检查是否是手动停止
-                if should_stop():
+                if should_stop() or _was_stop_requested(execution_record.id):
                     execution_record.status = 'stopped'
                     execution_record.logs += "\n[System] 任务已由用户停止。"
                 else:
@@ -3812,32 +3906,46 @@ class AICaseViewSet(viewsets.ModelViewSet):
 
             except Exception as e:
                 error_message = str(e)
-                failed_task_id = None if is_infrastructure_failure(error_message) else mark_first_active_task(execution_record.planned_tasks, 'failed')
-                execution_record.status = 'failed'
-                execution_record.end_time = timezone.now()
-                execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
-                if '执行预检失败' in error_message:
-                    execution_record.logs += f"\n执行出错: {error_message}"
-                elif 'Execution LLM unavailable' in error_message:
-                    execution_record.logs += f"\n执行出错: AI 执行模型连接失败。{error_message}"
+                if _was_stop_requested(execution_record.id):
+                    execution_record.status = 'stopped'
+                    execution_record.end_time = timezone.now()
+                    execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
+                    if '任务已由用户停止' not in (execution_record.logs or ''):
+                        execution_record.logs += "\n[System] 任务已由用户停止。"
+                    execution_record.logs = append_execution_summary(
+                        execution_record.logs,
+                        summarize_planned_tasks(execution_record.planned_tasks)
+                    )
+                    try:
+                        safe_save(execution_record)
+                    except Exception:
+                        logger.error(f"保存停止状态时出错: {e}")
                 else:
-                    execution_record.logs += f"\n执行出错: {error_message}"
-                if failed_task_id is not None:
-                    execution_record.logs += f"\n[System] 子任务 {failed_task_id} 已自动标记为失败。"
-                execution_record.logs = append_execution_summary(
-                    execution_record.logs,
-                    summarize_planned_tasks(execution_record.planned_tasks)
-                )
-                try:
-                    safe_save(execution_record)
-                except:
-                    # 如果保存失败，至少尝试保存基本信息
-                    logger.error(f"保存失败状态时出错: {e}")
-                    pass
+                    failed_task_id = None if is_infrastructure_failure(error_message) else mark_first_active_task(execution_record.planned_tasks, 'failed')
+                    execution_record.status = 'failed'
+                    execution_record.end_time = timezone.now()
+                    execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
+                    if '执行预检失败' in error_message:
+                        execution_record.logs += f"\n执行出错: {error_message}"
+                    elif 'Execution LLM unavailable' in error_message:
+                        execution_record.logs += f"\n执行出错: AI 执行模型连接失败。{error_message}"
+                    else:
+                        execution_record.logs += f"\n执行出错: {error_message}"
+                    if failed_task_id is not None:
+                        execution_record.logs += f"\n[System] 子任务 {failed_task_id} 已自动标记为失败。"
+                    execution_record.logs = append_execution_summary(
+                        execution_record.logs,
+                        summarize_planned_tasks(execution_record.planned_tasks)
+                    )
+                    try:
+                        safe_save(execution_record)
+                    except:
+                        # 如果保存失败，至少尝试保存基本信息
+                        logger.error(f"保存失败状态时出错: {e}")
+                        pass
             finally:
-                # 清理停止信号
-                if execution_record.id in STOP_SIGNALS:
-                    del STOP_SIGNALS[execution_record.id]
+                # 清理停止信号与运行中 agent
+                _unregister_running_agent(execution_record.id)
 
         thread = threading.Thread(target=run_task)
         thread.daemon = True
@@ -3893,9 +4001,92 @@ class AICaseViewSet(viewsets.ModelViewSet):
 
 # 全局停止信号字典 {execution_id: bool}
 STOP_SIGNALS = {}
+# 正在运行的 browser-use Agent，用于 stop 时立即打断 {execution_id: {'agent': Agent, 'loop': loop}}
+RUNNING_AGENTS = {}
 
 TERMINAL_TASK_STATUSES = {'completed', 'failed', 'skipped'}
 ACTIVE_TASK_STATUSES = {'pending', 'in_progress'}
+
+
+def _register_running_agent(execution_id, agent):
+    """注册运行中的 agent，供 stop 接口强制中断。"""
+    loop = getattr(agent, '_testhub_loop', None)
+    if loop is None:
+        try:
+            loop = asyncio.get_running_loop()
+        except RuntimeError:
+            loop = None
+    RUNNING_AGENTS[execution_id] = {'agent': agent, 'loop': loop}
+
+
+def _unregister_running_agent(execution_id):
+    RUNNING_AGENTS.pop(execution_id, None)
+    STOP_SIGNALS.pop(execution_id, None)
+
+
+def request_ai_execution_stop(execution_id: int) -> bool:
+    """发送停止信号并尽量立即打断 browser-use Agent。
+
+    Returns:
+        True 若找到了运行中的 agent 并已调用 stop。
+    """
+    STOP_SIGNALS[execution_id] = True
+    entry = RUNNING_AGENTS.get(execution_id)
+    if not entry:
+        return False
+
+    agent = entry.get('agent') if isinstance(entry, dict) else entry
+    loop = entry.get('loop') if isinstance(entry, dict) else getattr(agent, '_testhub_loop', None)
+
+    try:
+        if agent is not None and hasattr(agent, 'stop'):
+            agent.stop()
+    except Exception as e:
+        logger.warning(f"agent.stop() failed for execution {execution_id}: {e}")
+
+    # 取消 step / LLM 相关 asyncio 任务，避免卡在最长 60s 的 LLM 等待
+    if loop is not None and getattr(loop, 'is_running', lambda: False)():
+        interrupt_patterns = (
+            'step', 'multi_act', 'get_next_action', 'agent.step', 'agent.run',
+            '_get_model_output', 'ainvoke', 'chat',
+        )
+
+        def _cancel_interruptible():
+            try:
+                for task in asyncio.all_tasks(loop):
+                    name = ''
+                    try:
+                        name = task.get_name() or ''
+                    except Exception:
+                        pass
+                    coro = None
+                    try:
+                        coro = task.get_coro()
+                    except Exception:
+                        pass
+                    coro_name = (
+                        getattr(coro, '__name__', '')
+                        or getattr(coro, '__qualname__', '')
+                        or str(coro)
+                    )
+                    haystack = f'{name} {coro_name}'.lower()
+                    if any(p in haystack for p in interrupt_patterns):
+                        task.cancel()
+            except Exception as e:
+                logger.warning(f"cancel interruptible tasks failed for execution {execution_id}: {e}")
+
+        try:
+            loop.call_soon_threadsafe(_cancel_interruptible)
+        except Exception as e:
+            logger.warning(f"schedule cancel failed for execution {execution_id}: {e}")
+
+    return agent is not None
+
+
+def _was_stop_requested(execution_id) -> bool:
+    if STOP_SIGNALS.get(execution_id, False):
+        return True
+    return False
 
 
 def build_planned_tasks_from_cases(cases):
@@ -4043,10 +4234,11 @@ def _extract_ai_history_actions(history):
     return actions
 
 
-def _ai_actions_to_case_steps(project, user, actions, default_page='main'):
+def _ai_actions_to_case_steps(project, user, actions, default_page='main', captures=None):
     """把 AI 执行历史上的操作+定位器转换为用例步骤(DTO 结构)，并同步创建元素。
 
     与 codegen_pipeline_service.map_parse_to_case_steps 产出结构保持一致。
+    captures: ai_capture sidecar（截图+备用选择器），按主定位器/交互元素匹配写入元素。
     返回 (steps, created_element_ids)。
     """
     from .codegen_pipeline_service import (
@@ -4055,11 +4247,14 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main'):
         _build_step_description,
         _page_name_from_url,
     )
+    from .ai_capture import _take_ai_capture
 
     mapped = []
     element_cache = {}
     created_ids = []
     current_page = default_page or 'main'
+    capture_used: set[int] = set()
+    capture_seq = 0
 
     def _action_key(action_dict):
         # browser-use 动作序列化形如 {click_element: {...}} 或 {go_to_url: {...}}
@@ -4130,6 +4325,20 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main'):
         # 创建/复用元素（与录制步骤一致：按定位器入库）
         element = None
         if locator and ui_action in ('click', 'fill', 'hover', 'scroll'):
+            # 「AI生成步骤」：为该步骤匹配执行期采集结果（控件截图 + 备用选择器）
+            capture = None
+            if captures:
+                from .codegen_pipeline_service import _parse_playwright_locator
+                primary_strategy, primary_value = _parse_playwright_locator(locator)
+                capture = _take_ai_capture(
+                    captures,
+                    capture_used,
+                    primary_strategy=primary_strategy,
+                    primary_value=primary_value,
+                    sequential_idx=capture_seq,
+                    el=el,
+                )
+                capture_seq += 1
             element, created = _get_or_create_element_from_locator(
                 project=project,
                 user=user,
@@ -4138,6 +4347,7 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main'):
                 page_name=current_page,
                 cache=element_cache,
                 idx=len(mapped),
+                capture=capture,
             )
             if created and element:
                 created_ids.append(element.id)
@@ -4210,7 +4420,19 @@ def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
         )
         return None, None
 
-    steps, _created_ids = _ai_actions_to_case_steps(ui_project, user, actions, default_page='main')
+    # 「AI生成步骤」：读取执行期采集的控件截图 + 备用选择器 sidecar
+    try:
+        from .ai_capture import load_ai_captures
+        captures = load_ai_captures(execution_record.id)
+    except Exception as exc:  # noqa: BLE001
+        logger.warning('sync_ai_execution_to_cases: 读取 ai-captures 失败: %s', exc)
+        captures = []
+    if captures:
+        logger.info('sync_ai_execution_to_cases: 已读取 %s 条元素采集（执行 #%s）', len(captures), execution_record.id)
+
+    steps, _created_ids = _ai_actions_to_case_steps(
+        ui_project, user, actions, default_page='main', captures=captures
+    )
     if not steps:
         logger.info(
             'sync_ai_execution_to_cases: 执行 #%s 的 %s 个动作均无法映射为用例步骤，跳过',
@@ -4510,8 +4732,17 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         # 「用例详情 - AI生成步骤」：关联的主平台测试用例 id，执行完成后把步骤回显到该用例的 UI 自动化页
         hub_testcase_id = request.data.get('hub_testcase_id')
         # 「用例转换」：由「用例详情 - AI生成步骤」发起的临时执行，任务来源固定标记为用例转换
+        env_ui_project_id = None
+        initial_url = ''
         if hub_testcase_id:
             task_source = 'case_conversion'
+            # 「AI生成步骤」：解析该用例关联项目的环境配置（base_url 作为初始访问地址；
+            # 登录态在后台执行线程中准备并注入浏览器会话，避免静默登录阻塞本请求）
+            env_info = _resolve_hub_testcase_env(hub_testcase_id)
+            if env_info and env_info.get('base_url'):
+                initial_url = env_info['base_url']
+                env_ui_project_id = env_info.get('ui_project_id')
+        ai_storage_state = None
         # 文件模式：前端上传解析出的用例结构，用于构建与右侧明细 1:1 的 planned_tasks
         parsed_cases = request.data.get('parsed_cases')
         # multipart 模式下 parsed_cases 会以字符串形式到达，需解析为 JSON
@@ -4537,6 +4768,13 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         # 文件模式：用解析步骤直接生成 planned_tasks，跳过 LLM 重新拆分
         preset_planned_tasks = build_planned_tasks_from_cases(parsed_cases) if parsed_cases else None
 
+        # 「AI生成步骤」：把环境 base_url 拼进任务描述作为初始访问地址，引导 AI 首步直达目标站点
+        if initial_url:
+            task_description += (
+                f"\n\n[环境配置] 初始访问地址（项目环境 base_url）: {initial_url}\n"
+                "请从上述地址开始执行；若步骤文本中未给出其他完整 URL，一律基于该地址导航。"
+            )
+
         # 创建执行记录
         execution_record = AIExecutionRecord.objects.create(
             project=project,
@@ -4547,7 +4785,11 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
             execution_mode=execution_mode,
             status='running',
             executed_by=request.user,
-            logs="正在分析任务...\n" if not preset_planned_tasks else "已按用例文件步骤开始执行...\n",
+            logs=(
+                "正在分析任务...\n"
+                if not preset_planned_tasks
+                else "已按用例文件步骤开始执行...\n"
+            ) + (f"[System] 已复用项目环境 base_url: {initial_url}\n" if initial_url else ''),
             planned_tasks=preset_planned_tasks or [],
             parsed_cases=parsed_cases or [],
             source_file=source_file,
@@ -4561,8 +4803,24 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         from .ai_agent import run_full_process_sync
 
         def run_task():
-            # 注册停止信号
-            STOP_SIGNALS[execution_record.id] = False
+            # 注册停止信号（若 stop 已抢先置位，不要覆盖为 False）
+            STOP_SIGNALS.setdefault(execution_record.id, False)
+            if STOP_SIGNALS.get(execution_record.id) or AIExecutionRecord.objects.filter(
+                id=execution_record.id, status='stopped'
+            ).exists():
+                execution_record.status = 'stopped'
+                execution_record.end_time = timezone.now()
+                if execution_record.start_time:
+                    execution_record.duration = (
+                        execution_record.end_time - execution_record.start_time
+                    ).total_seconds()
+                execution_record.logs = (execution_record.logs or '') + "\n[System] 任务已由用户停止。"
+                try:
+                    execution_record.save(update_fields=['status', 'end_time', 'duration', 'logs'])
+                except Exception:
+                    pass
+                _unregister_running_agent(execution_record.id)
+                return
 
             # 关键修复：关闭旧连接，避免子线程共享主线程的连接
             try:
@@ -4603,21 +4861,42 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 return False
 
             try:
+                # 「AI生成步骤」：后台准备登录态（与 Playwright 录制/执行共用同一份项目级
+                # storage_state；缺失且有环境凭证时 headless 静默登录生成），避免阻塞 HTTP 请求
+                ai_storage_state = None
+                auth_log = ''
+                if env_ui_project_id and initial_url:
+                    ai_storage_state, auth_log = _ensure_ai_login_state(env_ui_project_id, initial_url)
+                    if auth_log:
+                        execution_record.logs = (execution_record.logs or '') + auth_log
+                        try:
+                            execution_record.save(update_fields=['logs'])
+                        except Exception:
+                            pass
+
                 # 定义异步安全的 should_stop
                 async def should_stop_async():
                     # 优先检查内存信号
                     if STOP_SIGNALS.get(execution_record.id, False):
                         return True
-                    # 兜底检查数据库状态 (使用 sync_to_async 避免异步上下文错误)
-                    await sync_to_async(execution_record.refresh_from_db)()
-                    return execution_record.status == 'stopped'
+                    # 仅查 status，避免 refresh_from_db 覆盖内存中的 logs/planned_tasks
+                    db_status = await sync_to_async(
+                        lambda: AIExecutionRecord.objects.filter(
+                            id=execution_record.id
+                        ).values_list('status', flat=True).first()
+                    )()
+                    return db_status == 'stopped'
 
                 # 定义同步版本的 should_stop 用于最后检查
                 def should_stop_sync():
                     if STOP_SIGNALS.get(execution_record.id, False):
                         return True
-                    execution_record.refresh_from_db()
-                    return execution_record.status == 'stopped'
+                    return AIExecutionRecord.objects.filter(
+                        id=execution_record.id
+                    ).values_list('status', flat=True).first() == 'stopped'
+
+                def on_agent_ready(agent):
+                    _register_running_agent(execution_record.id, agent)
 
                 async def on_analysis_complete(planned_tasks):
                     execution_record.planned_tasks = planned_tasks
@@ -4678,6 +4957,13 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     except Exception as e:
                         logger.error(f"更新步骤状态失败: {e}", exc_info=True)
 
+                # 「AI生成步骤」元素采集器（控件截图 + 备用选择器 sidecar）
+                capture_recorder = None
+                if hub_testcase_id:
+                    from .ai_capture import AiElementCaptureRecorder
+                    capture_recorder = AiElementCaptureRecorder(execution_record.id)
+                    capture_recorder.reset()
+
                 history = run_full_process_sync(
                     task_description,
                     analysis_callback=on_analysis_complete,
@@ -4688,12 +4974,19 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     case_name=task_description[:50] if task_description else "Adhoc Task",  # 传递用例名称用于GIF文件命名
                     screencast_group=f"ui_ai_{execution_record.id}",  # 实时投屏：与 AI 探索测试同一套推送模式
                     planned_tasks=preset_planned_tasks,  # 文件模式：与右侧用例明细 1:1，跳过 LLM 拆分
+                    on_agent_ready=on_agent_ready,
+                    # 「AI生成步骤」：复用项目环境登录态 + 初始访问地址
+                    storage_state=ai_storage_state,
+                    initial_url=initial_url,
+                    # 「AI生成步骤」：执行期间采集控件截图与备用选择器（与手动录制一致）
+                    capture_recorder=capture_recorder,
                 )
 
                 # 检查是否是手动停止 (使用同步版本)
                 if should_stop_sync():
                     execution_record.status = 'stopped'
-                    execution_record.logs += "\n[System] 任务已由用户停止。"
+                    if '任务已由用户停止' not in (execution_record.logs or ''):
+                        execution_record.logs += "\n[System] 任务已由用户停止。"
                 else:
                     # 补齐 AI 漏标的前序步骤（如合并输入账号+密码只 mark 了一次）
                     reconciled = reconcile_skipped_pending_tasks(execution_record.planned_tasks)
@@ -4737,31 +5030,49 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 safe_save(execution_record)
             except Exception as e:
                 error_message = str(e)
-                failed_task_id = None if is_infrastructure_failure(error_message) else mark_first_active_task(execution_record.planned_tasks, 'failed')
-                execution_record.status = 'failed'
-                execution_record.end_time = timezone.now()
-                execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
-                if '执行预检失败' in error_message:
-                    execution_record.logs += f"\n执行出错: {error_message}"
-                elif 'Execution LLM unavailable' in error_message:
-                    execution_record.logs += f"\n执行出错: AI 执行模型连接失败。{error_message}"
+                if _was_stop_requested(execution_record.id) or AIExecutionRecord.objects.filter(
+                    id=execution_record.id, status='stopped'
+                ).exists():
+                    execution_record.status = 'stopped'
+                    execution_record.end_time = timezone.now()
+                    execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
+                    if '任务已由用户停止' not in (execution_record.logs or ''):
+                        execution_record.logs += "\n[System] 任务已由用户停止。"
+                    execution_record.logs = append_execution_summary(
+                        execution_record.logs,
+                        summarize_planned_tasks(execution_record.planned_tasks)
+                    )
+                    try:
+                        safe_save(execution_record)
+                    except Exception:
+                        logger.error(f"保存停止状态时出错: {e}")
                 else:
-                    execution_record.logs += f"\n执行出错: {error_message}"
-                if failed_task_id is not None:
-                    execution_record.logs += f"\n[System] 子任务 {failed_task_id} 已自动标记为失败。"
-                execution_record.logs = append_execution_summary(
-                    execution_record.logs,
-                    summarize_planned_tasks(execution_record.planned_tasks)
-                )
-                try:
-                    safe_save(execution_record)
-                except:
-                    # 如果保存失败，至少尝试保存基本信息
-                    logger.error(f"保存失败状态时出错: {e}")
-                    pass
+                    failed_task_id = None if is_infrastructure_failure(error_message) else mark_first_active_task(execution_record.planned_tasks, 'failed')
+                    execution_record.status = 'failed'
+                    execution_record.end_time = timezone.now()
+                    execution_record.duration = (execution_record.end_time - execution_record.start_time).total_seconds()
+                    if '执行预检失败' in error_message:
+                        execution_record.logs += f"\n执行出错: {error_message}"
+                    elif 'Execution LLM unavailable' in error_message:
+                        execution_record.logs += f"\n执行出错: AI 执行模型连接失败。{error_message}"
+                    else:
+                        execution_record.logs += f"\n执行出错: {error_message}"
+                    if failed_task_id is not None:
+                        execution_record.logs += f"\n[System] 子任务 {failed_task_id} 已自动标记为失败。"
+                    execution_record.logs = append_execution_summary(
+                        execution_record.logs,
+                        summarize_planned_tasks(execution_record.planned_tasks)
+                    )
+                    try:
+                        safe_save(execution_record)
+                    except:
+                        # 如果保存失败，至少尝试保存基本信息
+                        logger.error(f"保存失败状态时出错: {e}")
+                        pass
             finally:
-                # 「用例详情 - AI生成步骤」：无论成功/失败/停止，都尽量把已生成的步骤回显到用例 UI 自动化页
-                if hub_testcase_id:
+                # 「用例详情 - AI生成步骤」：仅执行成功（所有子任务 completed → passed）才回写，
+                # 执行中断(stopped)、失败(failed)或其他状态一律不回写用例和步骤
+                if hub_testcase_id and execution_record.status == 'passed':
                     try:
                         echoed = echo_steps_to_hub_testcase(hub_testcase_id, execution_record.planned_tasks)
                         if echoed:
@@ -4779,9 +5090,13 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                             logger.info(f"已录制AI生成步骤到UI用例 #{ui_case_id}（用例库 #{hub_id}）")
                     except Exception as sync_err:
                         logger.error(f"录制AI生成步骤到用例失败: {sync_err}", exc_info=True)
-                # 清理停止信号
-                if execution_record.id in STOP_SIGNALS:
-                    del STOP_SIGNALS[execution_record.id]
+                elif hub_testcase_id:
+                    logger.info(
+                        '执行 #%s 状态为 %s（非 passed），不回写用例 #%s 的步骤',
+                        execution_record.id, execution_record.status, hub_testcase_id,
+                    )
+                # 清理停止信号与运行中 agent
+                _unregister_running_agent(execution_record.id)
 
         thread = threading.Thread(target=run_task)
         thread.daemon = True
@@ -4817,20 +5132,27 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         """停止正在执行的任务"""
         try:
             execution_id = int(pk)
-            if execution_id in STOP_SIGNALS:
-                STOP_SIGNALS[execution_id] = True
-                return Response({'message': '已发送停止信号'})
-            else:
-                # 如果不在内存中，可能已经结束，或者重启过服务
-                # 尝试直接更新数据库状态
-                record = self.get_object()
-                if record.status == 'running':
-                    record.status = 'stopped'
-                    record.end_time = timezone.now()
-                    record.logs += "\n[System] 任务被强制标记为停止（未在运行队列中找到）。"
-                    record.save()
-                    return Response({'message': '任务已标记为停止'})
+            record = self.get_object()
+
+            if record.status not in ('running', 'pending'):
                 return Response({'message': '任务不在运行中'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 1) 置位停止信号 + 调用 browser-use agent.stop() + 取消 LLM/step 任务
+            agent_found = request_ai_execution_stop(execution_id)
+
+            # 2) 立刻更新数据库状态，前端轮询可马上感知（不必等当前 step 结束）
+            # 注意：不要在此写 logs，避免与执行线程的日志写入互相覆盖
+            now = timezone.now()
+            record.status = 'stopped'
+            record.end_time = now
+            if record.start_time:
+                record.duration = (now - record.start_time).total_seconds()
+            record.save(update_fields=['status', 'end_time', 'duration'])
+
+            return Response({
+                'message': '已发送停止信号' if agent_found else '已标记为停止',
+                'status': 'stopped',
+            })
         except Exception as e:
             return Response({'error': str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 

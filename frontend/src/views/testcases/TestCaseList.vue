@@ -197,7 +197,8 @@
             </div>
             <div class="detail-body">
               <el-tabs v-model="detailActiveTab">
-                <el-tab-pane :label="$t('testcase.tabBasic')" name="basic">
+                <!-- 基础信息 ↔ 手工(manual)；UI自动化 ↔ UI；接口自动化 ↔ 接口(api) -->
+                <el-tab-pane v-if="caseTypes.includes('manual')" :label="$t('testcase.tabBasic')" name="basic">
                   <div class="detail-actions">
                     <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('common.edit') }}</el-button>
                     <el-button size="small" type="danger" @click="deleteTestCase(selectedCase)">{{ $t('common.delete') }}</el-button>
@@ -231,88 +232,25 @@
                     <el-descriptions-item :label="$t('testcase.createdAt')" :span="2">{{ formatDate(selectedCase.created_at) }}</el-descriptions-item>
                   </el-descriptions>
                 </el-tab-pane>
-                <el-tab-pane :label="$t('testcase.tabUi')" name="ui">
-                  <div class="tab-actions">
-                    <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.edit') }}</el-button>
-                    <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                <el-tab-pane v-if="caseTypes.includes('ui')" :label="$t('testcase.tabUi')" name="ui">
+                  <div v-if="uiDetailSteps.length > 0" class="ui-steps">
+                    <UiAutomationStepsReadonly :steps="uiDetailSteps">
+                      <template #actions>
+                        <el-button size="small" type="primary" @click="editUiAutomationCase">{{ $t('testcase.edit') }}</el-button>
+                        <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
+                      </template>
+                    </UiAutomationStepsReadonly>
                   </div>
-                  <div v-if="uiSteps.length > 0" class="ui-steps">
-                    <div class="ui-steps-header">
-                      <el-tag type="success" size="small">{{ $t('testcase.aiGeneratedSteps') }}</el-tag>
-                      <span class="ui-steps-tip">{{ $t('testcase.aiGeneratedStepsTip') }}</span>
+                  <template v-else>
+                    <div class="tab-actions">
+                      <el-button size="small" type="primary" @click="editUiAutomationCase">{{ $t('testcase.edit') }}</el-button>
+                      <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('ui')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
                     </div>
-                    <!-- 只读步骤卡片（样式与 UI自动化-用例管理 详情一致，仅展示不可编辑） -->
-                    <div class="readonly-steps">
-                      <div class="steps-header">
-                        <h4>{{ $t('uiAutomation.testCase.testSteps') }}</h4>
-                        <el-button size="small" text @click="toggleAllSteps">
-                          {{ allStepsExpanded ? $t('uiAutomation.testCase.foldAll') : $t('uiAutomation.testCase.expandAll') }}
-                        </el-button>
-                      </div>
-                      <div
-                        v-for="(step, index) in uiSteps"
-                        :key="step.step_number ?? index"
-                        class="step-item"
-                        :class="{ expanded: stepExpanded[index] }"
-                      >
-                        <div class="step-header" @click="toggleStep(index)">
-                          <div class="step-desc-row">
-                            <span class="step-number">{{ index + 1 }}</span>
-                            <span class="step-desc-pill">{{ step.action }}</span>
-                          </div>
-                          <span class="step-right">
-                            <el-icon><component :is="stepExpanded[index] ? ArrowUp : ArrowDown" /></el-icon>
-                          </span>
-                        </div>
-                        <div v-if="stepExpanded[index]" class="step-content">
-                          <div class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.testSteps') }}</label>
-                            <span class="step-param-text">{{ step.action }}</span>
-                          </div>
-                          <div v-if="detailFor(index).action_type" class="step-param">
-                            <label>{{ actionTypeLabel(detailFor(index).action_type) }}</label>
-                            <span class="step-param-text">{{ detailFor(index).description }}</span>
-                          </div>
-                          <div v-if="detailFor(index).page_filter" class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.selectPage') }}</label>
-                            <span class="step-param-text">{{ detailFor(index).page_filter }}</span>
-                          </div>
-                          <div v-if="detailFor(index).element" class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.selectElement') }}</label>
-                            <span class="step-param-text">{{ detailFor(index).element.name }}</span>
-                          </div>
-                          <div v-if="detailFor(index).element" class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.selector') }}</label>
-                            <span class="step-param-text">
-                              {{ detailFor(index).element.locator_strategy }}：{{ detailFor(index).element.locator_value }}
-                            </span>
-                          </div>
-                          <div v-if="detailFor(index).element && detailFor(index).element.backup_locators && detailFor(index).element.backup_locators.length" class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.backupSelectors') }}</label>
-                            <span class="step-param-text">
-                              {{ detailFor(index).element.backup_locators.map(b => `${b.strategy}：${b.value}`).join('；') }}
-                            </span>
-                          </div>
-                          <div v-if="detailFor(index).input_value" class="step-param">
-                            <label>{{ detailFor(index).action_type === 'fill' ? $t('uiAutomation.testCase.textValue') : $t('uiAutomation.testCase.inputValue') }}</label>
-                            <span class="step-param-text">{{ detailFor(index).input_value }}</span>
-                          </div>
-                          <div v-if="detailFor(index).assert_type" class="step-param">
-                            <label>{{ $t('uiAutomation.testCase.assertType') }}</label>
-                            <span class="step-param-text">{{ assertTypeLabel(detailFor(index).assert_type) }}：{{ detailFor(index).assert_value }}</span>
-                          </div>
-                          <div v-if="step.expected" class="step-param">
-                            <label>{{ $t('testcase.expectedResult') }}</label>
-                            <span class="step-param-text">{{ step.expected }}</span>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                  <el-empty v-else :description="$t('testcase.tabEmpty')" />
-                  <div v-if="uiSteps.length > 0" class="tab-updated-at">{{ $t('testcase.updatedAt') }}：{{ formatUpdatedAt(selectedCase.updated_at) }}</div>
+                    <el-empty :description="$t('testcase.tabEmpty')" />
+                  </template>
+                  <div v-if="uiDetailSteps.length > 0" class="tab-updated-at">{{ $t('testcase.updatedAt') }}：{{ formatUpdatedAt(selectedCase.updated_at) }}</div>
                 </el-tab-pane>
-                <el-tab-pane :label="$t('testcase.tabApi')" name="api">
+                <el-tab-pane v-if="caseTypes.includes('api')" :label="$t('testcase.tabApi')" name="api">
                   <div class="tab-actions">
                     <el-button size="small" type="primary" @click="editTestCase(selectedCase)">{{ $t('testcase.edit') }}</el-button>
                     <el-button size="small" type="success" :loading="aiGenerating" @click="handleAiGenerateSteps('api')">{{ $t('testcase.aiGenerateSteps') }}</el-button>
@@ -335,10 +273,11 @@ import { ref, onMounted, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Download, Upload, ArrowLeft, ArrowUp, ArrowDown } from '@element-plus/icons-vue'
+import { Plus, Search, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
+import UiAutomationStepsReadonly from '@/components/UiAutomationStepsReadonly.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -368,6 +307,26 @@ const selectedRows = ref([])
 // 分页
 const currentPage = ref(1)
 const pageSize = ref(20)
+
+// 解析用例类型（手工 manual / UI ui / 接口 api）
+const parseCaseTypes = (raw) => {
+  if (Array.isArray(raw)) return raw
+  if (typeof raw === 'string' && raw.trim()) {
+    return raw.split(/[,，、;；]/).map(v => v.trim()).filter(Boolean)
+  }
+  return []
+}
+
+// 当前详情用例勾选的类型，用于控制 Tab 展示：基础信息↔manual，UI自动化↔ui，接口自动化↔api
+const caseTypes = computed(() => parseCaseTypes(selectedCase.value?.case_type))
+
+// 按已选类型决定默认激活的 Tab
+const resolveDefaultTab = (types) => {
+  if (types.includes('manual')) return 'basic'
+  if (types.includes('ui')) return 'ui'
+  if (types.includes('api')) return 'api'
+  return 'basic'
+}
 
 // 当前页数据(前端分页)
 const pagedCases = computed(() => {
@@ -503,7 +462,7 @@ const handleNodeClick = (data) => {
   allProjectsActive.value = false
   if (data.isCase) {
     selectedCase.value = data.case
-    detailActiveTab.value = 'basic'
+    detailActiveTab.value = resolveDefaultTab(parseCaseTypes(data.case?.case_type))
     viewMode.value = 'detail'
     fetchUiDetailSteps()
   } else {
@@ -533,7 +492,7 @@ const showAllCases = () => {
 // 从列表点击某条用例 -> 进入详情
 const viewCaseDetail = (row) => {
   selectedCase.value = row
-  detailActiveTab.value = 'basic'
+  detailActiveTab.value = resolveDefaultTab(parseCaseTypes(row?.case_type))
   viewMode.value = 'detail'
   fetchUiDetailSteps()
 }
@@ -542,10 +501,19 @@ const viewCaseDetail = (row) => {
 const backToList = () => {
   viewMode.value = 'list'
   selectedCase.value = null
+  uiDetailSteps.value = []
+  uiCaseId.value = null
 }
 
 const editTestCase = (testcase) => {
   router.push(`/ai-generation/testcases/${testcase.id}/edit`)
+}
+
+// UI自动化 Tab：跳转到用例管理并展开关联用例
+const editUiAutomationCase = () => {
+  const query = {}
+  if (uiCaseId.value) query.id = uiCaseId.value
+  router.push({ path: '/ui-automation/test-cases', query })
 }
 
 // 将当前用例解析为 AI 任务描述
@@ -561,64 +529,9 @@ const buildTaskDescription = () => {
   return parts.join('\n')
 }
 
-// UI自动化 tab 展示的回显步骤（AI 智能测试完成后写入 TestCaseStep.step_details）
-const uiSteps = computed(() => {
-  const steps = selectedCase.value?.step_details
-  if (Array.isArray(steps) && steps.length > 0) {
-    return [...steps].sort((a, b) => (a.step_number ?? 0) - (b.step_number ?? 0))
-  }
-  return []
-})
-
-// 只读步骤卡片：展开/折叠状态（默认折叠，仅展开查看详情，不可编辑）
-const stepExpanded = ref({})
-const allStepsExpanded = computed(() => {
-  return uiSteps.value.length > 0 && uiSteps.value.every((_, i) => stepExpanded.value[i])
-})
-const toggleStep = (index) => {
-  stepExpanded.value[index] = !stepExpanded.value[index]
-}
-const toggleAllSteps = () => {
-  const target = !allStepsExpanded.value
-  const next = {}
-  uiSteps.value.forEach((_, i) => { next[i] = target })
-  stepExpanded.value = next
-}
-
-// 结构化步骤详情（来自 UI自动化模块的用例步骤，只读）：动作类型/页面/元素/选择器/输入值等
+// 关联的 UI自动化用例步骤（只读，数据来自 ui_step_details）
 const uiDetailSteps = ref([])
-const detailFor = (index) => {
-  const s = uiSteps.value[index]
-  const n = s?.step_number ?? index + 1
-  return uiDetailSteps.value.find(d => d.step_number === n) || {}
-}
-const actionTypeLabel = (v) => {
-  const map = {
-    click: t('uiAutomation.testCase.actionClick'),
-    fill: t('uiAutomation.testCase.actionFill'),
-    getText: t('uiAutomation.testCase.actionGetText'),
-    waitFor: t('uiAutomation.testCase.actionWaitFor'),
-    hover: t('uiAutomation.testCase.actionHover'),
-    scroll: t('uiAutomation.testCase.actionScroll'),
-    screenshot: t('uiAutomation.testCase.actionScreenshot'),
-    assert: t('uiAutomation.testCase.actionAssert'),
-    wait: t('uiAutomation.testCase.actionWait'),
-    switchTab: t('uiAutomation.testCase.actionSwitchTab'),
-    navigateUrl: t('uiAutomation.testCase.actionNavigateUrl'),
-  }
-  return map[v] || v
-}
-const assertTypeLabel = (v) => {
-  const map = {
-    textContains: t('uiAutomation.testCase.assertTextContains'),
-    textEquals: t('uiAutomation.testCase.assertTextEquals'),
-    isVisible: t('uiAutomation.testCase.assertIsVisible'),
-    exists: t('uiAutomation.testCase.assertExists'),
-    hasAttribute: t('uiAutomation.testCase.assertHasAttribute'),
-    urlContains: t('uiAutomation.testCase.assertUrlContains'),
-  }
-  return map[v] || v
-}
+const uiCaseId = ref(null)
 
 // 拉取结构化步骤详情（无 UI 自动化数据时静默忽略）
 const fetchUiDetailSteps = async () => {
@@ -626,8 +539,10 @@ const fetchUiDetailSteps = async () => {
   try {
     const response = await api.get(`/testcases/${selectedCase.value.id}/ui_step_details/`)
     uiDetailSteps.value = response.data?.steps || []
+    uiCaseId.value = response.data?.ui_case_id || null
   } catch (error) {
     uiDetailSteps.value = []
+    uiCaseId.value = null
   }
 }
 
@@ -637,6 +552,7 @@ const refreshSelectedCase = async () => {
   try {
     const response = await api.get(`/testcases/${selectedCase.value.id}/`)
     selectedCase.value = response.data
+    await fetchUiDetailSteps()
   } catch (error) {
     // 忽略刷新失败，保持现有数据
   }
@@ -1273,145 +1189,7 @@ onMounted(() => {
 }
 
 .ui-steps {
-  margin-top: 8px;
-}
-
-.ui-steps-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 8px;
-}
-
-.ui-steps-tip {
-  font-size: 12px;
-  color: #909399;
-}
-
-// ===== 只读步骤卡片（样式对齐 UI自动化-用例管理 详情页，仅展示不可编辑） =====
-.readonly-steps {
-  margin-top: 4px;
-
-  .steps-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 10px;
-
-    h4 {
-      margin: 0;
-      font-size: 14px;
-      font-weight: 600;
-      color: #303133;
-    }
-  }
-
-  .step-item {
-    border: 1px solid #e6e6e6;
-    border-radius: 6px;
-    margin-bottom: 10px;
-    background: white;
-    transition: all 0.3s;
-  }
-
-  .step-item:hover {
-    border-color: #409eff;
-  }
-
-  .step-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 12px 15px;
-    background: #fafafa;
-    border-radius: 6px;
-    gap: 8px;
-    cursor: pointer;
-  }
-
-  .step-item.expanded .step-header {
-    border-radius: 6px 6px 0 0;
-  }
-
-  .step-desc-row {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    min-width: 0;
-    flex: 1;
-  }
-
-  .step-number {
-    background: #409eff;
-    color: white;
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    font-size: 12px;
-    font-weight: bold;
-    flex-shrink: 0;
-  }
-
-  // 描述胶囊：白底圆角边框，只读时与编辑态视觉一致
-  .step-desc-pill {
-    display: inline-block;
-    max-width: 100%;
-    padding: 5px 12px;
-    border: 1px solid #dcdfe6;
-    border-radius: 16px;
-    background: #fff;
-    font-size: 14px;
-    font-weight: 500;
-    color: #303133;
-    line-height: 20px;
-    white-space: nowrap;
-    overflow: hidden;
-    text-overflow: ellipsis;
-  }
-
-  .step-right {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    color: #909399;
-    flex-shrink: 0;
-  }
-
-  .step-content {
-    padding: 15px;
-    border-top: 1px solid #e6e6e6;
-  }
-
-  .step-param {
-    display: flex;
-    align-items: center;
-    margin-bottom: 10px;
-    gap: 10px;
-
-    &:last-child {
-      margin-bottom: 0;
-    }
-
-    label {
-      width: 120px;
-      flex-shrink: 0;
-      font-weight: 500;
-      color: #333;
-      line-height: 24px;
-    }
-  }
-
-  .step-param-text {
-    flex: 1;
-    color: #303133;
-    font-size: 14px;
-    line-height: 1.6;
-    white-space: pre-wrap;
-    word-break: break-all;
-  }
+  margin-top: 0;
 }
 
 .html-content {

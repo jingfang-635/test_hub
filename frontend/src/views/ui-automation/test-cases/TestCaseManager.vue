@@ -960,7 +960,8 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onActivated, onBeforeUnmount, watch, nextTick } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   Search, Plus, Edit, Delete, Check, CaretRight, ArrowUp, ArrowDown, Rank, MagicStick, VideoCamera, RefreshRight, Close, CopyDocument, Download, DArrowLeft, DArrowRight, Monitor
@@ -968,9 +969,6 @@ import {
 import draggable from 'vuedraggable'
 import DataFactorySelector from '@/components/DataFactorySelector.vue'
 import { useI18n } from 'vue-i18n'
-
-const { t } = useI18n()
-
 import {
   loadUiAutomationProjects,
   getElements,
@@ -1001,6 +999,9 @@ import {
   stopElementPicker
 } from '@/api/ui_automation'
 import { getVariableFunctions } from '@/api/data-factory'
+
+const { t } = useI18n()
+const route = useRoute()
 
 // 响应式数据
 const projects = ref([])
@@ -1985,6 +1986,40 @@ const selectTestCase = (testCase) => {
   executionResult.value = null
 }
 
+// 从路由 query.id 打开并选中关联用例（用例详情「编辑」跳转）
+const openCaseFromQuery = async () => {
+  const rawId = route.query.id
+  if (rawId == null || rawId === '') return
+  const id = Number(rawId)
+  if (!Number.isFinite(id) || id <= 0) return
+
+  let tc = null
+  try {
+    const response = await getTestCaseDetail(id)
+    tc = response.data
+  } catch (error) {
+    console.error('按 id 打开用例失败:', error)
+    ElMessage.warning(t('uiAutomation.testCase.selectTestCase'))
+    return
+  }
+  if (!tc) return
+
+  const idx = testCases.value.findIndex(c => Number(c.id) === id)
+  if (idx >= 0) {
+    testCases.value[idx] = tc
+  } else {
+    testCases.value.unshift(tc)
+  }
+
+  // 强制重新选中（绕过同 id 早退）
+  if (selectedTestCase.value?.id === tc.id) {
+    selectedTestCase.value = null
+  }
+  selectTestCase(tc)
+  await nextTick()
+  document.querySelector('.test-case-item.active')?.scrollIntoView({ block: 'nearest', behavior: 'smooth' })
+}
+
 const addStep = () => {
   const newStep = {
     id: Date.now(),
@@ -2827,6 +2862,12 @@ onMounted(async () => {
 
   projectId.value = ALL_PROJECTS
   await onProjectChange()
+  await openCaseFromQuery()
+})
+
+// 支持从用例详情带 ?id= 再次进入时选中
+watch(() => route.query.id, () => {
+  openCaseFromQuery()
 })
 
 // 从元素管理改名返回后，刷新分组名/元素 page/步骤 page_filter
@@ -2837,6 +2878,7 @@ onActivated(async () => {
     loadPageNames(),
     refreshSelectedTestCaseSteps()
   ])
+  await openCaseFromQuery()
 })
 
 onBeforeUnmount(() => {

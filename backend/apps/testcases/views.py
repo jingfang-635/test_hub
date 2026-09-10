@@ -171,13 +171,13 @@ class TestCaseUiStepDetailView(generics.RetrieveAPIView):
         # 定位关联的 UI自动化项目与用例（命名规则见 sync_ai_execution_to_cases）
         ui_project = UiProjectModel.objects.filter(hub_project=testcase.project).first()
         if not ui_project:
-            return Response({'steps': []})
+            return Response({'ui_case_id': None, 'steps': []})
 
         ui_case = UiTestCase.objects.filter(
             project=ui_project, name=f'{testcase.title or ""}-AI生成步骤'
         ).order_by('-id').first()
         if not ui_case:
-            return Response({'steps': []})
+            return Response({'ui_case_id': None, 'steps': []})
 
         steps = UiTestCaseStep.objects.filter(test_case=ui_case).select_related(
             'element', 'element__locator_strategy'
@@ -194,6 +194,7 @@ class TestCaseUiStepDetailView(generics.RetrieveAPIView):
                 'backup_locators': el.backup_locators or [],
                 'screenshot': el.screenshot.url if el.screenshot else '',
                 'page': el.page,
+                'wait_timeout': el.wait_timeout,
             }
 
         data = []
@@ -210,7 +211,7 @@ class TestCaseUiStepDetailView(generics.RetrieveAPIView):
                 'assert_type': s.assert_type,
                 'assert_value': s.assert_value,
             })
-        return Response({'steps': data})
+        return Response({'ui_case_id': ui_case.id, 'ui_case_name': ui_case.name, 'steps': data})
 
 
 # ========== Excel 批量导入 ==========

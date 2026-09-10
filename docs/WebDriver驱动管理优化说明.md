@@ -74,13 +74,16 @@ python manage.py download_webdrivers
 # 后续执行会使用缓存（速度快）
 ```
 
-### Docker 容器部署
+### 本地环境预下载（推荐）
 
-在 Dockerfile 中添加：
+在项目虚拟环境中执行，首次部署或浏览器升级后预拉驱动，避免跑测时临时下载：
 
-```dockerfile
-# 安装依赖后，预下载驱动
-RUN python manage.py download_webdrivers
+```bash
+# Windows
+.\venv\Scripts\python.exe backend\manage.py download_webdrivers
+
+# macOS / Linux
+./venv/bin/python backend/manage.py download_webdrivers
 ```
 
 ## 驱动缓存管理

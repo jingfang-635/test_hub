@@ -237,6 +237,10 @@ const handleStop = async () => {
   try {
     await stopAITask(currentExecutionId.value)
     ElMessage.warning(t('uiAutomation.ai.messages.stopping'))
+    // 乐观更新：后端已立即写 stopped，这里同步收起执行态，避免再等一轮轮询
+    running.value = false
+    analyzing.value = false
+    disconnectScreencast()
   } catch (error) {
     console.error('停止失败:', error)
     ElMessage.error(t('uiAutomation.ai.messages.stopFailed'))

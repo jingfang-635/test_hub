@@ -1639,7 +1639,7 @@ class BaseBrowserAgent:
         if cleaned_count > 0:
             logger.info(f"✅ Cleaned up {cleaned_count} zombie Chrome processes")
 
-    def _create_browser_profile(self):
+    def _create_browser_profile(self, storage_state=None):
         # Default implementation, can be overridden
         import platform
 
@@ -1693,16 +1693,33 @@ class BaseBrowserAgent:
             wait_for_network_idle_page_load_time=0.2,
             minimum_wait_page_load_time=0.05,
             wait_between_actions=0.1,
-            enable_default_extensions=False
+            enable_default_extensions=False,
+            # 复用项目登录态：与 Playwright 录制/执行同一份 storage_state 文件
+            storage_state=storage_state,
         )
 
-    async def run_task(self, task_description: str, planned_tasks=None, callback=None, should_stop=None, skip_preflight=False):
+    async def _eval_should_stop(self, should_stop):
+        """统一评估停止回调（支持 sync / async）。"""
+        if not should_stop:
+            return False
+        if asyncio.iscoroutinefunction(should_stop):
+            return bool(await should_stop())
+        result = should_stop()
+        if asyncio.iscoroutine(result):
+            return bool(await result)
+        return bool(result)
+
+    async def run_task(self, task_description: str, planned_tasks=None, callback=None, should_stop=None,
+                       skip_preflight=False, on_agent_ready=None, storage_state=None, initial_url=None):
         # 预检失败立即终止；skip_preflight 用于 run_full_process 已预检的场景，避免重复探测
         if not skip_preflight:
             await self._preflight_check()
 
         # Cleanup potential zombie processes before starting
         self._cleanup_zombie_chrome()
+
+        if await self._eval_should_stop(should_stop):
+            raise KeyboardInterrupt("User requested stop")
 
         try:
             loop = asyncio.get_running_loop()
@@ -1908,7 +1925,29 @@ class BaseBrowserAgent:
         except:
             pass
 
-        browser_profile = self._create_browser_profile()
+        self._ai_storage_state = storage_state
+        self._ai_initial_url = (initial_url or '').strip()
+        browser_profile = self._create_browser_profile(storage_state=storage_state)
+
+        # 复用项目登录态时，登录已由 storage_state 注入完成，提示 AI 无需再执行登录类子任务
+        if storage_state and planned_tasks:
+            login_task_ids = []
+            for t in planned_tasks:
+                desc = str(t.get('description', '') or '')
+                if any(kw in desc for kw in ('登录', '登 录', '输入账号', '输入密码', '填写账号', '填写密码')):
+                    login_task_ids.append(str(t.get('id')))
+            if login_task_ids:
+                final_task += (
+                    "\n\nLOGIN STATE NOTE: The browser session ALREADY has a valid login session "
+                    f"(storage_state injected). Sub-tasks {'、'.join(login_task_ids)} about opening the login "
+                    "page or entering username/password are ALREADY FULFILLED by the initial logged-in state. "
+                    "Do NOT navigate to the login page or type any credentials. If such a sub-task appears, "
+                    "directly call mark_task_complete for it and continue with the next sub-task."
+                )
+
+        # browser-use 原生停止回调：在 step 内部（LLM 前后、动作之间）检查，比仅 on_step_end 更快
+        async def register_should_stop_callback():
+            return await self._eval_should_stop(should_stop)
 
         agent = Agent(
             task=final_task,
@@ -1922,26 +1961,45 @@ class BaseBrowserAgent:
             llm_timeout=60,  # 设置LLM调用超时为60秒（支持硅基流动等大模型API）
             step_timeout=90,  # 设置每步超时为90秒
             generate_gif=self.enable_gif,  # 根据开关决定是否生成GIF
+            register_should_stop_callback=register_should_stop_callback if should_stop else None,
         )
         agent._task_was_done = False
         agent._pending_status_task_id = None
         agent._pending_status_task_description = None
         agent._auth_failure_task_id = None
         agent._auth_failure_count = 0
+        agent._testhub_loop = loop
         # 保存 browser-use Agent 引用，供探索投屏 _push_screenshot 获取 browser_session
         self._browser_use_agent = agent
+
+        if on_agent_ready:
+            try:
+                on_agent_ready(agent)
+            except Exception as e:
+                logger.warning(f"on_agent_ready callback failed: {e}")
 
         # Callback helper - 添加任务标记跟踪
         last_processed_step = 0
         last_marked_task_id = 0  # 跟踪上一次标记的任务ID
         known_tab_ids = set()
 
+        async def on_step_start(agent_instance):
+            if await self._eval_should_stop(should_stop):
+                try:
+                    agent_instance.stop()
+                except Exception:
+                    pass
+                raise KeyboardInterrupt("User requested stop")
+
         async def on_step_end(agent_instance):
             nonlocal last_processed_step, last_marked_task_id, known_tab_ids
 
-            if should_stop:
-                do_stop = await should_stop() if asyncio.iscoroutinefunction(should_stop) else should_stop()
-                if do_stop: raise KeyboardInterrupt("User requested stop")
+            if await self._eval_should_stop(should_stop):
+                try:
+                    agent_instance.stop()
+                except Exception:
+                    pass
+                raise KeyboardInterrupt("User requested stop")
 
             if _task_was_done:
                 raise KeyboardInterrupt("Done")
@@ -2051,6 +2109,16 @@ class BaseBrowserAgent:
                         action_str = " | ".join([self._format_action(a) for a in actions])
                         log_content = f"\n[Step {i + 1}]\n执行: {action_str}\n"
 
+                        # 「AI生成步骤」元素采集：控件截图 + 备用选择器（失败不阻塞执行）
+                        capture_recorder = getattr(self, 'capture_recorder', None)
+                        if capture_recorder is not None:
+                            try:
+                                step_state = getattr(step, 'state', None)
+                                interacted = getattr(step_state, 'interacted_element', None) or []
+                                await capture_recorder.record(agent_instance, actions, interacted)
+                            except Exception as _cap_err:
+                                logger.warning(f"⚠️ capture_recorder failed at step {i + 1}: {_cap_err}")
+
                         # 探索模式扩展点：记录步骤元素坐标和截图
                         if getattr(self, 'step_recorder', None):
                             try:
@@ -2128,12 +2196,18 @@ class BaseBrowserAgent:
             # Try to pass callback
             import inspect
             sig = inspect.signature(agent.run)
+            run_kwargs = {'max_steps': 100}
+            if 'on_step_start' in sig.parameters:
+                run_kwargs['on_step_start'] = on_step_start
             if 'on_step_end' in sig.parameters:
-                await agent.run(max_steps=100, on_step_end=on_step_end)
-            else:
-                await agent.run(max_steps=100)
-        except KeyboardInterrupt:
-            pass
+                run_kwargs['on_step_end'] = on_step_end
+            await agent.run(**run_kwargs)
+        except (KeyboardInterrupt, InterruptedError, asyncio.CancelledError):
+            # 用户停止 / browser-use InterruptedError / 强制取消 LLM 任务
+            try:
+                agent.stop()
+            except Exception:
+                pass
         except Exception as e:
             logger.error(f"Agent execution error: {e}")
             raise
@@ -2215,13 +2289,21 @@ class BaseBrowserAgent:
         }
 
     async def run_full_process(self, task_description: str, analysis_callback=None, step_callback=None,
-                               should_stop=None, planned_tasks=None):
+                               should_stop=None, planned_tasks=None, on_agent_ready=None,
+                               storage_state=None, initial_url=None):
         # 先做执行前预检：失败立刻终止，避免拆任务后开浏览器再空转
         await self._preflight_check()
+
+        if await self._eval_should_stop(should_stop):
+            raise KeyboardInterrupt("User requested stop")
 
         # 文件模式可传入与右侧用例明细 1:1 的 planned_tasks，跳过 LLM 重新拆分，避免划线进度错位
         if planned_tasks is None:
             planned_tasks = await self.analyze_task(task_description)
+
+        if await self._eval_should_stop(should_stop):
+            raise KeyboardInterrupt("User requested stop")
+
         if analysis_callback:
             if asyncio.iscoroutinefunction(analysis_callback):
                 await analysis_callback(planned_tasks)
@@ -2229,5 +2311,7 @@ class BaseBrowserAgent:
                 analysis_callback(planned_tasks)
 
         return await self.run_task(
-            task_description, planned_tasks, step_callback, should_stop, skip_preflight=True
+            task_description, planned_tasks, step_callback, should_stop,
+            skip_preflight=True, on_agent_ready=on_agent_ready,
+            storage_state=storage_state, initial_url=initial_url
         )
