@@ -1,6 +1,9 @@
 """
 Playwright Codegen 录制 API + Phase 2–4 流水线。
 """
+import time
+import traceback
+
 from rest_framework import status, viewsets
 from rest_framework.decorators import action
 from rest_framework.permissions import IsAuthenticated
@@ -112,6 +115,86 @@ class PlaywrightCodegenViewSet(viewsets.ViewSet):
             return Response({'error': str(exc)}, status=status.HTTP_404_NOT_FOUND)
         except ValueError as exc:
             return Response({'error': str(exc)}, status=status.HTTP_400_BAD_REQUEST)
+
+    @action(detail=False, methods=['post'], url_path='replay')
+    def replay(self, request):
+        """同步回放编辑器中的原始脚本内容（不创建执行记录）"""
+        data = request.data or {}
+        content = (data.get('content') or '').strip()
+        if not content:
+            return Response({'error': '脚本内容为空，无法回放'}, status=status.HTTP_400_BAD_REQUEST)
+
+        language = (data.get('language') or 'python').lower()
+        framework = (data.get('framework') or 'playwright').lower()
+        browser = data.get('browser') or 'chromium'
+        headless_raw = data.get('headless', True)
+        if isinstance(headless_raw, str):
+            headless = headless_raw.strip().lower() in {'1', 'true', 'yes', 'on'}
+        else:
+            headless = bool(headless_raw)
+        base_url = (data.get('base_url') or '').strip()
+        project_id = data.get('project_id')
+
+        try:
+            project = UiProject.objects.get(pk=int(project_id)) if project_id not in (None, '', 'all') else None
+        except (TypeError, ValueError, UiProject.DoesNotExist):
+            project = None
+
+        script = TestScript(
+            project=project,
+            name=data.get('name') or '回放脚本',
+            language=language,
+            framework=framework,
+            content=content,
+        )
+
+        from .script_runner import ScriptRunner
+
+        runner = ScriptRunner(script=script, browser=browser, headless=headless, base_url=base_url)
+        import logging as _logging
+        _log = _logging.getLogger(__name__)
+        _log.warning('[REPLAY DEBUG] headless=%s browser=%s language=%s framework=%s content_len=%d',
+                      headless, browser, language, framework, len(content))
+        # 判断执行路径
+        is_pytest = runner._is_pytest_page_style(content)
+        needs_tests = runner._needs_tests_package(content)
+        _log.warning('[REPLAY DEBUG] is_pytest_page_style=%s needs_tests_pkg=%s', is_pytest, needs_tests)
+        start = time.time()
+        try:
+            if language == 'python':
+                result = runner._run_python(content, framework)
+            elif language in ('javascript', 'typescript'):
+                result = runner._run_javascript(content)
+            else:
+                return Response({'error': f'暂不支持的脚本语言: {language}'}, status=status.HTTP_400_BAD_REQUEST)
+        except Exception as exc:  # noqa: BLE001
+            result = {
+                'success': False,
+                'error': str(exc),
+                'logs': '',
+                'stdout': '',
+                'stderr': traceback.format_exc(),
+                'passed': 0,
+                'failed': 1,
+                'skipped': 0,
+                'test_cases': [],
+            }
+        finally:
+            runner._cleanup()
+
+        duration = round(time.time() - start, 2)
+        return Response({
+            'status': 'success' if result.get('success') else 'failed',
+            'duration': duration,
+            'passed': result.get('passed', 0),
+            'failed': result.get('failed', 0),
+            'skipped': result.get('skipped', 0),
+            'error': result.get('error', ''),
+            'logs': result.get('logs', ''),
+            'stdout': result.get('stdout', ''),
+            'stderr': result.get('stderr', ''),
+            'test_cases': result.get('test_cases', []),
+        })
 
     # ========== Phase 2–4 流水线 ==========
 

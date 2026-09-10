@@ -1131,6 +1131,38 @@ export default {
     characters: 'Characters',
     language: 'Language',
     editorPlaceholder: 'Enter script code or click the + button in the element library to auto-insert code...',
+    recorder: {
+      title: 'Playwright Record Script',
+      stepConfig: 'Configure',
+      stepRecord: 'Record',
+      stepImport: 'Import',
+      targetUrl: 'Start URL',
+      scriptName: 'Script Name',
+      scriptNamePlaceholder: 'Auto-generated if left empty',
+      language: 'Language',
+      pythonOption: 'Python (recommended, supports server-side replay)',
+      jsOption: 'JavaScript (Phase 1, storage only)',
+      browser: 'Browser',
+      saveState: 'Save Login State',
+      saveStateHint: 'Load the project login state during recording for reuse',
+      startRecord: 'Start Recording',
+      stopRecord: 'Stop Recording',
+      recordingHint: 'Recording: operate manually in the opened browser. The script will be imported into the editor automatically after the browser is closed or you click Stop.',
+      recordStarted: 'Recording started, please complete the operations in the browser',
+      recordStopped: 'Recording stopped',
+      importSuccess: 'Recorded script imported into the editor',
+      recordFailed: 'Recording failed',
+      recordStartFailed: 'Failed to start recording',
+      recordStopFailed: 'Failed to stop recording',
+      emptyUrl: 'Please enter the start URL'
+    },
+    saveDialog: {
+      title: 'Save Script',
+      scriptName: 'Script Name',
+      scriptNamePlaceholder: 'Please enter the script name',
+      nameRequired: 'Please enter the script name',
+      confirm: 'Save'
+    },
     messages: {
       loadProjectsFailed: 'Failed to load projects',
       loadElementTreeFailed: 'Failed to load element tree',
@@ -1150,6 +1182,22 @@ export default {
       scriptRunning: 'Script is running...',
       scriptRunningNotImplemented: 'Script running feature is in development...',
       scriptRunFailed: 'Failed to run script'
+    },
+    replayDialog: {
+      title: 'Script Replay',
+      currentScript: 'Current Script',
+      statusIdle: 'Not Executed',
+      statusRunning: 'Running',
+      statusSuccess: 'Success',
+      statusFailed: 'Failed',
+      headless: 'Headless',
+      start: 'Run',
+      executionLogs: 'Execution Logs',
+      clear: 'Clear',
+      notExecuted: 'Not executed yet',
+      runningTip: 'Running the script, please wait...',
+      replaySuccess: 'Replay finished',
+      replayFailed: 'Replay failed'
     }
   },
 

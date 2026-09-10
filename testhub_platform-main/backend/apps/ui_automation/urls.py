@@ -72,10 +72,12 @@ codegen_pipeline_update_plan = PlaywrightCodegenViewSet.as_view({
 })
 codegen_pipeline_confirm_plan = PlaywrightCodegenViewSet.as_view({'post': 'pipeline_confirm_plan'})
 codegen_pipeline_generate_scripts = PlaywrightCodegenViewSet.as_view({'post': 'pipeline_generate_scripts'})
+codegen_replay = PlaywrightCodegenViewSet.as_view({'post': 'replay'})
 
 urlpatterns = [
     # 独立 APIView，避免被 projects/<pk>/ 抢先匹配导致 POST ensure 405
     path('projects/ensure/', UiProjectEnsureView.as_view(), name='ui-project-ensure'),
+    path('codegen/replay/', codegen_replay, name='codegen-replay'),
     path('codegen/pipeline/parse/', codegen_pipeline_parse, name='codegen-pipeline-parse'),
     path(
         'codegen/pipeline/to-case-steps/',

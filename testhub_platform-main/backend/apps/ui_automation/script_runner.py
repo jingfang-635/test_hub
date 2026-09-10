@@ -59,12 +59,14 @@ class ScriptRunner:
         headless: bool = False,
         executed_by=None,
         timeout: int = 600,
+        base_url: str = '',
     ):
         self.script = script
         self.browser = (browser or 'chrome').lower()
         self.headless = bool(headless)
         self.executed_by = executed_by
         self.timeout = timeout
+        self.base_url_override = (base_url or '').strip()
         self.execution: TestExecution | None = None
         self.work_dir: Path | None = None
 
@@ -453,14 +455,17 @@ class ScriptRunner:
 
             launch_name = BROWSER_LAUNCH_MAP.get(self.browser, 'chromium')
             base_url = ''
-            try:
-                from .codegen_service import codegen_recorder
-                project_id = getattr(self.script, 'project_id', None)
-                base_url = codegen_recorder._resolve_project_base_url(project_id)
-            except Exception:
-                base_url = ''
-            if not base_url:
-                base_url = os.getenv('BASE_URL', 'http://localhost:3000')
+            if self.base_url_override:
+                base_url = self.base_url_override
+            else:
+                try:
+                    from .codegen_service import codegen_recorder
+                    project_id = getattr(self.script, 'project_id', None)
+                    base_url = codegen_recorder._resolve_project_base_url(project_id)
+                except Exception:
+                    base_url = ''
+                if not base_url:
+                    base_url = os.getenv('BASE_URL', 'http://localhost:3000')
 
             logs: list[str] = [
                 f'脚本: {self.script.name}',
@@ -479,6 +484,7 @@ class ScriptRunner:
                 launcher = getattr(p, launch_name, None)
                 if launcher is None:
                     raise ValueError(f'不支持的浏览器: {self.browser}')
+                logger.warning('[REPLAY] launching browser: %s headless=%s', launch_name, self.headless)
                 browser_obj = launcher.launch(headless=self.headless)
                 try:
                     context = browser_obj.new_context()
@@ -640,8 +646,38 @@ class ScriptRunner:
             except TypeError:
                 fn()
 
+    def _override_launch_headless(self, content: str) -> str:
+        """子进程执行时浏览器由脚本自行 launch，改写其中的 headless 参数以尊重执行设置。"""
+        desired = 'headless=True' if self.headless else 'headless=False'
+
+        def _repl(m: re.Match) -> str:
+            inner = m.group(2)
+            if re.search(r'headless\s*=', inner):
+                inner = re.sub(r'headless\s*=\s*(True|False|1|0)', desired, inner)
+            else:
+                inner = f'{inner}, {desired}' if inner.strip() else desired
+            return f'{m.group(1)}{inner})'
+
+        return re.sub(r'((?:await\s+)?[\w.]+\.launch\()([^)]*)\)', _repl, content)
+
+    def _override_launch_headless_js(self, content: str) -> str:
+        """JS 脚本同理：改写 chromium.launch({...}) / chromium.launch() 的 headless。"""
+        desired = 'true' if self.headless else 'false'
+
+        def _repl_obj(m: re.Match) -> str:
+            inner = m.group(1)
+            if re.search(r'headless\s*:', inner):
+                inner = re.sub(r'headless\s*:\s*(true|false)', f'headless: {desired}', inner)
+            else:
+                inner = f'{inner.rstrip().rstrip(",")}, headless: {desired}' if inner.strip() else f'headless: {desired}'
+            return f'.launch({{{inner}}})'
+
+        content = re.sub(r'\.launch\(\s*\{([^}]*)\}\s*\)', _repl_obj, content)
+        return re.sub(r'\.launch\(\s*\)', f'.launch({{headless: {desired}}})', content)
+
     def _run_python_subprocess(self, content: str) -> dict[str, Any]:
         content = self._harden_fragile_locators(content)
+        content = self._override_launch_headless(content)
         work = self._ensure_work_dir()
         script_path = work / 'script.py'
         script_path.write_text(content, encoding='utf-8')
@@ -700,7 +736,7 @@ class ScriptRunner:
                 cmd.append('--headed')
         else:
             script_path = work / 'script.js'
-            script_path.write_text(content, encoding='utf-8')
+            script_path.write_text(self._override_launch_headless_js(content), encoding='utf-8')
             cmd = ['node', str(script_path)]
 
         result = subprocess.run(

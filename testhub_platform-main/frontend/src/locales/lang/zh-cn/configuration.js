@@ -75,14 +75,14 @@ export default {
 
   // AI 智能模式配置
   aiMode: {
-    title: 'AI智能模式配置',
+    title: '模型配置',
     description: '配置Browser-use执行时的智能模式与模型参数',
     configList: '配置列表',
     addConfig: '添加配置',
     addFirstConfig: '添加第一个配置',
-    editConfig: '编辑AI智能模式配置',
-    addConfigTitle: '添加AI智能模式配置',
-    emptyTitle: '暂无AI智能模式配置',
+    editConfig: '编辑模型配置',
+    addConfigTitle: '添加模型配置',
+    emptyTitle: '暂无模型配置',
     emptyDescription: '请添加您的AI模型配置以开始使用智能模式',
     configName: '配置名称',
     configNamePlaceholder: '例如：OpenAI智能模式',

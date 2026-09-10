@@ -282,7 +282,7 @@ async def suggest_healed_locators(
     if not config or not config.get('api_key'):
         logger.warning('AI healer skipped: no AI model config')
         return {
-            'failure_reason': '未配置 AI 模型，无法自愈（请在「配置中心 → AI智能模式配置」启用 Browser Use 文本模型）',
+            'failure_reason': '未配置 AI 模型，无法自愈（请在「配置中心 → 模型配置」启用 Browser Use 文本模型）',
             'locators': [],
             'raw': None,
         }

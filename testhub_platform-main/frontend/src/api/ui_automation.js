@@ -1277,6 +1277,16 @@ export function getCodegenRecordedContent(name) {
   })
 }
 
+// 回放编辑器中的原始脚本内容（同步执行）
+export function replayCodegenScript(data) {
+  return request({
+    url: '/ui-automation/codegen/replay/',
+    method: 'post',
+    data,
+    timeout: 300000
+  })
+}
+
 // ========== Codegen Phase 2–4 流水线 ==========
 
 export function parseCodegenPipeline(data) {

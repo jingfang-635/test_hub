@@ -1133,7 +1133,7 @@ class AIExplorationTask(models.Model):
         on_delete=models.SET_NULL,
         null=True, blank=True,
         verbose_name='AI模型配置',
-        help_text='关联AI智能模式配置的模型'
+        help_text='关联模型配置的模型'
     )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name='执行状态')
     logs = models.TextField(blank=True, default='', verbose_name='执行日志')

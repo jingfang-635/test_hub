@@ -61,7 +61,7 @@ export default {
     knowledgeBaseManage: '知识库管理',
     knowledgeBaseConfig: '知识库配置',
     uiEnvConfig: 'UI环境配置',
-    aiModeConfig: 'AI智能模式配置',
+    aiModeConfig: '模型配置',
     skillsConfig: 'Skills 技能配置',
     scheduledTaskConfig: '定时任务配置',
     difyConfig: 'AI评测师配置',

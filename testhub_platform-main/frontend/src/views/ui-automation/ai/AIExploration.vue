@@ -685,7 +685,7 @@ async function loadEnvironmentOptions() {
   }
 }
 
-// 加载AI模型选项（从AI智能模式配置获取）
+// 加载AI模型选项（从模型配置获取）
 async function loadAIModelOptions() {
   try {
     const res = await api.get('/ui-automation/ai-models/')

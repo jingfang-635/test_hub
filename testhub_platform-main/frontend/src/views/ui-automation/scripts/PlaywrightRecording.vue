@@ -27,7 +27,8 @@
         <el-step :title="$t('uiAutomation.playwrightRecording.stepGenerate')" />
       </el-steps>
 
-      <el-alert
+      <!-- 隐藏提示框 -->
+      <!-- <el-alert
         :title="$t('uiAutomation.playwrightRecording.tipTitle')"
         type="info"
         :closable="false"
@@ -38,7 +39,7 @@
         <div class="tip-steps">
           {{ $t('uiAutomation.playwrightRecording.workflow') }}
         </div>
-      </el-alert>
+      </el-alert> -->
 
       <!-- Step 0: Record -->
       <template v-if="activeStep === 0">
@@ -66,9 +67,10 @@
               {{ envInfo.can_start ? $t('uiAutomation.playwrightRecording.envReady') : $t('uiAutomation.playwrightRecording.envNotReady') }}
             </el-tag>
           </div>
-          <ul v-if="envInfo?.tips?.length" class="env-tips">
+          <!-- 隐藏环境提示信息 -->
+          <!-- <ul v-if="envInfo?.tips?.length" class="env-tips">
             <li v-for="(tip, idx) in envInfo.tips" :key="idx">{{ tip }}</li>
-          </ul>
+          </ul> -->
         </el-card>
 
         <el-card shadow="never" class="config-card">
@@ -102,7 +104,8 @@
             </el-form-item>
             <el-form-item :label="$t('uiAutomation.playwrightRecording.status')">
               <el-tag :type="statusTagType">{{ statusText }}</el-tag>
-              <span v-if="session?.command" class="command-inline">{{ session.command }}</span>
+              <!-- 隐藏录制状态下方的路径显示 -->
+              <!-- <span v-if="session?.command" class="command-inline">{{ session.command }}</span> -->
             </el-form-item>
             <el-form-item>
               <el-button
@@ -938,5 +941,10 @@ onBeforeUnmount(() => {
   line-height: 1.7;
   max-height: 320px;
   overflow: auto;
+}
+
+// 去掉历史录制文件列表加载按钮的阴影
+:deep(.history-card .el-button--primary.is-text) {
+  box-shadow: none;
 }
 </style>

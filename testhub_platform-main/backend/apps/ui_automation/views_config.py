@@ -215,14 +215,14 @@ from apps.requirement_analysis.models import AIModelConfig
 
 class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
     """
-    AI智能模式配置视图集 (Browser-use) - 使用ModelViewSet支持标准CRUD
+    模型配置视图集 (Browser-use) - 使用ModelViewSet支持标准CRUD
     """
     permission_classes = [IsAuthenticated]
     queryset = AIModelConfig.objects.filter(role='browser_use_text')
 
     def list(self, request):
         """
-        获取所有AI智能模式配置列表
+        获取所有模型配置列表
         """
         configs = self.queryset.order_by('-created_at')
         serializer_data = [{
@@ -240,7 +240,7 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
 
     def create(self, request):
         """
-        创建新的AI智能模式配置
+        创建新的模型配置
         """
         data = request.data
         user = request.user

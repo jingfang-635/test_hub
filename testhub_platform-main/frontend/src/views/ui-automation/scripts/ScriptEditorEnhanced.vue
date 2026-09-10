@@ -20,7 +20,6 @@
             :placeholder="$t('uiAutomation.scriptEditor.searchElement')"
             clearable
             size="small"
-            style="margin-top: 10px"
           >
             <template #prefix>
               <el-icon><Search /></el-icon>
@@ -61,7 +60,11 @@
       <div class="center-panel">
         <div class="editor-toolbar">
           <div class="toolbar-left">
-            <el-select v-model="scriptLanguage" size="small" style="width: 120px">
+            <el-button size="small" :loading="recordStarting" @click="openRecordDialog">
+              <el-icon><VideoCamera /></el-icon>
+              {{ $t('uiAutomation.scriptEditor.recording') }}
+            </el-button>
+            <el-select v-model="scriptLanguage" size="small" style="width: 120px; margin-left: 10px">
               <el-option label="JavaScript" value="javascript" />
               <el-option label="Python" value="python" />
             </el-select>
@@ -71,11 +74,7 @@
             </el-select>
           </div>
           <div class="toolbar-right">
-            <el-button size="small" @click="goToRecording">
-              <el-icon><VideoCamera /></el-icon>
-              {{ $t('uiAutomation.scriptEditor.recording') }}
-            </el-button>
-            <el-button size="small" type="success" @click="runScript" :loading="running">
+            <el-button size="small" type="success" @click="openReplayDialog" :loading="running">
               <el-icon><VideoPlay /></el-icon>
               {{ $t('uiAutomation.scriptEditor.playback') }}
             </el-button>
@@ -92,6 +91,15 @@
               {{ $t('uiAutomation.scriptEditor.saveScript') }}
             </el-button>
           </div>
+        </div>
+
+        <!-- 录制中状态条 -->
+        <div v-if="recording" class="recording-bar">
+          <span class="recording-dot"></span>
+          <span class="recording-text">{{ $t('uiAutomation.scriptEditor.recorder.recordingHint') }}</span>
+          <el-button size="small" type="danger" plain :loading="recordStopping" @click="stopRecording">
+            {{ $t('uiAutomation.scriptEditor.recorder.stopRecord') }}
+          </el-button>
         </div>
 
         <div class="code-editor-container">
@@ -177,11 +185,135 @@
         </el-tabs>
       </div>
     </div>
+
+    <!-- Playwright 录制脚本弹窗 -->
+    <el-dialog
+      v-model="recordDialogVisible"
+      :title="$t('uiAutomation.scriptEditor.recorder.title')"
+      width="560px"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-steps :active="0" finish-status="success" align-center class="record-steps">
+        <el-step :title="$t('uiAutomation.scriptEditor.recorder.stepConfig')" />
+        <el-step :title="$t('uiAutomation.scriptEditor.recorder.stepRecord')" />
+        <el-step :title="$t('uiAutomation.scriptEditor.recorder.stepImport')" />
+      </el-steps>
+
+      <el-form label-width="92px" class="record-form">
+        <el-form-item :label="$t('uiAutomation.scriptEditor.recorder.targetUrl')" required>
+          <el-input v-model="recordUrl" placeholder="https://example.com/login" clearable />
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.scriptEditor.recorder.language')">
+          <el-radio-group v-model="recordLanguage">
+            <el-radio value="python" style="margin-right: 20px">{{ $t('uiAutomation.scriptEditor.recorder.pythonOption') }}</el-radio>
+            <el-radio value="javascript">{{ $t('uiAutomation.scriptEditor.recorder.jsOption') }}</el-radio>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.scriptEditor.recorder.browser')">
+          <el-select v-model="recordBrowser" style="width: 200px">
+            <el-option label="Chromium / Chrome" value="chromium" />
+            <el-option label="Firefox" value="firefox" />
+            <el-option label="WebKit" value="webkit" />
+          </el-select>
+        </el-form-item>
+        <el-form-item :label="$t('uiAutomation.scriptEditor.recorder.saveState')">
+          <el-switch v-model="recordSaveState" />
+          <span class="save-state-hint">{{ $t('uiAutomation.scriptEditor.recorder.saveStateHint') }}</span>
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button @click="recordDialogVisible = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="recordStarting" @click="startRecording">
+          {{ $t('uiAutomation.scriptEditor.recorder.startRecord') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 脚本回放弹窗 -->
+    <el-dialog
+      v-model="replayDialogVisible"
+      :title="$t('uiAutomation.scriptEditor.replayDialog.title')"
+      width="680px"
+      class="replay-dialog"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <div class="replay-header">
+        <div class="replay-script-status">
+          <span class="replay-label">{{ $t('uiAutomation.scriptEditor.replayDialog.currentScript') }}</span>
+          <el-tag :type="replayStatusTagType" size="small">{{ replayStatusText }}</el-tag>
+        </div>
+        <div class="replay-header-right">
+          <el-select v-model="replayBrowser" size="small" style="width: 150px">
+            <el-option label="Chromium" value="chromium" />
+            <el-option label="Firefox" value="firefox" />
+            <el-option label="WebKit" value="webkit" />
+          </el-select>
+          <el-checkbox v-model="replayHeadless" class="replay-headless">
+            {{ $t('uiAutomation.scriptEditor.replayDialog.headless') }}
+          </el-checkbox>
+          <el-button type="primary" size="small" :loading="replayRunning" @click="startReplay">
+            <el-icon style="margin-right: 4px"><VideoPlay /></el-icon>
+            {{ $t('uiAutomation.scriptEditor.replayDialog.start') }}
+          </el-button>
+        </div>
+      </div>
+
+      <div class="replay-base-url">
+        <span class="replay-base-url-label">Base URL</span>
+        <el-input v-model="replayBaseUrl" size="small" placeholder="http://localhost:5175/" clearable />
+      </div>
+
+      <div class="replay-logs">
+        <div class="replay-logs-header">
+          <span>{{ $t('uiAutomation.scriptEditor.replayDialog.executionLogs') }}</span>
+          <el-button link size="small" @click="replayLogs = ''">
+            {{ $t('uiAutomation.scriptEditor.replayDialog.clear') }}
+          </el-button>
+        </div>
+        <div class="replay-log-body">
+          <pre v-if="replayLogs" class="replay-log-pre">{{ replayLogs }}</pre>
+          <div v-else class="replay-log-empty">{{ $t('uiAutomation.scriptEditor.replayDialog.notExecuted') }}</div>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="replayDialogVisible = false">{{ $t('uiAutomation.common.close') }}</el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 保存脚本弹窗 -->
+    <el-dialog
+      v-model="saveDialogVisible"
+      :title="$t('uiAutomation.scriptEditor.saveDialog.title')"
+      width="480px"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-form label-width="92px" @submit.prevent>
+        <el-form-item :label="$t('uiAutomation.scriptEditor.saveDialog.scriptName')" required>
+          <el-input
+            v-model="saveScriptName"
+            :placeholder="$t('uiAutomation.scriptEditor.saveDialog.scriptNamePlaceholder')"
+            clearable
+            @keyup.enter="confirmSaveScript"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="saveDialogVisible = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="saving" @click="confirmSaveScript">
+          {{ $t('uiAutomation.scriptEditor.saveDialog.confirm') }}
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
@@ -193,7 +325,12 @@ import {
   createTestScript,
   getElementTree,
   getElementGroupTree,
-  validateElementLocator
+  validateElementLocator,
+  startCodegenRecording,
+  getCodegenStatus,
+  stopCodegenRecording,
+  getCodegenRecordedContent,
+  replayCodegenScript
 } from '@/api/ui_automation'
 
 // i18n
@@ -217,6 +354,10 @@ const executionLogs = ref([])
 const cursorPosition = reactive({ line: 1, column: 1 })
 const saving = ref(false)
 const running = ref(false)
+
+// 保存脚本弹窗
+const saveDialogVisible = ref(false)
+const saveScriptName = ref('')
 
 // 标签页控制
 const rightActiveTab = ref('logs')
@@ -347,8 +488,6 @@ const updateCursorPosition = () => {
 
 const onProjectChange = async () => {
   selectedElementDetail.value = null
-  executionLogs.value = []
-  scriptContent.value = ''
 
   await loadElementTree()
 
@@ -426,23 +565,6 @@ const generateElementCode = (element) => {
   }
 }
 
-// 生成脚本文件名
-const generateScriptName = () => {
-  const currentProject = projects.value.find(p => p.id === projectId.value)
-  const projectName = currentProject?.name || 'Script'
-  const language = scriptLanguage.value === 'javascript' ? 'JS' : 'Python'
-  const framework = scriptFramework.value === 'playwright' ? 'Playwright' : 'Selenium'
-  const date = new Date()
-  const dateStr = `${date.getFullYear()}${String(date.getMonth() + 1).padStart(2, '0')}${String(date.getDate()).padStart(2, '0')}`
-
-  // 获取自增数字 - 简单实现，实际应从后端获取
-  const timestamp = Date.now() % 1000
-
-  const extension = scriptLanguage.value === 'javascript' ? 'js' : 'py'
-
-  return `${projectName}_${language}_${framework}_${dateStr}_${timestamp}.${extension}`
-}
-
 const saveScript = async () => {
   if (!projectId.value || isAllProjectsSelected()) {
     ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
@@ -454,10 +576,20 @@ const saveScript = async () => {
     return
   }
 
+  // 弹出保存弹窗，让用户输入脚本名称
+  saveScriptName.value = ''
+  saveDialogVisible.value = true
+}
+
+const confirmSaveScript = async () => {
+  const scriptName = saveScriptName.value.trim()
+  if (!scriptName) {
+    ElMessage.warning(t('uiAutomation.scriptEditor.saveDialog.nameRequired'))
+    return
+  }
+
   try {
     saving.value = true
-
-    const scriptName = generateScriptName()
 
     await createTestScript({
       name: scriptName,
@@ -468,6 +600,7 @@ const saveScript = async () => {
       framework: scriptFramework.value
     })
 
+    saveDialogVisible.value = false
     ElMessage.success(`${t('uiAutomation.scriptEditor.messages.saveSuccess')}: ${scriptName}`)
     addLog('success', `${t('uiAutomation.scriptEditor.messages.saveSuccess')}: ${scriptName}`)
   } catch (error) {
@@ -523,30 +656,230 @@ const clearCode = () => {
   addLog('info', t('uiAutomation.scriptEditor.messages.codeCleared'))
 }
 
-const goToRecording = () => {
-  // 跳转到录制页面
-  window.location.href = '/ui-automation/playwright-recording'
+// ---- Playwright 录制 ----
+const recordDialogVisible = ref(false)
+const recordUrl = ref('https://')
+const recordScriptName = ref('')
+const recordLanguage = ref('python')
+const recordBrowser = ref('chromium')
+const recordSaveState = ref(false)
+const recordStarting = ref(false)
+const recordStopping = ref(false)
+const recording = ref(false)
+let recordPollTimer = null
+
+const openRecordDialog = () => {
+  // 默认带入当前项目的 base_url
+  const currentProject = projects.value.find(p => p.id === projectId.value)
+  if (currentProject?.base_url) {
+    recordUrl.value = currentProject.base_url
+  } else if (!recordUrl.value || recordUrl.value === 'https://') {
+    recordUrl.value = 'https://'
+  }
+  recordDialogVisible.value = true
 }
 
-const runScript = async () => {
-  if (!scriptContent.value.trim()) {
+const clearRecordPoll = () => {
+  if (recordPollTimer) {
+    clearInterval(recordPollTimer)
+    recordPollTimer = null
+  }
+}
+
+// 将录制得到的脚本内容导入中间栏编辑器
+const importRecordedContent = (content) => {
+  if (!content || !String(content).trim()) return false
+  scriptContent.value = content
+  scriptLanguage.value = recordLanguage.value === 'javascript' ? 'javascript' : 'python'
+  scriptFramework.value = 'playwright'
+  return true
+}
+
+const onRecordFinished = async (session) => {
+  clearRecordPoll()
+  recording.value = false
+
+  const status = session?.status
+  if (status === 'failed') {
+    const msg = session?.error || t('uiAutomation.scriptEditor.recorder.recordFailed')
+    ElMessage.error(msg)
+    addLog('error', msg)
+    return
+  }
+
+  // 优先使用会话内容；没有则按脚本文件名兜底拉取
+  let content = session?.content || ''
+  if (!content && session?.script_name) {
+    try {
+      const fileRes = await getCodegenRecordedContent(session.script_name)
+      const fileData = fileRes.data || fileRes
+      content = fileData.content || ''
+    } catch (e) {
+      console.error('failed to load recorded content:', e)
+    }
+  }
+
+  if (importRecordedContent(content)) {
+    ElMessage.success(t('uiAutomation.scriptEditor.recorder.importSuccess'))
+    addLog('success', t('uiAutomation.scriptEditor.recorder.importSuccess'))
+  } else {
+    ElMessage.info(t('uiAutomation.scriptEditor.recorder.recordStopped'))
+    addLog('info', t('uiAutomation.scriptEditor.recorder.recordStopped'))
+  }
+}
+
+const applyRecordSession = (session) => {
+  if (!session) {
+    recording.value = false
+    return
+  }
+  if (['starting', 'recording'].includes(session.status)) {
+    recording.value = true
+    return
+  }
+  if (['finished', 'stopped', 'failed'].includes(session.status)) {
+    onRecordFinished(session)
+  }
+}
+
+const pollRecordStatus = async () => {
+  try {
+    const res = await getCodegenStatus({ include_content: 1 })
+    const data = res.data || res
+    applyRecordSession(data.session)
+  } catch (error) {
+    console.error('record status poll failed:', error)
+  }
+}
+
+const startRecordPolling = () => {
+  clearRecordPoll()
+  recordPollTimer = setInterval(pollRecordStatus, 2000)
+}
+
+const startRecording = async () => {
+  const url = (recordUrl.value || '').trim()
+  if (!url || ['https://', 'http://'].includes(url)) {
+    ElMessage.warning(t('uiAutomation.scriptEditor.recorder.emptyUrl'))
+    return
+  }
+
+  recordStarting.value = true
+  try {
+    const res = await startCodegenRecording({
+      url,
+      browser: recordBrowser.value,
+      language: recordLanguage.value,
+      project_id: projectId.value === ALL_PROJECTS ? null : projectId.value,
+      script_name: recordScriptName.value.trim(),
+      auto_login: recordSaveState.value
+    })
+    const data = res.data || res
+    recordDialogVisible.value = false
+    recording.value = true
+    addLog('info', data.message || t('uiAutomation.scriptEditor.recorder.recordStarted'))
+    startRecordPolling()
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.scriptEditor.recorder.recordStartFailed')
+    ElMessage.error(msg)
+    addLog('error', msg)
+  } finally {
+    recordStarting.value = false
+  }
+}
+
+const stopRecording = async () => {
+  recordStopping.value = true
+  clearRecordPoll()
+  try {
+    const res = await stopCodegenRecording()
+    const data = res.data || res
+    await onRecordFinished(data.session)
+  } catch (error) {
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.scriptEditor.recorder.recordStopFailed')
+    ElMessage.error(msg)
+    addLog('error', msg)
+    // 结束失败且仍在录制中，恢复轮询
+    if (recording.value) startRecordPolling()
+  } finally {
+    recordStopping.value = false
+  }
+}
+
+// ---- 脚本回放弹窗 ----
+const replayDialogVisible = ref(false)
+const replayBrowser = ref('chromium')
+const replayHeadless = ref(true)
+const replayBaseUrl = ref('')
+const replayLogs = ref('')
+const replayStatus = ref('idle') // idle | running | success | failed
+const replayRunning = ref(false)
+
+const replayStatusText = computed(() => {
+  const map = {
+    idle: t('uiAutomation.scriptEditor.replayDialog.statusIdle'),
+    running: t('uiAutomation.scriptEditor.replayDialog.statusRunning'),
+    success: t('uiAutomation.scriptEditor.replayDialog.statusSuccess'),
+    failed: t('uiAutomation.scriptEditor.replayDialog.statusFailed')
+  }
+  return map[replayStatus.value] || map.idle
+})
+
+const replayStatusTagType = computed(() => {
+  if (replayStatus.value === 'running') return 'warning'
+  if (replayStatus.value === 'success') return 'success'
+  if (replayStatus.value === 'failed') return 'danger'
+  return 'info'
+})
+
+const openReplayDialog = () => {
+  replayStatus.value = 'idle'
+  replayLogs.value = ''
+  // 默认带入当前项目的 base_url
+  const currentProject = projects.value.find(p => p.id === projectId.value)
+  replayBaseUrl.value = currentProject?.base_url || ''
+  replayDialogVisible.value = true
+}
+
+const startReplay = async () => {
+  const content = scriptContent.value?.trim()
+  if (!content) {
     ElMessage.warning(t('uiAutomation.scriptEditor.messages.emptyScript'))
     return
   }
 
+  replayStatus.value = 'running'
+  replayRunning.value = true
+  replayLogs.value = t('uiAutomation.scriptEditor.replayDialog.runningTip')
   try {
-    running.value = true
-    addLog('info', t('uiAutomation.scriptEditor.messages.scriptRunning'))
-    
-    // TODO: 调用后端 API 运行脚本
-    // 这里需要实现脚本运行逻辑，可以复用 ScriptList.vue 中的运行功能
-    ElMessage.info(t('uiAutomation.scriptEditor.messages.scriptRunningNotImplemented'))
+    const res = await replayCodegenScript({
+      content,
+      language: scriptLanguage.value,
+      framework: scriptFramework.value,
+      browser: replayBrowser.value,
+      headless: replayHeadless.value,
+      base_url: replayBaseUrl.value.trim(),
+      project_id: projectId.value === ALL_PROJECTS ? null : projectId.value
+    })
+    const data = res.data || res
+    const parts = [data.logs, data.stdout, data.stderr, data.error].filter(Boolean)
+    replayLogs.value = parts.join('\n') || t('uiAutomation.scriptEditor.replayDialog.notExecuted')
+    replayStatus.value = data.status === 'success' ? 'success' : 'failed'
+    if (data.status === 'success') {
+      ElMessage.success(t('uiAutomation.scriptEditor.replayDialog.replaySuccess'))
+      addLog('success', t('uiAutomation.scriptEditor.replayDialog.replaySuccess'))
+    } else {
+      ElMessage.error(data.error || t('uiAutomation.scriptEditor.replayDialog.replayFailed'))
+      addLog('error', data.error || t('uiAutomation.scriptEditor.replayDialog.replayFailed'))
+    }
   } catch (error) {
-    console.error('Failed to run script:', error)
-    ElMessage.error(t('uiAutomation.scriptEditor.messages.scriptRunFailed'))
-    addLog('error', t('uiAutomation.scriptEditor.messages.scriptRunFailed'))
+    replayStatus.value = 'failed'
+    const msg = error.response?.data?.error || error.message || t('uiAutomation.scriptEditor.replayDialog.replayFailed')
+    replayLogs.value = msg
+    ElMessage.error(msg)
+    addLog('error', msg)
   } finally {
-    running.value = false
+    replayRunning.value = false
   }
 }
 
@@ -615,6 +948,23 @@ onMounted(async () => {
     codeEditor.value.addEventListener('click', updateCursorPosition)
     codeEditor.value.addEventListener('keyup', updateCursorPosition)
   }
+
+  // 恢复进行中的录制会话（如页面刷新后）
+  try {
+    const res = await getCodegenStatus({ include_content: 0 })
+    const data = res.data || res
+    if (data.session && ['starting', 'recording'].includes(data.session.status)) {
+      recording.value = true
+      addLog('info', t('uiAutomation.scriptEditor.recorder.recordStarted'))
+      startRecordPolling()
+    }
+  } catch (error) {
+    console.error('restore codegen session failed:', error)
+  }
+})
+
+onBeforeUnmount(() => {
+  clearRecordPoll()
 })
 </script>
 
@@ -659,12 +1009,27 @@ onMounted(async () => {
 }
 
 .panel-header {
-  padding: 15px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  height: 52px;
+  padding: 0 15px;
+  box-sizing: border-box;
   border-bottom: 1px solid #e6e6e6;
+  background-color: #fafafa;
 }
 
 .panel-header h3 {
-  margin: 0 0 10px 0;
+  margin: 0;
+  font-size: 16px;
+  font-weight: 600;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.panel-header .el-input {
+  flex: 1;
+  min-width: 0;
 }
 
 .center-panel {
@@ -704,6 +1069,130 @@ onMounted(async () => {
   display: flex;
   align-items: center;
   gap: 4px;
+}
+
+.recording-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 15px;
+  background: #fef0f0;
+  border-bottom: 1px solid #fbc4c4;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.recording-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f56c6c;
+  animation: recording-blink 1.2s ease-in-out infinite;
+  flex-shrink: 0;
+}
+
+@keyframes recording-blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.3; }
+}
+
+.recording-text {
+  flex: 1;
+  color: #f56c6c;
+}
+
+.record-steps {
+  margin: 6px 0 22px;
+}
+
+.record-form :deep(.el-radio) {
+  margin-right: 18px;
+}
+
+.save-state-hint {
+  margin-left: 10px;
+  color: #909399;
+  font-size: 12px;
+}
+
+/* 脚本回放弹窗 */
+.replay-dialog .replay-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.replay-dialog .replay-script-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.replay-dialog .replay-label {
+  font-weight: 600;
+  color: #303133;
+  font-size: 14px;
+}
+
+.replay-dialog .replay-header-right {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.replay-dialog .replay-headless {
+  margin-right: 2px;
+}
+
+.replay-dialog .replay-base-url {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 14px;
+}
+
+.replay-dialog .replay-base-url-label {
+  font-size: 13px;
+  color: #606266;
+  flex-shrink: 0;
+}
+
+.replay-dialog .replay-logs-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 10px;
+  background: #f5f7fa;
+  border: 1px solid #e4e7ed;
+  border-bottom: none;
+  border-radius: 4px 4px 0 0;
+  font-size: 13px;
+  color: #303133;
+}
+
+.replay-dialog .replay-log-body {
+  height: 300px;
+  background: #1e1e1e;
+  border-radius: 0 0 4px 4px;
+  padding: 12px;
+  overflow: auto;
+}
+
+.replay-dialog .replay-log-pre {
+  margin: 0;
+  font-family: Consolas, Monaco, 'Courier New', monospace;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #d4d4d4;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.replay-dialog .replay-log-empty {
+  color: #8a8a8a;
+  font-size: 13px;
 }
 
 .code-editor-container {
