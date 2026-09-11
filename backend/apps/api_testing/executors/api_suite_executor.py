@@ -198,6 +198,9 @@ class ApiSuiteExecutor:
                 return None
 
             cmd = [allure_path, 'generate', allure_results_dir, '-o', report_dir, '--clean']
+            report_lang = getattr(settings, 'ALLURE_REPORT_LANGUAGE', 'zh')
+            if report_lang:
+                cmd.extend(['--lang', str(report_lang)])
             logger.info(f"生成 Allure 报告: {' '.join(cmd)}")
             result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
             if result.returncode == 0:

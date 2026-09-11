@@ -1364,6 +1364,9 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
                 'generate', str(Path(results_dir)),
                 '--clean',
             ]
+        report_lang = getattr(settings, 'ALLURE_REPORT_LANGUAGE', 'zh')
+        if report_lang:
+            cmd_list.extend(['--lang', str(report_lang)])
         if single_file:
             cmd_list.append('--single-file')
         cmd_list.extend(['--output', str(Path(output_dir))])

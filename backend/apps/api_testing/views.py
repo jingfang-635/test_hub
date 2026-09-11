@@ -1337,6 +1337,9 @@ class TestExecutionViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewS
                         '--clean', '--single-file',
                         '--output', str(Path(offline_dir)),
                     ]
+                report_lang = getattr(settings, 'ALLURE_REPORT_LANGUAGE', 'zh')
+                if report_lang:
+                    cmd_list.extend(['--lang', str(report_lang)])
 
                 result = subprocess.run(
                     cmd_list,
@@ -1493,7 +1496,10 @@ class TestExecutionViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewS
                                     '--clean',
                                     '--output', str(Path(report_output_dir))
                                 ]
-                            
+                            report_lang = getattr(settings, 'ALLURE_REPORT_LANGUAGE', 'zh')
+                            if report_lang:
+                                cmd_list.extend(['--lang', str(report_lang)])
+
                             # 生成Allure报告
                             result = subprocess.run(
                                 cmd_list,

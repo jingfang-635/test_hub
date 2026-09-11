@@ -279,6 +279,9 @@ class AppTestExecutor:
             
             # 生成报告
             cmd = [allure_path, 'generate', allure_results_dir, '-o', report_dir, '--clean']
+            report_lang = getattr(settings, 'ALLURE_REPORT_LANGUAGE', 'zh')
+            if report_lang:
+                cmd.extend(['--lang', str(report_lang)])
             
             logger.info(f"生成 Allure 报告: {' '.join(cmd)}")
             

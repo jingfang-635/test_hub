@@ -181,6 +181,10 @@ TIME_ZONE = config('TIME_ZONE', default='Asia/Shanghai')
 USE_I18N = True
 USE_TZ = True
 
+# Allure 报告语言（支持 allure 内置语言代码：en/zh/ja/ko/fr/de/...）
+# 传入 allure generate --lang，决定报告界面默认语言
+ALLURE_REPORT_LANGUAGE = config('ALLURE_REPORT_LANGUAGE', default='zh')
+
 STATIC_URL = '/static/'
 STATIC_ROOT = os.path.join(BASE_DIR, 'static_files')
 
