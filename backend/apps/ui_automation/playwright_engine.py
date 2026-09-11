@@ -545,7 +545,10 @@ class PlaywrightTestEngine:
         )
 
     async def _retry_action_on_backups(self, element_data: Dict, timeout_ms: int, action):
-        """主定位器已 attached 但操作失败时，继续试后续备用。action(locator) 为 async。"""
+        """主定位器已 attached 但操作失败时，继续试后续备用。action(locator) 为 async。
+
+        成功返回 (locator, strategy, value)；失败返回 (None, None, last_error)。
+        """
         candidates = element_data.get('_locator_candidates') or self._build_locator_candidates(element_data)
         start = int(element_data.get('_candidate_index') or 0) + 1
         last_error = None
@@ -564,7 +567,7 @@ class PlaywrightTestEngine:
             except Exception as exc:  # noqa: BLE001
                 last_error = exc
                 continue
-        return None, last_error
+        return None, None, last_error
 
     async def execute_step(self, step, element_data: Dict) -> Tuple[bool, str, Optional[str]]:
         """
@@ -1102,12 +1105,12 @@ class PlaywrightTestEngine:
                     try:
                         await _do_click(locator)
                     except Exception:
-                        nxt, _ = await self._retry_action_on_backups(
+                        nxt_loc, nxt_strategy, nxt_value = await self._retry_action_on_backups(
                             element_data, timeout_ms, _do_click
                         )
-                        if not nxt:
+                        if not nxt_loc:
                             raise
-                        locator, locator_strategy, locator_value = nxt
+                        locator, locator_strategy, locator_value = nxt_loc, nxt_strategy, nxt_value
 
                     execution_time = round(time.time() - start_time, 2)
                     log = f"✓ 点击元素 '{element_name}' 成功\n"
@@ -1125,12 +1128,12 @@ class PlaywrightTestEngine:
                 try:
                     await _do_fill(locator)
                 except Exception:
-                    nxt, _ = await self._retry_action_on_backups(
+                    nxt_loc, nxt_strategy, nxt_value = await self._retry_action_on_backups(
                         element_data, timeout_ms, _do_fill
                     )
-                    if not nxt:
+                    if not nxt_loc:
                         raise
-                    locator, locator_strategy, locator_value = nxt
+                    locator, locator_strategy, locator_value = nxt_loc, nxt_strategy, nxt_value
                 execution_time = round(time.time() - start_time, 2)
 
                 # 输入成功后短暂等待，确保表单验证生效

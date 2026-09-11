@@ -145,10 +145,11 @@ class TestCaseDetailView(generics.RetrieveUpdateDestroyAPIView):
 # ========== 用例详情 - UI自动化 tab 只读步骤详情（含元素/选择器/输入值） ==========
 
 class TestCaseUiStepDetailView(generics.RetrieveAPIView):
-    """返回用例对应的 UI自动化用例（{标题}-AI生成步骤）的结构化只读步骤。
+    """返回用例对应的 UI自动化用例的结构化只读步骤。
 
-    数据源为 UI自动化模块的 TestCaseStep（含动作类型/页面/元素/选择器/输入值/截图），
-    供用例详情「UI自动化」tab 的只读步骤卡片展示，不做任何写入。
+    优先通过 ui_test_cases.hub_testcase 一对一关联定位；兼容历史命名
+    「{标题}-AI生成步骤」。供用例详情「UI自动化」tab 只读展示，不做业务写入
+    （仅在命中历史命名时补绑 FK）。
     """
     permission_classes = [permissions.IsAuthenticated]
 
@@ -168,14 +169,31 @@ class TestCaseUiStepDetailView(generics.RetrieveAPIView):
             UiProject as UiProjectModel, TestCase as UiTestCase, TestCaseStep as UiTestCaseStep,
         )
 
-        # 定位关联的 UI自动化项目与用例（命名规则见 sync_ai_execution_to_cases）
-        ui_project = UiProjectModel.objects.filter(hub_project=testcase.project).first()
-        if not ui_project:
-            return Response({'ui_case_id': None, 'steps': []})
-
-        ui_case = UiTestCase.objects.filter(
-            project=ui_project, name=f'{testcase.title or ""}-AI生成步骤'
-        ).order_by('-id').first()
+        # 定位关联的 UI自动化用例：优先 hub_testcase 一对一 FK，兼容旧命名规则
+        ui_case = UiTestCase.objects.filter(hub_testcase_id=testcase.id).first()
+        if not ui_case:
+            ui_project = UiProjectModel.objects.filter(hub_project=testcase.project).first()
+            if not ui_project:
+                return Response({'ui_case_id': None, 'steps': []})
+            expected_name = f'{testcase.title or ""}-AI生成步骤'
+            ui_case = UiTestCase.objects.filter(
+                project=ui_project, name=expected_name
+            ).order_by('id').first()
+            if not ui_case and testcase.title:
+                ui_case = (
+                    UiTestCase.objects.filter(
+                        project=ui_project,
+                        hub_testcase__isnull=True,
+                        name__endswith='-AI生成步骤',
+                        name__startswith=testcase.title,
+                    )
+                    .order_by('id')
+                    .first()
+                )
+            # 历史数据补绑 FK，后续重复生成走更新而非新建
+            if ui_case and not ui_case.hub_testcase_id:
+                ui_case.hub_testcase = testcase
+                ui_case.save(update_fields=['hub_testcase', 'updated_at'])
         if not ui_case:
             return Response({'ui_case_id': None, 'steps': []})
 

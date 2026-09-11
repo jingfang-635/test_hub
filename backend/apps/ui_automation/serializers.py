@@ -598,10 +598,11 @@ class TestCaseSerializer(serializers.ModelSerializer):
     class Meta:
         model = TestCase
         fields = [
-            'id', 'name', 'description', 'project', 'project_name', 'status', 'priority',
-            'created_by', 'created_by_name', 'created_at', 'updated_at', 'steps'
+            'id', 'name', 'description', 'project', 'project_name', 'hub_testcase',
+            'status', 'priority', 'created_by', 'created_by_name', 'created_at',
+            'updated_at', 'steps',
         ]
-        read_only_fields = ['created_by']
+        read_only_fields = ['created_by', 'hub_testcase']
 
     def create(self, validated_data):
         validated_data['created_by'] = self.context['request'].user

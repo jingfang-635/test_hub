@@ -186,7 +186,36 @@ const buildTaskDescription = () => {
   return parts.join('\n')
 }
 
-const handleAiGenerateSteps = async () => {
+const confirmReuseAuth = async () => {
+  try {
+    await ElMessageBox.confirm(
+      t('testcase.aiGenerateStepsReuseAuthHint'),
+      t('testcase.aiGenerateStepsReuseAuthTitle'),
+      {
+        confirmButtonText: t('testcase.aiGenerateStepsReuseAuthYes'),
+        cancelButtonText: t('testcase.aiGenerateStepsReuseAuthNo'),
+        distinguishCancelAndClose: true,
+        dangerouslyUseHTMLString: true,
+        type: 'info',
+      }
+    )
+    return true
+  } catch (action) {
+    if (action === 'cancel') return false
+    return null // close / Esc：中止
+  }
+}
+
+const handleAiGenerateSteps = async (target = 'ui') => {
+  if (target === 'api') {
+    ElMessage.info(t('testcase.aiGenerateStepsTodo'))
+    return
+  }
+
+  // UI 自动化：弹窗确认是否复用登录态
+  const autoLogin = await confirmReuseAuth()
+  if (autoLogin === null) return
+
   aiGenerating.value = true
   try {
     // 校验是否已配置 AI 智能模式模型
@@ -218,6 +247,7 @@ const handleAiGenerateSteps = async () => {
       execution_mode: 'text',
       enable_gif: false,
       hub_testcase_id: route.params.id,
+      auto_login: autoLogin,
     })
     const executionId = response?.data?.execution_id
     // 跳转到 AI 智能测试执行详情页实时查看执行/回显

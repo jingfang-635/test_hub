@@ -511,7 +511,7 @@
                 <el-tag v-if="step.healed" type="warning" size="small" effect="plain">
                   {{ t('uiAutomation.testCase.aiHealedStep') }}
                 </el-tag>
-                <span class="result-log-desc">{{ step.description || step.message || '' }}</span>
+                <span class="result-log-desc">{{ step.description || step.message || step.action_type || step.error || '' }}</span>
                 <div v-if="step.healed && step.healing_reason" class="result-log-heal">
                   <div class="result-log-heal-label">{{ t('uiAutomation.testCase.aiFailureReason') }}</div>
                   <pre>{{ step.healing_reason }}</pre>

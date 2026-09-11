@@ -37,6 +37,10 @@ export default {
     aiGenerateStepsTodo: 'AI generate steps is coming soon',
     aiGenerateStepsStarted: 'AI task started; steps will be echoed automatically after execution',
     aiGenerateStepsFailed: 'Failed to generate steps via AI',
+    aiGenerateStepsReuseAuthTitle: 'Reuse Login State',
+    aiGenerateStepsReuseAuthHint: 'Reuse the project saved login state?<br/>· Yes: skip login, suitable for post-login business steps<br/>· No: run full login & interactions so login steps can be recorded',
+    aiGenerateStepsReuseAuthYes: 'Reuse',
+    aiGenerateStepsReuseAuthNo: 'Do not reuse',
     aiGeneratedSteps: 'AI Generated Steps',
     aiGeneratedStepsTip: 'Steps below are automatically generated and echoed after AI intelligent testing',
     preconditions: 'Preconditions',
@@ -148,7 +152,7 @@ export default {
 
     // Validation
     titleRequired: 'Please enter case title',
-    titleLength: 'Title length must be between 5 and 500 characters',
+    titleLength: 'Title length cannot exceed 500 characters',
     expectedResultRequired: 'Please enter expected result',
     stepsRequired: 'Please enter steps',
     stepsMaxLength: 'Steps cannot exceed 1000 characters',

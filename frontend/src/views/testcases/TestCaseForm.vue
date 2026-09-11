@@ -189,7 +189,7 @@ const form = reactive({
 const rules = {
   title: [
     { required: true, message: computed(() => t('testcase.titleRequired')), trigger: 'blur' },
-    { min: 5, max: 500, message: computed(() => t('testcase.titleLength')), trigger: 'blur' }
+    { max: 500, message: computed(() => t('testcase.titleLength')), trigger: 'blur' }
   ],
   steps: [
     { required: true, message: computed(() => t('testcase.stepsRequired')), trigger: 'blur' },

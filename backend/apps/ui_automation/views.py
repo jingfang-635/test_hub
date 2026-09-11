@@ -242,15 +242,12 @@ def _ensure_ai_login_state(ui_project_id, base_url):
     （失效时静默重登刷新）；缺失且配置了环境登录凭证时先 headless 静默登录生成。
     返回 (storage_path|None, log_message)。
     """
-    from .auth_state import auth_path_for_project, ensure_project_auth_state
+    from .auth_state import ensure_project_auth_state, post_login_start_url
     from .codegen_service import codegen_recorder
 
     if not ui_project_id:
         return None, ''
     try:
-        auth_file = auth_path_for_project(ui_project_id)
-        if not auth_file:
-            return None, ''
         login_username, login_password = codegen_recorder._resolve_project_login(ui_project_id)
         storage = ensure_project_auth_state(
             ui_project_id,
@@ -259,9 +256,13 @@ def _ensure_ai_login_state(ui_project_id, base_url):
             password=login_password,
         )
         if storage:
-            return storage, '\n[System] 已复用项目登录态（storage_state），本次执行免登录。'
+            start = post_login_start_url(base_url) if base_url else ''
+            msg = '\n[System] 已复用项目登录态（storage_state），本次执行免登录。'
+            if start and start.rstrip('/') != (base_url or '').strip().rstrip('/'):
+                msg += f'\n[System] 复用登录态起始地址已改写为业务入口: {start}'
+            return storage, msg
         if login_username and login_password:
-            return None, '\n[System] 静默登录未成功，本次AI执行不复用登录态。'
+            return None, '\n[System] 静默登录未成功或登录态已失效，本次AI执行不复用登录态。'
         # 未配置登录凭证且无已保存登录态：交给 AI 按步骤文本自行处理
         return None, ''
     except Exception as exc:  # noqa: BLE001
@@ -1993,6 +1994,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
 
             # 复用登录态：跳过用例中的登录相关步骤（点登录/填账号密码等）
             skipped_login_steps = 0
+            original_step_count = len(steps_data)
             if auto_login and steps_data:
                 from .auth_state import is_login_related_step
 
@@ -2003,6 +2005,48 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                     else:
                         kept.append(sd)
                 steps_data = kept
+
+            # 无可执行步骤时直接失败并返回可读日志，避免「空日志 + 成功」
+            if not steps_data:
+                if original_step_count == 0:
+                    error_msg = '测试用例没有定义任何步骤，请先保存用例步骤后再执行'
+                else:
+                    error_msg = (
+                        f'复用登录态后无可执行步骤（原有 {original_step_count} 个步骤，'
+                        f'已全部作为登录相关步骤跳过 {skipped_login_steps} 个）。'
+                        f'请关闭「复用登录态」后重试，或补充非登录步骤'
+                    )
+                empty_logs = [{
+                    'step_number': 0,
+                    'action_type': 'system',
+                    'description': error_msg,
+                    'success': False,
+                    'error': error_msg,
+                }]
+                execution.status = 'failed'
+                execution.error_message = error_msg
+                execution.execution_logs = json.dumps(empty_logs, ensure_ascii=False)
+                execution.execution_time = 0
+                execution.finished_at = timezone.now()
+                execution.screenshots = []
+                execution.save()
+                log_operation('run', 'test_case', test_case.id, test_case.name, request.user)
+                return Response({
+                    'success': False,
+                    'logs': execution.execution_logs,
+                    'screenshots': [],
+                    'execution_time': 0,
+                    'errors': [{
+                        'message': error_msg,
+                        'details': error_msg,
+                        'step_number': None,
+                        'action_type': '系统检查',
+                        'element': '',
+                        'description': '执行前步骤检查'
+                    }],
+                    'healed': False,
+                    'ai_healing': {'used': False, 'passed_with_heal': False, 'steps': []},
+                })
 
             # 存储步骤执行结果（用于JSON格式的execution_logs）
             step_results = []
@@ -2160,7 +2204,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                     step_results.append({
                                         'step_number': i,
                                         'action_type': action_type,
-                                        'description': description or '',
+                                        'description': description or action_type_text or action_type,
                                         'success': success,
                                         'error': None if success else step_log
                                     })
@@ -2251,8 +2295,19 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                             execution_logs.append(f"========== 执行完成 ({step_count} 个步骤全部通过) ==========")
                             return True
                         else:
+                            # 理论上已在入口拦截；此处作为兜底，禁止空步骤静默通过
                             execution_logs.append("警告: 测试用例没有定义任何步骤")
-                            return True
+                            execution_result['status'] = 'failed'
+                            execution_result['error_message'] = '测试用例没有定义任何步骤'
+                            detailed_errors.append({
+                                'step_number': None,
+                                'action_type': '系统检查',
+                                'element': '',
+                                'message': '测试用例没有定义任何步骤',
+                                'details': '无可执行步骤',
+                                'description': '执行前步骤检查'
+                            })
+                            return False
 
                     finally:
                         execution_logs.append("")
@@ -2397,7 +2452,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                         step_results.append({
                                             'step_number': i,
                                             'action_type': action_type,
-                                            'description': description or '',
+                                            'description': description or action_type_text or action_type,
                                             'success': success,
                                             'error': None if success else step_log,
                                             'healed': healed and success,
@@ -2429,15 +2484,15 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                             if not screenshot_base64:
                                                 screenshot_base64 = await engine.capture_screenshot()
 
-                                        if screenshot_base64:
-                                            screenshots.append({
-                                                'url': screenshot_base64,
-                                                'description': f'步骤 {i} 失败截图: {description or action_type_text}',
-                                                'step_number': i,
-                                                'timestamp': timezone.now().isoformat()
-                                                # 移除 loaded 和 error 字段，让前端自行处理
-                                            })
-                                            execution_logs.append(f"  📸 失败截图已捕获")
+                                            if screenshot_base64:
+                                                screenshots.append({
+                                                    'url': screenshot_base64,
+                                                    'description': f'步骤 {i} 失败截图: {description or action_type_text}',
+                                                    'step_number': i,
+                                                    'timestamp': timezone.now().isoformat()
+                                                    # 移除 loaded 和 error 字段，让前端自行处理
+                                                })
+                                                execution_logs.append(f"  📸 失败截图已捕获")
 
                                             execution_logs.append(f"  [调试] 步骤失败,准备退出执行...")
                                             return False
@@ -2506,8 +2561,19 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                 return True
 
                             else:
+                                # 理论上已在入口拦截；此处作为兜底，禁止空步骤静默通过
                                 execution_logs.append("警告: 测试用例没有定义任何步骤")
-                                return True
+                                execution_result['status'] = 'failed'
+                                execution_result['error_message'] = '测试用例没有定义任何步骤'
+                                detailed_errors.append({
+                                    'step_number': None,
+                                    'action_type': '系统检查',
+                                    'element': '',
+                                    'message': '测试用例没有定义任何步骤',
+                                    'details': '无可执行步骤',
+                                    'description': '执行前步骤检查'
+                                })
+                                return False
 
                         finally:
                             # 关闭浏览器
@@ -2573,6 +2639,39 @@ class TestCaseViewSet(viewsets.ModelViewSet):
 
             # 保存error_message（step_log已经是简洁的错误信息）
             execution.error_message = execution_result['error_message'] or ''
+
+            # 复用登录态跳过信息写入日志头部，便于前端展示
+            if skipped_login_steps:
+                step_results.insert(0, {
+                    'step_number': 0,
+                    'action_type': 'skip',
+                    'description': f'已跳过 {skipped_login_steps} 个登录相关步骤（复用登录态）',
+                    'success': True,
+                    'error': None,
+                })
+
+            # 兜底：禁止返回空日志（前端会显示「无日志」却 success=true）
+            if not step_results:
+                fallback_msg = execution.error_message or '执行完成但未产生步骤日志'
+                if execution.status == 'passed':
+                    execution.status = 'failed'
+                    execution.error_message = fallback_msg
+                step_results.append({
+                    'step_number': 0,
+                    'action_type': 'system',
+                    'description': fallback_msg,
+                    'success': False,
+                    'error': fallback_msg,
+                })
+                if not detailed_errors:
+                    detailed_errors.append({
+                        'step_number': None,
+                        'action_type': '系统检查',
+                        'element': '',
+                        'message': fallback_msg,
+                        'details': '\n'.join(execution_logs[-20:]) if execution_logs else fallback_msg,
+                        'description': '执行结果兜底检查'
+                    })
 
             # 保存步骤执行结果为JSON格式
             execution.execution_logs = json.dumps(step_results, ensure_ascii=False)
@@ -4170,32 +4269,72 @@ def _dom_element_to_locator(el):
     """把 browser-use 交互相元素映射为可被 _parse_playwright_locator 解析的定位表达式。
 
     兼容 UI自动化「录制步骤 → 用例」的解析器，使 AI 生成步骤能以同样的格式进入元素库。
+    同时兼容对象与 dict（history.model_actions 序列化后常为 dict）。
+    仅返回「可独立定位」的表达式；裸 tag（button/input）视为无效，交给采集 sidecar 兜底。
     """
     if el is None:
         return ''
-    attrs = getattr(el, 'attributes', None) or {}
-    node = (getattr(el, 'node_name', '') or '').lower()
-    ax_name = getattr(el, 'ax_name', None) or ''
-    xpath = getattr(el, 'x_path', '') or ''
+
+    if isinstance(el, dict):
+        attrs = el.get('attributes') or {}
+        node = (el.get('node_name') or '').lower()
+        ax_name = (el.get('ax_name') or '') or ''
+        xpath = (el.get('x_path') or '') or ''
+    else:
+        attrs = getattr(el, 'attributes', None) or {}
+        node = (getattr(el, 'node_name', '') or '').lower()
+        ax_name = getattr(el, 'ax_name', None) or ''
+        xpath = getattr(el, 'x_path', '') or ''
+
+    if not isinstance(attrs, dict):
+        attrs = {}
+    attrs = {str(k): str(v) for k, v in attrs.items() if v is not None}
+    ax_name = str(ax_name or '').strip()
+    xpath = str(xpath or '').strip()
+
+    def _q(text: str) -> str:
+        return str(text).replace('\\', '\\\\').replace('"', '\\"')
 
     testid = attrs.get('data-testid') or attrs.get('data-test') or attrs.get('data-cy')
     if testid:
-        return f'page.get_by_test_id("{testid}")'
-    if attrs.get('id'):
-        return f'page.locator("#{attrs.get("id")}")'
+        return f'page.get_by_test_id("{_q(testid)}")'
+
+    el_id = attrs.get('id') or ''
+    # Element Plus 动态 id（el-id-*）不稳定：有 placeholder / name / aria 时优先用后者
+    dynamic_id = bool(el_id) and bool(re.match(r'^el-id-\d+', el_id, re.I))
+    if el_id and not dynamic_id:
+        return f'page.locator("#{_q(el_id)}")'
     if attrs.get('placeholder'):
-        return f'page.get_by_placeholder("{attrs.get("placeholder")}")'
+        return f'page.get_by_placeholder("{_q(attrs.get("placeholder"))}")'
     if attrs.get('name'):
-        return f'page.locator("[name={attrs.get("name")}]")'
+        return f'page.locator("[name={_q(attrs.get("name"))}]")'
     if attrs.get('aria-label'):
-        return f'page.get_by_label("{attrs.get("aria-label")}")'
+        return f'page.get_by_label("{_q(attrs.get("aria-label"))}")'
+    if el_id:
+        # 仅剩动态 id 时仍可用（总比空好）；采集兜底会再补充更稳的备用选择器
+        return f'page.locator("#{_q(el_id)}")'
+
+    role = attrs.get('role') or {
+        'button': 'button',
+        'a': 'link',
+        'input': 'textbox',
+        'textarea': 'textbox',
+        'select': 'combobox',
+    }.get(node)
+    if ax_name and role:
+        return f'page.get_by_role("{_q(role)}", name="{_q(ax_name)}")'
+    if ax_name and node in ('button', 'a'):
+        role = 'button' if node == 'button' else 'link'
+        return f'page.get_by_role("{role}", name="{_q(ax_name)}")'
     if ax_name:
-        return f'page.get_by_label("{ax_name}")'
-    if attrs.get('role'):
-        return f'page.get_by_role("{attrs.get("role")}")'
+        return f'page.get_by_label("{_q(ax_name)}")'
+    if role:
+        return f'page.get_by_role("{_q(role)}")'
     if xpath:
-        return f'page.locator("xpath={xpath}")'
-    return node or ''
+        xp = xpath if xpath.startswith('/') or xpath.startswith('(') else f'/{xpath}'
+        return f'page.locator("xpath={_q(xp)}")'
+    # 裸 tag 无法唯一定位，返回空以触发采集 sidecar 兜底
+    return ''
 
 
 def _extract_ai_history_actions(history):
@@ -4241,7 +4380,8 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
     """把 AI 执行历史上的操作+定位器转换为用例步骤(DTO 结构)，并同步创建元素。
 
     与 codegen_pipeline_service.map_parse_to_case_steps 产出结构保持一致。
-    captures: ai_capture sidecar（截图+备用选择器），按主定位器/交互元素匹配写入元素。
+    captures: ai_capture sidecar（截图+备用选择器）。
+    主定位器优先；若历史缺 interacted_element（常见于 click），则用采集结果兜底建元素。
     返回 (steps, created_element_ids)。
     """
     from .codegen_pipeline_service import (
@@ -4249,8 +4389,9 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
         _element_step_extras,
         _build_step_description,
         _page_name_from_url,
+        _parse_playwright_locator,
     )
-    from .ai_capture import _take_ai_capture
+    from .ai_capture import _take_ai_capture, locator_expr_from_capture
 
     mapped = []
     element_cache = {}
@@ -4258,6 +4399,8 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
     current_page = default_page or 'main'
     capture_used: set[int] = set()
     capture_seq = 0
+    # 需要绑定元素的动作（含 assert：验证步骤也应写入「选择元素」）
+    ELEMENT_ACTIONS = ('click', 'fill', 'hover', 'scroll', 'assert')
 
     def _action_key(action_dict):
         # browser-use 动作序列化形如 {click_element: {...}} 或 {go_to_url: {...}}
@@ -4325,14 +4468,14 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
             # 新版 select_dropdown_option 用 text 字段；input 用 text 字段
             input_value = params.get('text', '') if isinstance(params, dict) else str(params)
 
-        # 创建/复用元素（与录制步骤一致：按定位器入库）
+        # 创建/复用元素：主定位器优先；为空时用执行期采集 sidecar 兜底（解决 click 历史缺元素）
         element = None
-        if locator and ui_action in ('click', 'fill', 'hover', 'scroll'):
-            # 「AI生成步骤」：为该步骤匹配执行期采集结果（控件截图 + 备用选择器）
+        if ui_action in ELEMENT_ACTIONS:
             capture = None
             if captures:
-                from .codegen_pipeline_service import _parse_playwright_locator
-                primary_strategy, primary_value = _parse_playwright_locator(locator)
+                primary_strategy, primary_value = ('', '')
+                if locator:
+                    primary_strategy, primary_value = _parse_playwright_locator(locator)
                 capture = _take_ai_capture(
                     captures,
                     capture_used,
@@ -4340,20 +4483,39 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
                     primary_value=primary_value,
                     sequential_idx=capture_seq,
                     el=el,
+                    ui_action=ui_action,
                 )
                 capture_seq += 1
-            element, created = _get_or_create_element_from_locator(
-                project=project,
-                user=user,
-                locator=locator,
-                action=ui_action,
-                page_name=current_page,
-                cache=element_cache,
-                idx=len(mapped),
-                capture=capture,
-            )
-            if created and element:
-                created_ids.append(element.id)
+                # 主定位器为空（或仅裸 tag）时，用采集结果生成可入库的定位表达式
+                if not locator and capture:
+                    locator = locator_expr_from_capture(capture) or ''
+                    if locator:
+                        logger.info(
+                            'AI步骤兜底：动作用采集结果补主定位器 action=%s locator=%s',
+                            ui_action, locator[:120],
+                        )
+                # 主定位器是动态 el-id-* 时，优先换成采集里更稳的 placeholder/role/text
+                elif locator and capture and re.search(r'#el-id-\d+', locator, re.I):
+                    better = locator_expr_from_capture(capture) or ''
+                    if better and better != locator:
+                        logger.info(
+                            'AI步骤优化：动态id主定位器替换为采集定位器 %s → %s',
+                            locator[:80], better[:80],
+                        )
+                        locator = better
+            if locator:
+                element, created = _get_or_create_element_from_locator(
+                    project=project,
+                    user=user,
+                    locator=locator,
+                    action=ui_action,
+                    page_name=current_page,
+                    cache=element_cache,
+                    idx=len(mapped),
+                    capture=capture,
+                )
+                if created and element:
+                    created_ids.append(element.id)
 
         desc = _build_step_description(
             action=ui_action,
@@ -4385,6 +4547,7 @@ def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
     1. UI自动化测试模块「用例管理」列表（ui_test_cases / ui_test_case_steps / ui_elements）；
     2. 主项目「用例库」的 UI自动化页面（testcases，case_type 含 'ui'，并回显 step_details）。
 
+    同一主平台用例只关联一条 UI 用例（hub_testcase 一对一）；重复生成时更新该条步骤，不新建。
     返回 (ui_testcase_id, hub_testcase_id)；无可录制操作时返回 (None, None)。
     """
     if not hub_testcase_id:
@@ -4443,21 +4606,55 @@ def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
         )
         return None, None
 
-    # 2) 创建/更新 UI自动化 TestCase
+    # 2) 创建/更新 UI自动化 TestCase（同一主平台用例只关联一条：优先 hub_testcase FK，兼容旧名称匹配）
     base_name = hub_case.title or 'AI生成步骤'
-    ui_title = f'{base_name}-AI生成步骤'
-    existing_ui = UiTestCase.objects.filter(project=ui_project, name=ui_title).first()
+    ui_title = f'{base_name}-AI生成步骤'[:200]
+    desc = f'由「AI生成步骤」自动录制（源用例：{hub_case.title}）'
+
+    existing_ui = UiTestCase.objects.filter(hub_testcase_id=hub_case.id).first()
+    if not existing_ui:
+        # 兼容历史数据：按命名规则找回后绑定 FK，避免重复生成时再新建
+        existing_ui = UiTestCase.objects.filter(project=ui_project, name=ui_title).first()
+    if not existing_ui and base_name:
+        # 标题微调（如末尾多/少「-」）时，仍回收同前缀的历史 AI 用例
+        existing_ui = (
+            UiTestCase.objects.filter(
+                project=ui_project,
+                hub_testcase__isnull=True,
+                name__endswith='-AI生成步骤',
+                name__startswith=base_name,
+            )
+            .order_by('id')
+            .first()
+        )
+
     if existing_ui:
         UiTestCaseStep.objects.filter(test_case=existing_ui).delete()
         ui_case = existing_ui
+        dirty = []
+        if ui_case.name != ui_title:
+            ui_case.name = ui_title
+            dirty.append('name')
+        if ui_case.description != desc:
+            ui_case.description = desc
+            dirty.append('description')
+        if ui_case.hub_testcase_id != hub_case.id:
+            ui_case.hub_testcase = hub_case
+            dirty.append('hub_testcase')
+        if ui_case.project_id != ui_project.id:
+            ui_case.project = ui_project
+            dirty.append('project')
+        if dirty:
+            ui_case.save(update_fields=dirty + ['updated_at'])
     else:
         ui_case = UiTestCase(
             project=ui_project,
             name=ui_title,
-            description=f'由「AI生成步骤」自动录制（源用例：{hub_case.title}）',
+            description=desc,
             status='draft',
             priority='medium',
             created_by=user,
+            hub_testcase=hub_case,
         )
         ui_case.save()
 
@@ -4734,16 +4931,28 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         enable_gif = request.data.get('enable_gif', True)  # GIF录制开关，默认开启
         # 「用例详情 - AI生成步骤」：关联的主平台测试用例 id，执行完成后把步骤回显到该用例的 UI 自动化页
         hub_testcase_id = request.data.get('hub_testcase_id')
+        # 「AI生成步骤」弹窗确认：是否复用项目登录态（默认否，避免已登录跳过交互导致步骤残缺）
+        auto_login_raw = request.data.get('auto_login', False)
+        if isinstance(auto_login_raw, str):
+            auto_login = auto_login_raw.strip().lower() not in {'0', 'false', 'no', 'off', ''}
+        else:
+            auto_login = bool(auto_login_raw)
+        logger.info(
+            'run_adhoc auto_login=%s (raw=%r) hub_testcase_id=%s',
+            auto_login, auto_login_raw, hub_testcase_id,
+        )
         # 「用例转换」：由「用例详情 - AI生成步骤」发起的临时执行，任务来源固定标记为用例转换
         env_ui_project_id = None
         initial_url = ''
+        auth_base_url = ''  # 静默登录/校验登录态用原始环境地址（可能含 /login）
         if hub_testcase_id:
             task_source = 'case_conversion'
-            # 「AI生成步骤」：解析该用例关联项目的环境配置（base_url 作为初始访问地址；
-            # 登录态在后台执行线程中准备并注入浏览器会话，避免静默登录阻塞本请求）
+            # 「AI生成步骤」：解析该用例关联项目的环境配置（base_url 作为初始访问地址）。
+            # 是否注入 storage_state 由前端弹窗确认的 auto_login 决定。
             env_info = _resolve_hub_testcase_env(hub_testcase_id)
             if env_info and env_info.get('base_url'):
                 initial_url = env_info['base_url']
+                auth_base_url = initial_url
                 env_ui_project_id = env_info.get('ui_project_id')
         ai_storage_state = None
         # 文件模式：前端上传解析出的用例结构，用于构建与右侧明细 1:1 的 planned_tasks
@@ -4771,7 +4980,8 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         # 文件模式：用解析步骤直接生成 planned_tasks，跳过 LLM 重新拆分
         preset_planned_tasks = build_planned_tasks_from_cases(parsed_cases) if parsed_cases else None
 
-        # 「AI生成步骤」：把环境 base_url 拼进任务描述作为初始访问地址，引导 AI 首步直达目标站点
+        # 「AI生成步骤」：把环境 base_url 拼进任务描述作为初始访问地址，引导 AI 首步直达目标站点。
+        # 复用登录态成功后再改写 /login → 业务入口（见后台线程），避免登录态失效时丢了登录页地址。
         if initial_url:
             task_description += (
                 f"\n\n[环境配置] 初始访问地址（项目环境 base_url）: {initial_url}\n"
@@ -4864,14 +5074,70 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 return False
 
             try:
-                # 「AI生成步骤」：后台准备登录态（与 Playwright 录制/执行共用同一份项目级
-                # storage_state；缺失且有环境凭证时 headless 静默登录生成），避免阻塞 HTTP 请求
+                # 「AI生成步骤 / 用例转换」：是否注入登录态由前端弹窗 auto_login 决定。
+                # 复用时可跳过登录加快业务步骤录制；不复用则完整走登录交互，避免 history 只剩 navigate。
+                # 普通 AI 智能测试（非 case_conversion）仍默认复用登录态以加快执行。
                 ai_storage_state = None
                 auth_log = ''
-                if env_ui_project_id and initial_url:
-                    ai_storage_state, auth_log = _ensure_ai_login_state(env_ui_project_id, initial_url)
+                if task_source == 'case_conversion':
+                    if auto_login:
+                        if env_ui_project_id and (auth_base_url or initial_url):
+                            ai_storage_state, auth_log = _ensure_ai_login_state(
+                                env_ui_project_id, auth_base_url or initial_url
+                            )
+                            if not auth_log:
+                                auth_log = (
+                                    '\n[System] 用例转换/AI生成步骤：已选择复用登录态，'
+                                    '但未找到可用登录态，将按步骤自行登录。\n'
+                                )
+                        else:
+                            auth_log = (
+                                '\n[System] 用例转换/AI生成步骤：已选择复用登录态，'
+                                '但未解析到项目环境地址，本次不注入登录态。\n'
+                            )
+                    else:
+                        auth_log = (
+                            '\n[System] 用例转换/AI生成步骤：不复用项目登录态，'
+                            '以便完整录制登录与交互步骤。\n'
+                        )
+                    execution_record.logs = (execution_record.logs or '') + auth_log
+                    try:
+                        execution_record.save(update_fields=['logs'])
+                    except Exception:
+                        pass
+                elif env_ui_project_id and (auth_base_url or initial_url):
+                    ai_storage_state, auth_log = _ensure_ai_login_state(
+                        env_ui_project_id, auth_base_url or initial_url
+                    )
                     if auth_log:
                         execution_record.logs = (execution_record.logs or '') + auth_log
+                        try:
+                            execution_record.save(update_fields=['logs'])
+                        except Exception:
+                            pass
+
+                # 复用登录态成功：改写起始 URL（避免 /login）并强化任务说明，防止 AI 再走登录表单
+                run_task_description = task_description
+                run_initial_url = initial_url
+                if ai_storage_state:
+                    from .auth_state import post_login_start_url
+
+                    raw_url = auth_base_url or initial_url
+                    start_url = post_login_start_url(raw_url) if raw_url else ''
+                    if raw_url and start_url and start_url != raw_url:
+                        run_task_description = run_task_description.replace(raw_url, start_url)
+                        run_initial_url = start_url
+                    elif start_url:
+                        run_initial_url = start_url
+                    run_task_description += (
+                        "\n\n[登录态] 浏览器已注入项目 storage_state，当前会话视为已登录。"
+                        "严禁打开登录页、严禁输入账号/密码；用例中凡涉及访问登录页、填写账号密码、点击登录按钮的子任务，"
+                        "一律直接 mark_task_complete（或 mark_task_skipped）后继续后续业务步骤。"
+                        f"请从已登录业务入口开始：{run_initial_url}\n"
+                    )
+                    if run_initial_url and raw_url and run_initial_url != raw_url:
+                        extra = f"\n[System] AI 起始导航改写为: {run_initial_url}\n"
+                        execution_record.logs = (execution_record.logs or '') + extra
                         try:
                             execution_record.save(update_fields=['logs'])
                         except Exception:
@@ -4968,19 +5234,19 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     capture_recorder.reset()
 
                 history = run_full_process_sync(
-                    task_description,
+                    run_task_description,
                     analysis_callback=on_analysis_complete,
                     step_callback=on_step_update,
                     should_stop=should_stop_async,  # 传递异步版本
                     execution_mode=execution_mode,
                     enable_gif=enable_gif,  # 传递GIF录制开关
-                    case_name=task_description[:50] if task_description else "Adhoc Task",  # 传递用例名称用于GIF文件命名
+                    case_name=run_task_description[:50] if run_task_description else "Adhoc Task",  # 传递用例名称用于GIF文件命名
                     screencast_group=f"ui_ai_{execution_record.id}",  # 实时投屏：与 AI 探索测试同一套推送模式
                     planned_tasks=preset_planned_tasks,  # 文件模式：与右侧用例明细 1:1，跳过 LLM 拆分
                     on_agent_ready=on_agent_ready,
-                    # 「AI生成步骤」：复用项目环境登录态 + 初始访问地址
+                    # 「AI生成步骤」：复用项目环境登录态 + 初始访问地址（已去登录页）
                     storage_state=ai_storage_state,
-                    initial_url=initial_url,
+                    initial_url=run_initial_url,
                     # 「AI生成步骤」：执行期间采集控件截图与备用选择器（与手动录制一致）
                     capture_recorder=capture_recorder,
                 )

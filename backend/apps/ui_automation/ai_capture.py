@@ -355,6 +355,176 @@ def load_ai_captures(execution_id: Any) -> list[dict[str, Any]]:
         return []
 
 
+# 主定位器为空时，按动作类型优先匹配的 tag（用于消费 sidecar）
+_ACTION_PREFERRED_TAGS = {
+    'click': ('button', 'a'),
+    'fill': ('input', 'textarea', 'select'),
+    'hover': ('button', 'a', 'div', 'span'),
+    'scroll': ('div', 'section', 'main', 'body'),
+    'assert': ('button', 'a', 'div', 'span', 'h1', 'h2', 'h3', 'p'),
+}
+
+# 从采集定位器生成 Playwright 表达式时的策略优先级（越靠前越稳）
+_CAPTURE_LOCATOR_PREFERENCE = (
+    'test-id', 'placeholder', 'name', 'label', 'role', 'text', 'css', 'id', 'xpath', 'class',
+)
+
+# Element Plus 等框架生成的动态 id，优先让位给 placeholder/role/text
+_DYNAMIC_ID_RE = re.compile(r'^el-id-\d+', re.I)
+
+
+def _is_weak_or_dynamic_id(value: str) -> bool:
+    v = (value or '').strip()
+    if not v:
+        return True
+    if _DYNAMIC_ID_RE.match(v):
+        return True
+    return False
+
+
+def _strategy_value_to_playwright(strategy: str, value: str) -> str:
+    """把采集 sidecar 的 (strategy, value) 转成可被 _parse_playwright_locator 解析的表达式。"""
+    s = (strategy or '').strip().lower()
+    v = (value or '').strip()
+    if not s or not v:
+        return ''
+
+    def q(text: str) -> str:
+        return str(text).replace('\\', '\\\\').replace('"', '\\"')
+
+    if s in ('test-id', 'testid', 'data-testid'):
+        return f'page.get_by_test_id("{q(v)}")'
+    if s == 'id':
+        return f'page.locator("#{q(v)}")'
+    if s == 'placeholder':
+        return f'page.get_by_placeholder("{q(v)}")'
+    if s == 'label':
+        return f'page.get_by_label("{q(v)}")'
+    if s == 'text':
+        return f'page.get_by_text("{q(v)}")'
+    if s == 'title':
+        return f'page.get_by_title("{q(v)}")'
+    if s == 'name':
+        return f'page.locator("[name={q(v)}]")'
+    if s == 'role':
+        # button[name="登 录"] / button
+        m = re.match(r'''^(\w+)\s*\[\s*name\s*=\s*["']([^"']*)["']\s*\]$''', v, re.I)
+        if m:
+            return f'page.get_by_role("{q(m.group(1))}", name="{q(m.group(2))}")'
+        return f'page.get_by_role("{q(v)}")'
+    if s == 'css':
+        return f'page.locator("{q(v)}")'
+    if s == 'xpath':
+        xp = v if v.startswith('/') or v.startswith('(') or v.startswith('xpath=') else f'/{v}'
+        if xp.startswith('xpath='):
+            xp = xp[6:]
+        return f'page.locator("xpath={q(xp)}")'
+    if s == 'class':
+        classes = [c for c in v.split() if c]
+        if not classes:
+            return ''
+        return f'page.locator(".{".".join(_css_escape(c) for c in classes)}")'
+    return f'page.locator("{q(v)}")'
+
+
+def locator_expr_from_capture(capture: dict[str, Any] | None) -> str:
+    """从采集结果挑选最稳定位器，生成 Playwright 表达式；无可用定位器返回空串。"""
+    if not capture:
+        return ''
+    from .codegen_pipeline_service import _is_junk_capture, _is_junk_capture_locator
+
+    if _is_junk_capture(capture):
+        return ''
+
+    by_strategy: dict[str, str] = {}
+    for loc in capture.get('locators') or []:
+        strategy = (loc.get('strategy') or '').strip().lower()
+        value = (loc.get('value') or '').strip()
+        if not strategy or not value:
+            continue
+        if _is_junk_capture_locator(strategy, value):
+            continue
+        # id：跳过动态 el-id-*，留给 placeholder/role 等更稳策略
+        if strategy == 'id' and _is_weak_or_dynamic_id(value):
+            continue
+        # role：优先带 name 的
+        if strategy == 'role':
+            prev = by_strategy.get('role') or ''
+            if 'name=' in value or 'name=' not in prev:
+                by_strategy['role'] = value
+            continue
+        # css：跳过过于宽泛的单 class（如 .el-input__inner）
+        if strategy == 'css':
+            if value in ('.el-input__inner', 'input.el-input__inner', 'button', 'input', 'a'):
+                continue
+            if strategy not in by_strategy:
+                by_strategy[strategy] = value
+            continue
+        if strategy not in by_strategy:
+            by_strategy[strategy] = value
+
+    for strategy in _CAPTURE_LOCATOR_PREFERENCE:
+        if strategy in by_strategy:
+            expr = _strategy_value_to_playwright(strategy, by_strategy[strategy])
+            if expr:
+                return expr
+    return ''
+
+
+def _take_ai_capture_by_action(
+    captures: list[dict[str, Any]],
+    used: set[int],
+    *,
+    ui_action: str,
+    sequential_idx: int,
+) -> dict[str, Any] | None:
+    """主定位器缺失时：按动作偏好 tag 取未使用 capture，再顺序回退；仍无则复用已用同 tag。"""
+    from .codegen_pipeline_service import _is_junk_capture
+
+    if not captures:
+        return None
+
+    preferred_tags = _ACTION_PREFERRED_TAGS.get((ui_action or '').lower(), ())
+
+    def _tag_ok(cap: dict[str, Any]) -> bool:
+        if not preferred_tags:
+            return True
+        tag = (cap.get('tag') or '').lower()
+        return tag in preferred_tags
+
+    # 1) 未使用 + tag 匹配
+    for i, cap in enumerate(captures):
+        if i in used or _is_junk_capture(cap):
+            continue
+        if _tag_ok(cap):
+            used.add(i)
+            return cap
+
+    # 2) 顺序位未使用
+    if 0 <= sequential_idx < len(captures) and sequential_idx not in used:
+        cap = captures[sequential_idx]
+        if not _is_junk_capture(cap):
+            used.add(sequential_idx)
+            return cap
+
+    # 3) 任意未使用
+    for i, cap in enumerate(captures):
+        if i in used or _is_junk_capture(cap):
+            continue
+        used.add(i)
+        return cap
+
+    # 4) 复用已消费的同 tag（同按钮二次点击等）：按偏好顺序精确匹配 tag
+    for want in preferred_tags:
+        for i, cap in enumerate(captures):
+            if _is_junk_capture(cap):
+                continue
+            if (cap.get('tag') or '').lower() == want:
+                used.add(i)
+                return cap
+    return None
+
+
 def _take_ai_capture(
     captures: list[dict[str, Any]],
     used: set[int],
@@ -363,9 +533,11 @@ def _take_ai_capture(
     primary_value: str,
     sequential_idx: int,
     el: Any = None,
+    ui_action: str = '',
 ) -> dict[str, Any] | None:
     """为步骤挑选采集结果：交互元素精确匹配 → 主定位器精确命中 → 启发式顺序匹配。
 
+    主定位器为空时：按动作 tag 偏好消费 sidecar（解决 click 历史缺 interacted_element）。
     前两级允许复用已消费的 capture（同一元素多次交互只采集一份）。
     """
     from .codegen_pipeline_service import (
@@ -398,12 +570,17 @@ def _take_ai_capture(
             used.add(best_i)
             return captures[best_i]
 
-    # 3) 与手动录制一致的启发式匹配（只取未使用的 capture）
-    return _take_best_capture(
-        captures, used,
-        primary_strategy=primary_strategy,
-        primary_value=primary_value,
-        sequential_idx=sequential_idx,
+        # 3) 与手动录制一致的启发式匹配（只取未使用的 capture）
+        return _take_best_capture(
+            captures, used,
+            primary_strategy=primary_strategy,
+            primary_value=primary_value,
+            sequential_idx=sequential_idx,
+        )
+
+    # 4) 主定位器为空：按动作类型从 sidecar 兜底取 capture
+    return _take_ai_capture_by_action(
+        captures, used, ui_action=ui_action, sequential_idx=sequential_idx,
     )
 
 
@@ -452,11 +629,47 @@ if __name__ == '__main__':
     assert ('id', 'login-btn') == next((s, v) for s, v in _pairs if s == 'id')
 
     # 同一元素重复交互 → 去重并保留一份
-    _caps = [{'locators': _locs, 'screenshot_b64': '', 'x_path': _FakeEl.x_path}]
+    _caps = [{'locators': _locs, 'screenshot_b64': '', 'x_path': _FakeEl.x_path, 'tag': 'button'}]
     _used: set[int] = set()
     _first = _take_ai_capture(_caps, _used, primary_strategy='id', primary_value='login-btn', sequential_idx=0, el=_FakeEl())
     assert _first is _caps[0]
     # 已消费但 x_path 精确匹配 → 复用（同元素二次交互场景）
     _again = _take_ai_capture(_caps, _used, primary_strategy='id', primary_value='login-btn', sequential_idx=0, el=_FakeEl())
     assert _again is _caps[0]
-    print('ai_capture selfcheck ok')
+
+    locator_expr_from_capture = _mod.locator_expr_from_capture
+    # 主定位器为空时按 click+button tag 兜底
+    _used2: set[int] = set()
+    _cap_btn = _take_ai_capture(
+        _caps, _used2, primary_strategy='', primary_value='', sequential_idx=0, ui_action='click',
+    )
+    assert _cap_btn is not None and _cap_btn.get('tag') == 'button'
+
+    # 登录按钮采集：应产出 role，而非空
+    _login_cap = {
+        'tag': 'button',
+        'locators': [
+            {'strategy': 'class', 'value': 'el-button el-button--primary login-page__submit'},
+            {'strategy': 'css', 'value': 'button.el-button.login-page__submit'},
+            {'strategy': 'role', 'value': 'button[name="登 录"]'},
+            {'strategy': 'text', 'value': '登 录'},
+            {'strategy': 'xpath', 'value': '/html/body/div/form/button'},
+        ],
+        'x_path': 'html/body/div/form/button',
+    }
+    _login_expr = locator_expr_from_capture(_login_cap)
+    assert '登 录' in _login_expr and 'get_by_role' in _login_expr, _login_expr
+
+    # 输入框：跳过动态 el-id，优先 placeholder
+    _input_cap = {
+        'tag': 'input',
+        'locators': [
+            {'strategy': 'id', 'value': 'el-id-8836-6'},
+            {'strategy': 'placeholder', 'value': '请输入用户名'},
+            {'strategy': 'css', 'value': '.el-input__inner'},
+        ],
+    }
+    _input_expr = locator_expr_from_capture(_input_cap)
+    assert '请输入用户名' in _input_expr, _input_expr
+
+    print('ai_capture selfcheck ok', _login_expr, _input_expr)

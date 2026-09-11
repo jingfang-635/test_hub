@@ -144,6 +144,50 @@ def _normalize_url(url: str) -> str:
     return target
 
 
+# 路径含这些片段时视为登录页（复用登录态时应改打开站内首页）
+_LOGIN_PATH_MARKERS = (
+    '/login', '/signin', '/sign-in', '/sign_in', '/log-in', '/log_in',
+    '/auth/login', '/user/login', '/account/login', '/passport/login',
+)
+
+
+def is_login_url(url: str) -> bool:
+    """判断 URL 是否看起来像登录入口页。"""
+    target = _normalize_url(url)
+    if not target:
+        return False
+    try:
+        from urllib.parse import urlparse
+
+        path = (urlparse(target).path or '').rstrip('/').lower()
+    except Exception:  # noqa: BLE001
+        path = target.lower()
+    if not path or path == '':
+        return False
+    for marker in _LOGIN_PATH_MARKERS:
+        if path == marker or path.endswith(marker):
+            return True
+    # 末段为 login/signin 等
+    tail = path.rsplit('/', 1)[-1]
+    return tail in {'login', 'signin', 'sign-in', 'log-in', 'auth'}
+
+
+def post_login_start_url(url: str) -> str:
+    """复用登录态时的起始地址：若 base_url 是登录页，改为站点根路径，避免再落到登录表单。"""
+    target = _normalize_url(url)
+    if not target:
+        return ''
+    if not is_login_url(target):
+        return target
+    try:
+        from urllib.parse import urlparse, urlunparse
+
+        parsed = urlparse(target)
+        return urlunparse((parsed.scheme, parsed.netloc, '/', '', '', ''))
+    except Exception:  # noqa: BLE001
+        return target.rstrip('/') + '/'
+
+
 async def _visible_password(page: Any) -> Any | None:
     loc = page.locator('input[type="password"]')
     count = await loc.count()
@@ -330,6 +374,8 @@ async def _ensure_auth_async(
 
     storage = load_path_if_exists(auth_path)
     target = _normalize_url(base_url)
+    # 探测/登录用原始地址；复用成功后业务入口用去登录页后的地址
+    probe_url = post_login_start_url(target) if target else ''
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -340,15 +386,24 @@ async def _ensure_auth_async(
             context = await browser.new_context(**ctx_opts)
             page = await context.new_page()
 
-            if target:
+            async def _goto(url: str) -> None:
+                if not url:
+                    return
                 try:
-                    await page.goto(target, wait_until='domcontentloaded', timeout=30000)
+                    await page.goto(url, wait_until='domcontentloaded', timeout=30000)
                 except Exception as exc:  # noqa: BLE001
-                    logger.warning('ensure auth goto failed: %s', exc)
+                    logger.warning('ensure auth goto failed (%s): %s', url, exc)
+
+            # 有已存登录态时：优先打开业务首页探测，避免 /login 页永远有密码框导致误判失效
+            if storage:
+                await _goto(probe_url or target)
+            elif target:
+                await _goto(target)
 
             need_login = not storage
-            if storage and target:
+            if storage and (probe_url or target):
                 try:
+                    # 只在业务入口探测；勿用 /login 判断（登录页必然有密码框）
                     need_login = await looks_logged_out(page)
                 except Exception:  # noqa: BLE001
                     need_login = True
@@ -363,20 +418,44 @@ async def _ensure_auth_async(
 
             if not username or not password:
                 logger.warning('ensure auth: logged out / missing state, no credentials')
+                # 已确认未登录且无法静默重登：不返回失效态，避免上层误报「免登录」
+                if storage and need_login:
+                    invalidate(auth_path)
+                    return None
                 return storage
 
-            if not target:
+            login_page_url = target if (target and is_login_url(target)) else (target or probe_url)
+            if not login_page_url:
                 logger.warning('ensure auth: need login but no base_url')
-                return storage
+                return None if need_login else storage
+
+            # 静默登录应在登录页完成（探测阶段可能停在业务首页）
+            try:
+                current_url = page.url or ''
+            except Exception:  # noqa: BLE001
+                current_url = ''
+            if login_page_url and not is_login_url(current_url):
+                await _goto(login_page_url)
 
             ok = await try_auto_login(page, username, password)
             if ok:
+                # 登录成功后再探一下业务首页，确认会话可用
+                if probe_url and probe_url != login_page_url:
+                    await _goto(probe_url)
+                    try:
+                        if await looks_logged_out(page):
+                            logger.warning('ensure auth: login ok but still logged out on %s', probe_url)
+                            return None
+                    except Exception:  # noqa: BLE001
+                        pass
                 saved = await save_storage_state(context, auth_path)
                 logger.info('ensure auth: silent login saved=%s path=%s', saved, auth_path)
-                return str(auth_path) if saved else storage
+                return str(auth_path) if saved else None
 
             logger.warning('ensure auth: silent login failed path=%s', auth_path)
-            return storage
+            # 失效态勿继续注入：否则 AI 仍报免登录却落在登录表单
+            invalidate(auth_path)
+            return None
         finally:
             await browser.close()
 
@@ -481,4 +560,9 @@ if __name__ == '__main__':
     assert is_login_related_step({'description': '输入密码', 'element_data': {}})
     assert not is_login_related_step({'description': '点击搜索', 'element_data': {}})
     assert '请输入手机号/用户名' in _USER_FIELD_NAMES
+    assert is_login_url('https://cladmin.test.xinjikang.cn:8443/login')
+    assert post_login_start_url('https://cladmin.test.xinjikang.cn:8443/login') == (
+        'https://cladmin.test.xinjikang.cn:8443/'
+    )
+    assert post_login_start_url('https://example.com/app/home') == 'https://example.com/app/home'
     print('auth_state selfcheck ok')

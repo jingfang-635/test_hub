@@ -1929,21 +1929,32 @@ class BaseBrowserAgent:
         self._ai_initial_url = (initial_url or '').strip()
         browser_profile = self._create_browser_profile(storage_state=storage_state)
 
-        # 复用项目登录态时，登录已由 storage_state 注入完成，提示 AI 无需再执行登录类子任务
+        # 复用项目登录态：强化 prompt；登录子任务已在 run_full_process 中预完成
+        skipped_login_ids = []
         if storage_state and planned_tasks:
-            login_task_ids = []
             for t in planned_tasks:
                 desc = str(t.get('description', '') or '')
-                if any(kw in desc for kw in ('登录', '登 录', '输入账号', '输入密码', '填写账号', '填写密码')):
-                    login_task_ids.append(str(t.get('id')))
-            if login_task_ids:
-                final_task += (
-                    "\n\nLOGIN STATE NOTE: The browser session ALREADY has a valid login session "
-                    f"(storage_state injected). Sub-tasks {'、'.join(login_task_ids)} about opening the login "
-                    "page or entering username/password are ALREADY FULFILLED by the initial logged-in state. "
-                    "Do NOT navigate to the login page or type any credentials. If such a sub-task appears, "
-                    "directly call mark_task_complete for it and continue with the next sub-task."
-                )
+                if str(t.get('status', '')).lower() == 'completed' and any(
+                    kw in desc for kw in ('登录', '登 录', '输入账号', '输入密码', '填写账号', '填写密码', 'login', 'Login', '密码', '账号')
+                ):
+                    skipped_login_ids.append(str(t.get('id')))
+
+        if storage_state:
+            login_note_ids = '、'.join(skipped_login_ids) if skipped_login_ids else '（登录相关）'
+            start_hint = self._ai_initial_url or 'the already-authenticated app entry'
+            final_task += (
+                "\n\nLOGIN STATE NOTE: The browser session ALREADY has a valid login session "
+                f"(storage_state injected). Sub-tasks {login_note_ids} about opening the login "
+                "page or entering username/password are ALREADY FULFILLED. "
+                "Do NOT navigate to any /login URL. Do NOT type credentials. "
+                f"Start from {start_hint} and continue with non-login business steps only. "
+                "If a login-like sub-task still appears pending, call mark_task_complete immediately."
+            )
+
+        # 显式首屏导航：避免 browser-use 从任务文本抽出 /login；有登录态时打开业务入口
+        initial_actions = None
+        if self._ai_initial_url:
+            initial_actions = [{'navigate': {'url': self._ai_initial_url, 'new_tab': False}}]
 
         # browser-use 原生停止回调：在 step 内部（LLM 前后、动作之间）检查，比仅 on_step_end 更快
         async def register_should_stop_callback():
@@ -1962,6 +1973,9 @@ class BaseBrowserAgent:
             step_timeout=90,  # 设置每步超时为90秒
             generate_gif=self.enable_gif,  # 根据开关决定是否生成GIF
             register_should_stop_callback=register_should_stop_callback if should_stop else None,
+            initial_actions=initial_actions,
+            # 已手动指定 initial_actions 时关闭自动抽 URL，防止再打开登录页
+            directly_open_url=not bool(initial_actions),
         )
         agent._task_was_done = False
         agent._pending_status_task_id = None
@@ -2303,6 +2317,33 @@ class BaseBrowserAgent:
 
         if await self._eval_should_stop(should_stop):
             raise KeyboardInterrupt("User requested stop")
+
+        # 复用登录态：分析完成后立刻把登录类子任务标为已完成，再通知前端
+        if storage_state and planned_tasks:
+            from .auth_state import is_login_related_step
+
+            def _is_login_subtask(desc: str) -> bool:
+                text = str(desc or '')
+                # 避免把「已登录/登录态」类业务描述误判为登录步骤
+                if any(x in text for x in ('已登录', '登录态', '登录状态', '免登录')):
+                    if not any(
+                        k in text
+                        for k in ('输入密码', '输入账号', '填写密码', '填写账号', '点击登录', '打开登录', '访问登录')
+                    ):
+                        return False
+                return is_login_related_step({'description': text, 'element_data': {}})
+
+            skipped = []
+            for t in planned_tasks:
+                desc = str(t.get('description', '') or '')
+                status = str(t.get('status', 'pending') or 'pending').lower()
+                if status not in {'pending', 'in_progress'}:
+                    continue
+                if _is_login_subtask(desc):
+                    t['status'] = 'completed'
+                    skipped.append(str(t.get('id')))
+            if skipped:
+                logger.info('♻️ storage_state: pre-completed login sub-tasks before run: %s', skipped)
 
         if analysis_callback:
             if asyncio.iscoroutinefunction(analysis_callback):

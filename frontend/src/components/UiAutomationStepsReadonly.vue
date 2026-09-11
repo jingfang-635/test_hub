@@ -3,7 +3,7 @@
     <div class="steps-toolbar">
       <div class="steps-toolbar-left">
         <h4>{{ t('uiAutomation.testCase.testSteps') }}</h4>
-        <button type="button" class="expand-all-btn" @click="toggleAllSteps">
+        <button type="button" class="expand-all-btn" @click.stop="toggleAllSteps">
           <span>{{ allStepsExpanded ? t('uiAutomation.testCase.foldAll') : t('uiAutomation.testCase.expandAll') }}</span>
           <el-icon>
             <component :is="allStepsExpanded ? ArrowUp : ArrowDown" />
@@ -230,27 +230,44 @@ const props = defineProps({
 })
 
 const { t } = useI18n()
-const stepExpanded = ref({})
 
+/** 按索引记录展开态；用数组避免 object 键类型导致的误判 */
+const stepExpanded = ref([])
+
+const stepsIdentity = (steps) =>
+  (steps || []).map((s, i) => String(s?.id ?? s?.step_number ?? `i${i}`)).join('|')
+
+/**
+ * 仅在步骤集合变化（换用例 / 增删步骤）时重置展开态。
+ * 同一批步骤被父组件重新赋值（如 AI 回显轮询刷新）时保留展开，避免「展开全部」后立刻收起。
+ */
 watch(
-  () => props.steps,
-  () => { stepExpanded.value = {} },
-  { deep: false }
+  () => stepsIdentity(props.steps),
+  (nextId, prevId) => {
+    if (nextId === prevId) return
+    stepExpanded.value = (props.steps || []).map(() => false)
+  },
+  { immediate: true }
 )
 
 const allStepsExpanded = computed(() => {
-  return props.steps.length > 0 && props.steps.every((_, i) => stepExpanded.value[i])
+  const steps = props.steps || []
+  return (
+    steps.length > 0 &&
+    stepExpanded.value.length === steps.length &&
+    stepExpanded.value.every(Boolean)
+  )
 })
 
 const toggleStep = (index) => {
-  stepExpanded.value[index] = !stepExpanded.value[index]
+  const next = stepExpanded.value.slice()
+  next[index] = !next[index]
+  stepExpanded.value = next
 }
 
 const toggleAllSteps = () => {
   const target = !allStepsExpanded.value
-  const next = {}
-  props.steps.forEach((_, i) => { next[i] = target })
-  stepExpanded.value = next
+  stepExpanded.value = (props.steps || []).map(() => target)
 }
 
 const actionTypeOptions = computed(() => [

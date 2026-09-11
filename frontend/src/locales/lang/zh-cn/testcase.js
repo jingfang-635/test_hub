@@ -37,6 +37,10 @@ export default {
     aiGenerateStepsTodo: 'AI生成步骤功能开发中',
     aiGenerateStepsStarted: 'AI 任务已启动，执行完成后步骤将自动回显',
     aiGenerateStepsFailed: 'AI生成步骤失败',
+    aiGenerateStepsReuseAuthTitle: '复用登录态',
+    aiGenerateStepsReuseAuthHint: '是否复用项目已保存的登录态？<br/>· 复用：跳过登录，适合已登录后的业务步骤<br/>· 不复用：按用例完整走登录与交互，便于录制登录相关步骤',
+    aiGenerateStepsReuseAuthYes: '复用',
+    aiGenerateStepsReuseAuthNo: '不复用',
     aiGeneratedSteps: 'AI 生成步骤',
     aiGeneratedStepsTip: '以下步骤由 AI 智能测试执行后自动生成并回显',
     preconditions: '前置条件',
@@ -148,7 +152,7 @@ export default {
 
     // Validation
     titleRequired: '请输入用例标题',
-    titleLength: '标题长度在 5 到 500 个字符',
+    titleLength: '标题长度不能超过 500 个字符',
     expectedResultRequired: '请输入预期结果',
     stepsRequired: '请输入操作步骤',
     stepsMaxLength: '操作步骤不能超过1000个字符',

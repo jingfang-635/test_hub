@@ -611,6 +611,15 @@ class TestCase(models.Model):
     name = models.CharField(max_length=200, verbose_name='用例名称')
     description = models.TextField(blank=True, verbose_name='用例描述')
     project = models.ForeignKey(UiProject, on_delete=models.CASCADE, related_name='test_cases', verbose_name='所属项目')
+    # 「AI生成步骤」：与主平台用例一对一关联；重复生成时更新本条，不新建
+    hub_testcase = models.OneToOneField(
+        'testcases.TestCase',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ui_automation_case',
+        verbose_name='关联主平台用例',
+    )
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='draft', verbose_name='状态')
     priority = models.CharField(max_length=10, choices=PRIORITY_CHOICES, default='medium', verbose_name='优先级')
     created_by = models.ForeignKey(User, on_delete=models.CASCADE, related_name='created_test_cases', verbose_name='创建人')

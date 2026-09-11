@@ -263,8 +263,8 @@ class TestExecutor:
             )
             case_executions[case_data['id']] = case_execution
 
-        # 整个套件共用一个浏览器/上下文，连续执行以复用登录态
-        print(f"准备执行 {len(test_cases_data)} 个测试用例（复用浏览器会话）")
+        # 整个套件共用一个浏览器/上下文：用例之间不关窗，仅套件全部结束后关闭
+        print(f"准备执行 {len(test_cases_data)} 个测试用例（复用同一浏览器窗口）")
 
         with sync_playwright() as p:
             browser = None
@@ -287,8 +287,32 @@ class TestExecutor:
                     user_agent='Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/119.0.0.0 Safari/537.36'
                 )
                 self.current_page = self.context.new_page()
-                print(f"✓ 浏览器已启动（将复用于所有用例）\n")
+                print(f"✓ 浏览器已启动（套件内所有用例共用此窗口，单条结束不关闭）\n")
+            except Exception as e:
+                print(f"✗ 浏览器启动失败: {str(e)}")
+                for case_data in test_cases_data:
+                    self.results.append({
+                        'test_case_id': case_data['id'],
+                        'test_case_name': case_data['name'],
+                        'status': 'failed',
+                        'steps': [],
+                        'error': f"浏览器启动失败: {str(e)}",
+                        'start_time': datetime.now().isoformat(),
+                        'end_time': datetime.now().isoformat(),
+                        'screenshots': []
+                    })
+                    failed += 1
+                    case_execution = case_executions[case_data['id']]
+                    case_execution.status = 'failed'
+                    case_execution.finished_at = timezone.now()
+                    case_execution.execution_time = 0
+                    case_execution.error_message = f"浏览器启动失败: {str(e)}"
+                    case_execution.save()
+                duration = time.time() - start_time
+                self.update_execution_result('FAILED', passed, failed, skipped, duration)
+                return
 
+            try:
                 for i, case_data in enumerate(test_cases_data, 1):
                     print(f"\n{'=' * 60}")
                     print(f"正在执行第 {i}/{len(test_cases_data)} 个用例: {case_data['name']}")
@@ -300,6 +324,9 @@ class TestExecutor:
                     case_execution.save()
 
                     try:
+                        # 用例间若页面被关闭，在同一 browser/context 中恢复 page，不重启浏览器
+                        self._ensure_shared_playwright_page()
+
                         # 仅首用例导航到项目环境 base_url；后续用例沿用当前页面与登录态
                         from .codegen_service import codegen_recorder
                         suite_base_url = codegen_recorder._resolve_project_base_url(
@@ -341,6 +368,8 @@ class TestExecutor:
                                 ).total_seconds()
                                 case_execution.error_message = f"导航到基础URL失败: {str(e)}"
                                 case_execution.save()
+                                if i < len(test_cases_data):
+                                    print(f"→ 保持浏览器窗口，继续执行下一用例\n")
                                 continue
 
                         case_result = self.execute_test_case_playwright_no_db(case_data)
@@ -381,35 +410,26 @@ class TestExecutor:
                             'screenshots': []
                         })
                         failed += 1
-                        case_execution.status = 'failed'
-                        case_execution.finished_at = timezone.now()
-                        case_execution.execution_time = (
-                            case_execution.finished_at - case_execution.started_at
-                        ).total_seconds()
-                        case_execution.error_message = f"用例执行异常: {str(e)}"
-                        case_execution.save()
+                        try:
+                            case_execution.status = 'failed'
+                            case_execution.finished_at = timezone.now()
+                            case_execution.execution_time = (
+                                case_execution.finished_at - case_execution.started_at
+                            ).total_seconds()
+                            case_execution.error_message = f"用例执行异常: {str(e)}"
+                            case_execution.save()
+                        except Exception as save_err:
+                            print(f"⚠️  更新用例执行记录失败: {save_err}")
 
-            except Exception as e:
-                print(f"✗ 浏览器启动失败: {str(e)}")
-                for case_data in test_cases_data:
-                    self.results.append({
-                        'test_case_id': case_data['id'],
-                        'test_case_name': case_data['name'],
-                        'status': 'failed',
-                        'steps': [],
-                        'error': f"浏览器启动失败: {str(e)}",
-                        'start_time': datetime.now().isoformat(),
-                        'end_time': datetime.now().isoformat(),
-                        'screenshots': []
-                    })
-                    failed += 1
-                    case_execution = case_executions[case_data['id']]
-                    case_execution.status = 'failed'
-                    case_execution.finished_at = timezone.now()
-                    case_execution.execution_time = 0
-                    case_execution.error_message = f"浏览器启动失败: {str(e)}"
-                    case_execution.save()
+                    # 单条用例结束后不关闭窗口；仅提示继续
+                    if i < len(test_cases_data):
+                        try:
+                            alive_url = self.current_page.url if self.current_page and not self.current_page.is_closed() else '(page closed)'
+                        except Exception:
+                            alive_url = '(unknown)'
+                        print(f"→ 保持浏览器窗口，继续执行下一用例 | url={alive_url}\n")
             finally:
+                # 仅在套件全部用例跑完（或中途不可恢复）后关闭一次
                 if browser:
                     try:
                         browser.close()
@@ -420,6 +440,179 @@ class TestExecutor:
         duration = time.time() - start_time
         status = 'SUCCESS' if failed == 0 else 'FAILED'
         self.update_execution_result(status, passed, failed, skipped, duration)
+
+    def _ensure_shared_playwright_page(self):
+        """确保套件仍持有可用 page；若页/标签被关掉，在同一 context 内新建，不重启浏览器。"""
+        context = getattr(self, 'context', None)
+        if context is None:
+            raise RuntimeError('套件浏览器上下文不存在，无法继续执行')
+
+        page = getattr(self, 'current_page', None)
+        try:
+            if page is not None and not page.is_closed():
+                try:
+                    page.bring_to_front()
+                except Exception:
+                    pass
+                return
+        except Exception:
+            page = None
+
+        # 优先复用 context 中仍打开的标签
+        try:
+            open_pages = [p for p in context.pages if not p.is_closed()]
+        except Exception:
+            open_pages = []
+
+        if open_pages:
+            self.current_page = open_pages[-1]
+            try:
+                self.current_page.bring_to_front()
+            except Exception:
+                pass
+            print(f"⚠️  当前页已关闭，已切回同窗口已有标签页: {self.current_page.url}")
+            return
+
+        self.current_page = context.new_page()
+        print("⚠️  当前页已关闭，已在同一浏览器窗口新建标签页（未重启浏览器）")
+        # 尽量回到项目首页，避免空白页导致后续步骤失败
+        try:
+            from .codegen_service import codegen_recorder
+            base_url = codegen_recorder._resolve_project_base_url(
+                getattr(self.test_suite, 'project_id', None)
+            )
+            if base_url:
+                self.current_page.goto(base_url, wait_until='domcontentloaded', timeout=30000)
+                print(f"✓ 已在共用窗口重新打开: {base_url}")
+        except Exception as e:
+            print(f"⚠️  恢复页面导航失败: {e}")
+
+    def _resolve_action_timeout_ms(self, step_data):
+        """与单用例 PlaywrightTestEngine 对齐：优先元素 wait_timeout(秒)，否则步骤 wait_time(毫秒)。"""
+        element = step_data.get('element') or {}
+        element_wait = element.get('wait_timeout')
+        if element_wait is not None and element_wait > 0:
+            return int(float(element_wait) * 1000)
+        wait_time = step_data.get('wait_time') or 0
+        try:
+            wait_time = int(wait_time)
+        except (TypeError, ValueError):
+            wait_time = 0
+        if wait_time > 0:
+            return wait_time
+        return 5000
+
+    def _build_selector_from_strategy(self, strategy, value):
+        """把定位策略转为 Playwright selector 字符串。"""
+        strategy = (strategy or '').strip().lower()
+        value = (value or '').strip()
+        if not value:
+            return ''
+        if strategy in ['css', 'css selector']:
+            return value
+        if strategy == 'xpath':
+            return value if value.startswith('xpath=') else f'xpath={value}'
+        if strategy == 'id':
+            return value if value.startswith('#') else f'#{value}'
+        if strategy == 'name':
+            return f'[name="{value}"]'
+        if strategy == 'text':
+            return value if value.startswith('text=') else f'text={value}'
+        if strategy == 'placeholder':
+            return f'[placeholder="{value}"]'
+        if strategy == 'label':
+            return f'[aria-label="{value}"]'
+        if strategy == 'title':
+            return f'[title="{value}"]'
+        if strategy == 'role':
+            return value if value.startswith('role=') else f'role={value}'
+        if strategy in ['class', 'class name']:
+            classes = [c.strip() for c in value.split() if c.strip()]
+            if value.startswith('.'):
+                return value
+            return '.' + '.'.join(classes) if classes else value
+        return value
+
+    def _locator_candidates_for_element(self, element):
+        """主定位器 + 备用定位器（与单用例引擎一致，主定位失败时回退）。"""
+        candidates = []
+        seen = set()
+
+        def _add(strategy, value):
+            strategy = (strategy or '').strip()
+            value = (value or '').strip()
+            if not strategy or not value:
+                return
+            key = (strategy.lower(), value)
+            if key in seen:
+                return
+            # 过滤 Playwright Inspector 遮罩
+            low = value.lower()
+            if 'x-pw-glass' in low or 'playwright-inspector' in low:
+                return
+            selector = self._build_selector_from_strategy(strategy, value)
+            if not selector:
+                return
+            seen.add(key)
+            candidates.append({
+                'strategy': strategy,
+                'value': value,
+                'selector': selector,
+            })
+
+        _add(element.get('locator_strategy'), element.get('locator_value'))
+        for backup in element.get('backup_locators') or []:
+            if isinstance(backup, dict):
+                _add(backup.get('strategy'), backup.get('value'))
+        return candidates
+
+    def _locator_for_action(self, selector):
+        """多匹配时优先可见元素，避免点到隐藏节点导致超时。"""
+        loc = self.current_page.locator(selector)
+        try:
+            visible = loc.locator('visible=true')
+            if visible.count() > 0:
+                return visible.first
+        except Exception:
+            pass
+        return loc.first
+
+    def _run_action_with_backups(self, element, timeout_ms, action_fn):
+        """依次尝试主/备用定位器执行 action_fn(locator, timeout_ms)。
+
+        Returns:
+            (strategy, value, selector) on success; raises last error on failure.
+        """
+        candidates = self._locator_candidates_for_element(element)
+        if not candidates:
+            raise RuntimeError('元素缺少可用定位器')
+
+        force_action = bool(element.get('force_action'))
+        last_error = None
+        for idx, cand in enumerate(candidates):
+            # 主定位用满超时；备用稍短，加快回退
+            attempt_timeout = timeout_ms if idx == 0 else min(timeout_ms, 5000)
+            try:
+                locator = self._locator_for_action(cand['selector'])
+                if force_action:
+                    try:
+                        locator.wait_for(state='attached', timeout=min(2000, attempt_timeout))
+                    except Exception:
+                        pass
+                action_fn(locator, attempt_timeout, force_action)
+                if idx > 0:
+                    print(
+                        f"✓ 主定位失败，已使用备用定位器 #{idx}: "
+                        f"{cand['strategy']}={cand['value']}"
+                    )
+                return cand['strategy'], cand['value'], cand['selector']
+            except Exception as exc:
+                last_error = exc
+                print(
+                    f"⚠️  定位器失败 [{idx}] {cand['strategy']}={cand['value']}: "
+                    f"{str(exc)[:120]}"
+                )
+        raise last_error or RuntimeError('所有定位器均失败')
 
     def execute_test_case_playwright_no_db(self, case_data):
         """使用 Playwright 执行单个测试用例（不访问数据库）
@@ -659,7 +852,14 @@ class TestExecutor:
                     step_result['error'] = "✗ 跳转URL失败: URL为空"
                     return step_result
                 print(f"🔗 开始跳转URL: {url}")
+                self._ensure_shared_playwright_page()
                 self.current_page.goto(url, wait_until='domcontentloaded', timeout=30000)
+                try:
+                    self.current_page.wait_for_load_state('domcontentloaded', timeout=10000)
+                except Exception:
+                    pass
+                # 给 SPA/首页一点稳定时间，避免紧接着的点击 1s 内失败
+                self.current_page.wait_for_timeout(800)
                 step_result['success'] = True
                 print(f"  ✓ 跳转成功，当前页面: {self.current_page.url}")
                 return step_result
@@ -683,41 +883,10 @@ class TestExecutor:
                 locator_value = element['locator_value']
                 locator_strategy = element['locator_strategy'].lower()
                 element_name = element.get('name', '未知元素')
+                selector = self._build_selector_from_strategy(locator_strategy, locator_value)
 
-                # 根据定位策略构造 Playwright 选择器
-                # 注意：这里使用 page.locator(selector) / page.fill(selector) 等 API，
-                # selector 是字符串形式。对于 placeholder/label/title/role/class 等语义化策略，
-                # 转换成等价的 CSS 属性选择器。
-                if locator_strategy in ['css', 'css selector']:
-                    selector = locator_value
-                elif locator_strategy == 'xpath':
-                    selector = f'xpath={locator_value}'
-                elif locator_strategy == 'id':
-                    selector = f'#{locator_value}'
-                elif locator_strategy == 'name':
-                    selector = f'[name="{locator_value}"]'
-                elif locator_strategy == 'text':
-                    selector = f'text={locator_value}'
-                elif locator_strategy == 'placeholder':
-                    selector = f'[placeholder="{locator_value}"]'
-                elif locator_strategy == 'label':
-                    selector = f'[aria-label="{locator_value}"]'
-                elif locator_strategy == 'title':
-                    selector = f'[title="{locator_value}"]'
-                elif locator_strategy == 'role':
-                    # 支持：link / link[name="收藏商品"] / role=link[name="收藏商品"]
-                    # 勿降级为 [role="..."] CSS，否则会丢失 name 可访问名称匹配
-                    selector = (
-                        locator_value
-                        if locator_value.startswith('role=')
-                        else f'role={locator_value}'
-                    )
-                elif locator_strategy in ['class', 'class name']:
-                    # 空格分隔的多个 class 转成 .class1.class2 形式
-                    classes = [c.strip() for c in locator_value.split() if c.strip()]
-                    selector = '.' + '.'.join(classes) if classes else locator_value
-                else:
-                    selector = locator_value
+                # 超时：优先元素 wait_timeout（秒），与单用例引擎一致
+                action_timeout_ms = self._resolve_action_timeout_ms(step_data)
 
                 # 根据操作类型执行动作
                 if step_data['action_type'] == 'click':
@@ -765,7 +934,7 @@ class TestExecutor:
                                 select_locator = self.current_page.locator(select_locator_value)
 
                             # 使用select_option方法
-                            select_locator.select_option(value=option_value, timeout=step_data['wait_time'])
+                            select_locator.select_option(value=option_value, timeout=action_timeout_ms)
 
                             execution_time = round(time.time() - start_time, 2)
                             step_result['success'] = True
@@ -955,17 +1124,28 @@ class TestExecutor:
 
                                 # 先尝试滚动到元素（确保元素在视口内）
                                 try:
-                                    self.current_page.locator(selector).scroll_into_view_if_needed(timeout=5000)
+                                    self._locator_for_action(selector).scroll_into_view_if_needed(timeout=5000)
                                     print(f"  ✓ 元素已滚动到视口")
                                 except Exception as e:
                                     print(f"  ⚠️  滚动失败: {str(e)[:50]}")
 
-                                # 使用更长的超时时间（至少10秒）
-                                extended_timeout = max(step_data['wait_time'], 10000)
-                                self.current_page.click(selector, timeout=extended_timeout)
+                                # 使用更长的超时时间（至少10秒）+ 备用定位器回退
+                                extended_timeout = max(action_timeout_ms, 10000)
+
+                                def _click_action(loc, timeout, force):
+                                    loc.click(timeout=timeout, force=force)
+
+                                self._run_action_with_backups(element, extended_timeout, _click_action)
                                 print(f"  ✓ 点击成功（超时: {extended_timeout}ms）")
                             else:
-                                self.current_page.click(selector, timeout=step_data['wait_time'])
+                                def _click_action(loc, timeout, force):
+                                    try:
+                                        loc.scroll_into_view_if_needed(timeout=min(timeout, 5000))
+                                    except Exception:
+                                        pass
+                                    loc.click(timeout=timeout, force=force)
+
+                                self._run_action_with_backups(element, action_timeout_ms, _click_action)
                             step_result['success'] = True
 
                 elif step_data['action_type'] == 'fill':
@@ -973,13 +1153,18 @@ class TestExecutor:
                     resolved_value = resolve_variables(step_data['input_value'])
 
                     # 如果刚切换了标签页，增加超时时间
+                    fill_timeout = (
+                        max(action_timeout_ms, 10000)
+                        if step_data.get('_just_switched_tab')
+                        else action_timeout_ms
+                    )
                     if step_data.get('_just_switched_tab'):
-                        # 确保页面保持在前台
                         self.current_page.bring_to_front()
-                        extended_timeout = max(step_data['wait_time'], 10000)
-                        self.current_page.fill(selector, resolved_value, timeout=extended_timeout)
-                    else:
-                        self.current_page.fill(selector, resolved_value, timeout=step_data['wait_time'])
+
+                    def _fill_action(loc, timeout, force):
+                        loc.fill(resolved_value, timeout=timeout, force=force)
+
+                    self._run_action_with_backups(element, fill_timeout, _fill_action)
 
                     step_result['success'] = True
                     # 记录解析后的值（用于调试）
@@ -989,7 +1174,7 @@ class TestExecutor:
 
 
                 elif step_data['action_type'] == 'getText':
-                    text = self.current_page.text_content(selector, timeout=step_data['wait_time'])
+                    text = self._locator_for_action(selector).text_content(timeout=action_timeout_ms)
                     step_result['result'] = text
                     step_result['success'] = True
 
@@ -1005,15 +1190,15 @@ class TestExecutor:
 
                     if is_dropdown_option_wait:
                         # 对于下拉框选项，只等待元素在DOM中（attached），不要求可见
-                        self.current_page.wait_for_selector(selector, state='attached', timeout=step_data['wait_time'])
+                        self.current_page.wait_for_selector(selector, state='attached', timeout=action_timeout_ms)
                     else:
                         # 普通元素：等待可见
-                        self.current_page.wait_for_selector(selector, timeout=step_data['wait_time'])
+                        self.current_page.wait_for_selector(selector, timeout=action_timeout_ms)
 
                     step_result['success'] = True
 
                 elif step_data['action_type'] == 'hover':
-                    self.current_page.hover(selector, timeout=step_data['wait_time'])
+                    self._locator_for_action(selector).hover(timeout=action_timeout_ms)
                     step_result['success'] = True
 
                 elif step_data['action_type'] == 'scroll':
@@ -1034,7 +1219,7 @@ class TestExecutor:
 
                     # 执行断言（urlContains 已在元素定位器之前提前处理）
                     if step_data['assert_type'] == 'textContains':
-                        text = self.current_page.text_content(selector, timeout=step_data['wait_time'])
+                        text = self._locator_for_action(selector).text_content(timeout=action_timeout_ms)
                         if resolved_assert_value in text:
                             step_result['success'] = True
                         else:
@@ -1043,7 +1228,7 @@ class TestExecutor:
                             log += f"  - 实际文本: '{text}'"
                             step_result['error'] = log
                     elif step_data['assert_type'] == 'textEquals':
-                        text = self.current_page.text_content(selector, timeout=step_data['wait_time'])
+                        text = self._locator_for_action(selector).text_content(timeout=action_timeout_ms)
                         if text == resolved_assert_value:
                             step_result['success'] = True
                         else:
@@ -1435,207 +1620,164 @@ class TestExecutor:
             )
             case_executions[case_data['id']] = case_execution
 
-        # 整个套件共用一个浏览器实例，连续执行以复用登录态
-        # Safari 不支持浏览器复用（会话管理问题），需要每个用例独立启动
-        print(f"准备执行 {len(test_cases_data)} 个测试用例（复用浏览器会话）")
+        # 整个套件共用一个浏览器实例：单条用例结束不关窗，仅套件全部结束后关闭
+        print(f"准备执行 {len(test_cases_data)} 个测试用例（复用同一浏览器窗口）")
 
-        use_browser_reuse = self.browser != 'safari'
-
-        if use_browser_reuse:
-            driver = None
-            try:
-                driver = self.create_selenium_driver()
-                print(f"✓ 浏览器已启动（将复用于所有用例，保留登录态）\n")
-            except Exception as e:
-                print(f"✗ 浏览器启动失败: {str(e)}")
-                # 标记所有用例为失败
-                for case_data in test_cases_data:
-                    self.results.append({
-                        'test_case_id': case_data['id'],
-                        'test_case_name': case_data['name'],
-                        'status': 'failed',
-                        'steps': [],
-                        'error': f"浏览器启动失败: {str(e)}",
-                        'start_time': datetime.now().isoformat(),
-                        'end_time': datetime.now().isoformat(),
-                        'screenshots': []
-                    })
-                    failed += 1
-                # 更新执行记录并返回
-                for case_result in self.results:
-                    case_execution = case_executions[case_result['test_case_id']]
-                    case_execution.status = 'failed'
-                    case_execution.finished_at = timezone.now()
-                    case_execution.execution_time = 0
-                    case_execution.error_message = case_result['error']
-                    case_execution.save()
-                duration = time.time() - start_time
-                self.update_execution_result('FAILED', 0, len(test_cases_data), 0, duration)
-                return
-        else:
-            # Safari：不预先启动浏览器，每个用例独立启动
-            driver = None
-            print(f"ℹ️  Safari 浏览器将为每个用例独立启动（Safari 不支持浏览器复用）\n")
-
-        # 执行所有测试用例
-        for i, case_data in enumerate(test_cases_data, 1):
-            print(f"\n{'=' * 60}")
-            print(f"正在执行第 {i}/{len(test_cases_data)} 个用例: {case_data['name']}")
-            print(f"{'=' * 60}")
-
-            # 记录用例实际开始执行时间
-            case_execution = case_executions[case_data['id']]
-            case_execution.started_at = timezone.now()
-            case_execution.status = 'running'
-            case_execution.save()
-
-            # Safari：为每个用例启动新的浏览器
-            if not use_browser_reuse:
-                try:
-                    driver = self.create_selenium_driver()
-                    print(f"✓ Safari 浏览器已启动")
-                except Exception as e:
-                    print(f"✗ Safari 浏览器启动失败: {str(e)}")
-                    self.results.append({
-                        'test_case_id': case_data['id'],
-                        'test_case_name': case_data['name'],
-                        'status': 'failed',
-                        'steps': [],
-                        'error': f"浏览器启动失败: {str(e)}",
-                        'start_time': datetime.now().isoformat(),
-                        'end_time': datetime.now().isoformat(),
-                        'screenshots': []
-                    })
-                    failed += 1
-                    # 更新执行记录
-                    case_execution.status = 'failed'
-                    case_execution.finished_at = timezone.now()
-                    case_execution.execution_time = (
-                                case_execution.finished_at - case_execution.started_at).total_seconds()
-                    case_execution.error_message = f"浏览器启动失败: {str(e)}"
-                    case_execution.save()
-                    continue
-
-            try:
-                # 仅首用例（或 Safari 每用例独立浏览器）导航到项目环境 base_url；
-                # 复用浏览器时后续用例沿用当前页面与登录态，不清理 Cookie/Storage
-                from .codegen_service import codegen_recorder
-                suite_base_url = codegen_recorder._resolve_project_base_url(
-                    getattr(self.test_suite, 'project_id', None)
-                )
-                should_goto_base = (
-                    suite_base_url
-                    and (i == 1 or not use_browser_reuse)
-                )
-                if should_goto_base:
-                    try:
-                        print(f"正在导航到: {suite_base_url}")
-
-                        import platform
-                        is_linux = platform.system() == 'Linux'
-
-                        driver.get(suite_base_url)
-
-                        try:
-                            WebDriverWait(driver, 15 if is_linux else 10).until(
-                                lambda d: d.execute_script("return document.readyState") == "complete"
-                            )
-                        except Exception:
-                            pass
-
-                        extra_wait = 3 if is_linux else 2
-                        time.sleep(extra_wait)
-
-                        print(
-                            f"✓ 成功导航到: {suite_base_url} "
-                            f"(已等待页面加载完成，额外{extra_wait}秒)"
-                        )
-                    except Exception as e:
-                        print(f"✗ 导航失败: {str(e)}")
-                        self.results.append({
-                            'test_case_id': case_data['id'],
-                            'test_case_name': case_data['name'],
-                            'status': 'failed',
-                            'steps': [],
-                            'error': f"导航到基础URL失败: {str(e)}",
-                            'start_time': datetime.now().isoformat(),
-                            'end_time': datetime.now().isoformat(),
-                            'screenshots': []
-                        })
-                        failed += 1
-                        continue
-
-                # 执行测试用例
-                case_result = self.execute_test_case_selenium_no_db(driver, case_data)
-                self.results.append(case_result)
-                print(f"✓ 用例执行完成，状态: {case_result['status']}")
-
-                # 立即更新该用例的执行记录（包含准确的执行时间）
-                case_execution = case_executions[case_data['id']]
-                case_execution.status = case_result['status']
-                case_execution.finished_at = timezone.now()
-                case_execution.execution_time = (case_execution.finished_at - case_execution.started_at).total_seconds()
-                case_execution.execution_logs = json.dumps(case_result['steps'], ensure_ascii=False)
-                if case_result['error']:
-                    case_execution.error_message = case_result['error']
-                if case_result.get('screenshots'):
-                    case_execution.screenshots = case_result['screenshots']
-                case_execution.save()
-
-                print(f"⏱️  执行时长: {case_execution.execution_time:.2f}秒")
-
-                if case_result['status'] == 'passed':
-                    passed += 1
-                elif case_result['status'] == 'failed':
-                    failed += 1
-                else:
-                    skipped += 1
-
-            except Exception as e:
-                print(f"✗ 用例执行出现异常: {str(e)}")
-                # 记录异常
+        driver = None
+        try:
+            driver = self.create_selenium_driver()
+            print(f"✓ 浏览器已启动（套件内所有用例共用此窗口，单条结束不关闭）\n")
+        except Exception as e:
+            print(f"✗ 浏览器启动失败: {str(e)}")
+            for case_data in test_cases_data:
                 self.results.append({
                     'test_case_id': case_data['id'],
                     'test_case_name': case_data['name'],
                     'status': 'failed',
                     'steps': [],
-                    'error': f"用例执行异常: {str(e)}",
+                    'error': f"浏览器启动失败: {str(e)}",
                     'start_time': datetime.now().isoformat(),
                     'end_time': datetime.now().isoformat(),
                     'screenshots': []
                 })
                 failed += 1
-
-                # 更新执行记录
-                case_execution = case_executions[case_data['id']]
+            for case_result in self.results:
+                case_execution = case_executions[case_result['test_case_id']]
                 case_execution.status = 'failed'
                 case_execution.finished_at = timezone.now()
-                case_execution.execution_time = (case_execution.finished_at - case_execution.started_at).total_seconds()
-                case_execution.error_message = f"用例执行异常: {str(e)}"
+                case_execution.execution_time = 0
+                case_execution.error_message = case_result['error']
+                case_execution.save()
+            duration = time.time() - start_time
+            self.update_execution_result('FAILED', 0, len(test_cases_data), 0, duration)
+            return
+
+        try:
+            for i, case_data in enumerate(test_cases_data, 1):
+                print(f"\n{'=' * 60}")
+                print(f"正在执行第 {i}/{len(test_cases_data)} 个用例: {case_data['name']}")
+                print(f"{'=' * 60}")
+
+                case_execution = case_executions[case_data['id']]
+                case_execution.started_at = timezone.now()
+                case_execution.status = 'running'
                 case_execution.save()
 
-            finally:
-                # Safari：每个用例执行完都关闭浏览器
-                if not use_browser_reuse and driver:
+                try:
+                    # 仅首用例导航到项目环境 base_url；后续用例沿用当前页面与登录态
+                    from .codegen_service import codegen_recorder
+                    suite_base_url = codegen_recorder._resolve_project_base_url(
+                        getattr(self.test_suite, 'project_id', None)
+                    )
+                    if suite_base_url and i == 1:
+                        try:
+                            print(f"正在导航到: {suite_base_url}")
+
+                            import platform
+                            is_linux = platform.system() == 'Linux'
+
+                            driver.get(suite_base_url)
+
+                            try:
+                                WebDriverWait(driver, 15 if is_linux else 10).until(
+                                    lambda d: d.execute_script("return document.readyState") == "complete"
+                                )
+                            except Exception:
+                                pass
+
+                            extra_wait = 3 if is_linux else 2
+                            time.sleep(extra_wait)
+
+                            print(
+                                f"✓ 成功导航到: {suite_base_url} "
+                                f"(已等待页面加载完成，额外{extra_wait}秒)"
+                            )
+                        except Exception as e:
+                            print(f"✗ 导航失败: {str(e)}")
+                            self.results.append({
+                                'test_case_id': case_data['id'],
+                                'test_case_name': case_data['name'],
+                                'status': 'failed',
+                                'steps': [],
+                                'error': f"导航到基础URL失败: {str(e)}",
+                                'start_time': datetime.now().isoformat(),
+                                'end_time': datetime.now().isoformat(),
+                                'screenshots': []
+                            })
+                            failed += 1
+                            case_execution.status = 'failed'
+                            case_execution.finished_at = timezone.now()
+                            case_execution.execution_time = (
+                                case_execution.finished_at - case_execution.started_at
+                            ).total_seconds()
+                            case_execution.error_message = f"导航到基础URL失败: {str(e)}"
+                            case_execution.save()
+                            if i < len(test_cases_data):
+                                print(f"→ 保持浏览器窗口，继续执行下一用例\n")
+                            continue
+
+                    case_result = self.execute_test_case_selenium_no_db(driver, case_data)
+                    self.results.append(case_result)
+                    print(f"✓ 用例执行完成，状态: {case_result['status']}")
+
+                    case_execution.status = case_result['status']
+                    case_execution.finished_at = timezone.now()
+                    case_execution.execution_time = (
+                        case_execution.finished_at - case_execution.started_at
+                    ).total_seconds()
+                    case_execution.execution_logs = json.dumps(case_result['steps'], ensure_ascii=False)
+                    if case_result['error']:
+                        case_execution.error_message = case_result['error']
+                    if case_result.get('screenshots'):
+                        case_execution.screenshots = case_result['screenshots']
+                    case_execution.save()
+
+                    print(f"⏱️  执行时长: {case_execution.execution_time:.2f}秒")
+
+                    if case_result['status'] == 'passed':
+                        passed += 1
+                    elif case_result['status'] == 'failed':
+                        failed += 1
+                    else:
+                        skipped += 1
+
+                except Exception as e:
+                    print(f"✗ 用例执行出现异常: {str(e)}")
+                    self.results.append({
+                        'test_case_id': case_data['id'],
+                        'test_case_name': case_data['name'],
+                        'status': 'failed',
+                        'steps': [],
+                        'error': f"用例执行异常: {str(e)}",
+                        'start_time': datetime.now().isoformat(),
+                        'end_time': datetime.now().isoformat(),
+                        'screenshots': []
+                    })
+                    failed += 1
+
                     try:
-                        driver.quit()
-                        print(f"✓ Safari 浏览器已关闭\n")
-                    except Exception as e:
-                        print(f"✗ 关闭 Safari 浏览器时出错: {str(e)}\n")
-                    driver = None
+                        case_execution.status = 'failed'
+                        case_execution.finished_at = timezone.now()
+                        case_execution.execution_time = (
+                            case_execution.finished_at - case_execution.started_at
+                        ).total_seconds()
+                        case_execution.error_message = f"用例执行异常: {str(e)}"
+                        case_execution.save()
+                    except Exception as save_err:
+                        print(f"⚠️  更新用例执行记录失败: {save_err}")
 
-        # 所有用例执行完毕后，关闭浏览器（仅对复用浏览器的情况）
-        if use_browser_reuse and driver:
-            try:
-                print(f"\n{'=' * 60}")
-                print(f"正在关闭浏览器...")
-                driver.quit()
-                print(f"✓ 浏览器已关闭")
-                print(f"{'=' * 60}\n")
-            except Exception as e:
-                print(f"✗ 关闭浏览器时出错: {str(e)}")
-
-        # 注意：每个用例的执行记录已在执行过程中实时更新，不需要在这里统一更新
+                if i < len(test_cases_data):
+                    print(f"→ 保持浏览器窗口，继续执行下一用例\n")
+        finally:
+            if driver:
+                try:
+                    print(f"\n{'=' * 60}")
+                    print(f"正在关闭浏览器（套件执行结束）...")
+                    driver.quit()
+                    print(f"✓ 浏览器已关闭")
+                    print(f"{'=' * 60}\n")
+                except Exception as e:
+                    print(f"✗ 关闭浏览器时出错: {str(e)}")
 
         duration = time.time() - start_time
         status = 'SUCCESS' if failed == 0 else 'FAILED'
