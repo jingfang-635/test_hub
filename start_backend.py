@@ -71,14 +71,30 @@ def main() -> None:
     print('  Protocols: HTTP + SSE + WebSocket')
     print('=' * 56)
 
-    uvicorn.run(
-        'backend.asgi:application',
-        host=args.host,
-        port=port,
-        reload=args.reload,
-        log_level='info',
-        ws='websockets',
-    )
+    uvicorn_kwargs = {
+        'app': 'backend.asgi:application',
+        'host': args.host,
+        'port': port,
+        'log_level': 'info',
+        'ws': 'websockets',
+    }
+    if args.reload:
+        # 只监听 backend 代码变更，避免 redis dump / media / screenshots 等触发热重载
+        # 热重载会杀掉 worker，导致套件执行中途浏览器窗口被关闭
+        uvicorn_kwargs.update({
+            'reload': True,
+            'reload_dirs': [str(backend_dir)],
+            'reload_excludes': [
+                '**/__pycache__/**',
+                '**/*.pyc',
+                '**/media/**',
+                '**/screenshots/**',
+                '**/*.rdb',
+                '**/*.log',
+            ],
+        })
+
+    uvicorn.run(**uvicorn_kwargs)
 
 
 if __name__ == '__main__':
