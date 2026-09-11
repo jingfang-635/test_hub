@@ -100,6 +100,18 @@ media/ui-automation/elements/*
 # 忽略 UI 自动化录制产物
 media/ui-automation/recorded/*
 !media/ui-automation/recorded/.gitkeep
+# 忽略 UI 自动化运行时产生的 Allure 报告/结果/离线 HTML（与 api-testing、app-automation 规则一致）
+media/ui-automation/allure-reports/*
+!media/ui-automation/allure-reports/.gitkeep
+media/ui-automation/allure-results/*
+!media/ui-automation/allure-results/.gitkeep
+media/ui-automation/allure-offline/*
+!media/ui-automation/allure-offline/.gitkeep
+# 忽略 AI 智能测试采集产物（截图/定位器 sidecar 等运行时文件）
+media/ui-automation/ai-captures/*
+!media/ui-automation/ai-captures/.gitkeep
+# 忽略 Redis 运行转储
+redis-windows/dump.rdb
 # 忽略知识库文档上传文件，但保留 .gitkeep
 media/knowledge_docs/*
 !media/knowledge_docs/.gitkeep
