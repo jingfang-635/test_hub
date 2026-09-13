@@ -1,6 +1,9 @@
 from rest_framework import serializers
 from .models import TestPlan, TestRun, TestRunCase, TestRunCaseHistory
 from apps.testcases.models import TestCase
+from apps.projects.models import Project
+from apps.versions.models import Version
+from apps.users.models import User
 from apps.users.serializers import UserSimpleSerializer
 
 class TestRunCaseHistorySerializer(serializers.ModelSerializer):
@@ -79,24 +82,49 @@ class TestRunSerializer(serializers.ModelSerializer):
 
 
 class TestPlanSerializer(serializers.ModelSerializer):
+    """列表只读序列化"""
     creator = UserSimpleSerializer(read_only=True)
     projects = serializers.StringRelatedField(many=True, read_only=True)
-    version = serializers.StringRelatedField()
+    version = serializers.StringRelatedField(read_only=True)
 
     class Meta:
         model = TestPlan
-        fields = ('id', 'name', 'projects', 'version', 'creator', 'created_at', 'is_active')
+        fields = ('id', 'name', 'description', 'projects', 'version', 'creator', 'created_at', 'is_active')
+
+
+class TestPlanWriteSerializer(serializers.ModelSerializer):
+    """创建/更新可写序列化：确保 description / projects / version / assignees 能正确落库"""
+    projects = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=Project.objects.all(), required=False
+    )
+    version = serializers.PrimaryKeyRelatedField(
+        queryset=Version.objects.all(), allow_null=True, required=False
+    )
+    assignees = serializers.PrimaryKeyRelatedField(
+        many=True, queryset=User.objects.all(), required=False
+    )
+
+    class Meta:
+        model = TestPlan
+        fields = ('id', 'name', 'description', 'projects', 'version', 'assignees', 'is_active')
 
 
 class TestPlanDetailSerializer(serializers.ModelSerializer):
     test_runs = TestRunSerializer(many=True, read_only=True)
     creator = UserSimpleSerializer(read_only=True)
     projects = serializers.StringRelatedField(many=True, read_only=True)
-    version = serializers.StringRelatedField()
+    project_ids = serializers.PrimaryKeyRelatedField(source='projects', many=True, read_only=True)
+    version = serializers.StringRelatedField(read_only=True)
+    version_id = serializers.IntegerField(read_only=True, allow_null=True)
+    assignees = serializers.PrimaryKeyRelatedField(many=True, read_only=True)
 
     class Meta:
         model = TestPlan
-        fields = '__all__'
+        fields = (
+            'id', 'name', 'description', 'projects', 'project_ids',
+            'version', 'version_id', 'creator', 'assignees',
+            'is_active', 'created_at', 'updated_at', 'test_runs'
+        )
 
 class TestRunCaseSerializer(serializers.ModelSerializer):
     class Meta:

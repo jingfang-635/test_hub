@@ -349,6 +349,15 @@ export function deleteTestExecution(id) {
   })
 }
 
+// 批量删除测试报告
+export function batchDeleteTestExecutions(ids) {
+  return request({
+    url: '/ui-automation/test-executions/batch-delete/',
+    method: 'post',
+    data: { ids }
+  })
+}
+
 /** 生成 Allure 在线报告并返回 URL */
 export function generateUiHtmlReport(id) {
   return request({

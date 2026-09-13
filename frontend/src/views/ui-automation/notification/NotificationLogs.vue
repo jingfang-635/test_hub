@@ -1,76 +1,66 @@
 <template>
   <div class="notification-logs-container">
-    <!-- 页面操作栏 -->
-    <div class="page-actions">
-      <el-row :gutter="20" class="filter-row">
-        <el-col :span="6">
-          <el-input
-              v-model="searchForm.taskName"
-              :placeholder="$t('uiAutomation.notification.logs.searchTaskName')"
-              clearable
-              @clear="handleSearch"
-              @keyup.enter="handleSearch"
-          >
-            <template #prefix>
-              <el-icon>
-                <Search/>
-              </el-icon>
-            </template>
-          </el-input>
-        </el-col>
-        <el-col :span="6">
-          <el-date-picker
-              v-model="searchForm.dateRange"
-              type="daterange"
-              :range-separator="$t('uiAutomation.notification.logs.dateRangeTo')"
-              :start-placeholder="$t('uiAutomation.notification.logs.startDate')"
-              :end-placeholder="$t('uiAutomation.notification.logs.endDate')"
-              value-format="YYYY-MM-DD"
-              @change="handleSearch"
-          />
-        </el-col>
-        <el-col :span="6">
-          <el-select
-              v-model="searchForm.status"
-              :placeholder="$t('uiAutomation.notification.logs.notificationStatus')"
-              clearable
-              @change="handleSearch"
-          >
-            <el-option :label="$t('uiAutomation.notification.logs.allStatus')" value=""/>
-            <el-option :label="$t('uiAutomation.notification.logs.statusSuccess')" value="SUCCESS"/>
-            <el-option :label="$t('uiAutomation.notification.logs.statusFailed')" value="FAILED"/>
-            <el-option :label="$t('uiAutomation.notification.logs.statusRetrying')" value="RETRYING"/>
-          </el-select>
-        </el-col>
-        <el-col :span="6">
-          <el-button type="primary" @click="handleSearch">
+    <div class="page-header">
+      <h3 class="page-title">{{ $t('uiAutomation.notification.logs.title') }}</h3>
+    </div>
+
+    <!-- 筛选栏 -->
+    <div class="card-container">
+      <div class="filter-bar">
+        <el-input
+          v-model="searchForm.taskName"
+          class="filter-item filter-item--search"
+          :placeholder="$t('uiAutomation.notification.logs.searchTaskName')"
+          clearable
+          @input="handleSearchInput"
+        >
+          <template #prefix>
             <el-icon>
               <Search/>
             </el-icon>
-            {{ $t('uiAutomation.common.search') }}
-          </el-button>
-          <el-button @click="handleReset">
-            {{ $t('uiAutomation.common.reset') }}
-          </el-button>
-        </el-col>
-      </el-row>
-    </div>
+          </template>
+        </el-input>
+        <el-date-picker
+          v-model="searchForm.dateRange"
+          class="filter-item filter-item--date"
+          type="daterange"
+          :range-separator="$t('uiAutomation.notification.logs.dateRangeTo')"
+          :start-placeholder="$t('uiAutomation.notification.logs.startDate')"
+          :end-placeholder="$t('uiAutomation.notification.logs.endDate')"
+          value-format="YYYY-MM-DD"
+          style="width: 240px; flex: none;"
+          @change="handleSearch"
+        />
+        <el-select
+          v-model="searchForm.status"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.notification.logs.notificationStatus')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.notification.logs.allStatus')" value=""/>
+          <el-option :label="$t('uiAutomation.notification.logs.statusSuccess')" value="success"/>
+          <el-option :label="$t('uiAutomation.notification.logs.statusFailed')" value="failed"/>
+          <el-option :label="$t('uiAutomation.notification.logs.statusSending')" value="sending"/>
+        </el-select>
+        <el-button @click="handleReset">
+          {{ $t('uiAutomation.common.reset') }}
+        </el-button>
+      </div>
 
-    <!-- 通知列表 -->
-    <div class="logs-table-container">
+      <!-- 通知列表 -->
+      <div class="logs-table-container">
       <el-table
           :data="logsData"
           v-loading="loading"
           :element-loading-text="$t('uiAutomation.notification.logs.messages.loading')"
           stripe
           style="width: 100%"
-          @sort-change="handleSortChange"
       >
         <el-table-column
             prop="task_name"
             :label="$t('uiAutomation.notification.logs.taskName')"
             min-width="150"
-            sortable="custom"
         />
         <el-table-column
             prop="task_type_display"
@@ -104,7 +94,6 @@
             prop="created_at"
             :label="$t('uiAutomation.notification.logs.notificationTime')"
             min-width="180"
-            sortable="custom"
         >
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
@@ -114,7 +103,6 @@
             prop="status_display"
             :label="$t('uiAutomation.common.status')"
             min-width="100"
-            sortable="custom"
         >
           <template #default="{ row }">
             <el-tag
@@ -133,7 +121,7 @@
           <template #default="{ row }">
             <el-button
                 type="primary"
-                link
+                round
                 size="small"
                 @click="viewDetail(row)"
             >
@@ -154,6 +142,7 @@
             @size-change="handleSizeChange"
             @current-change="handleCurrentChange"
         />
+      </div>
       </div>
     </div>
 
@@ -257,8 +246,9 @@
 
 <script>
 import {Search} from '@element-plus/icons-vue'
-import {ref, reactive, onMounted, computed} from 'vue'
+import {ref, reactive, onMounted, computed, onUnmounted} from 'vue'
 import {ElMessage} from 'element-plus'
+import { debounce } from 'lodash-es'
 import { getNotificationLogs } from '@/api/ui_automation.js'
 import { useI18n } from 'vue-i18n'
 
@@ -290,12 +280,6 @@ export default {
       total: 0
     })
 
-    // 排序参数
-    const sortParams = reactive({
-      prop: 'created_at',
-      order: 'descending'
-    })
-
     // 获取通知日志数据
     const fetchLogsData = async () => {
       loading.value = true
@@ -303,7 +287,7 @@ export default {
         const params = {
           page: pagination.currentPage,
           page_size: pagination.pageSize,
-          ordering: sortParams.order === 'ascending' ? sortParams.prop : `-${sortParams.prop}`
+          ordering: '-created_at'
         }
 
         // 添加搜索条件
@@ -335,6 +319,11 @@ export default {
       fetchLogsData()
     }
 
+    // 任务名称输入即时搜索（防抖 400ms）
+    const handleSearchInput = debounce(() => {
+      handleSearch()
+    }, 400)
+
     // 重置搜索
     const handleReset = () => {
       searchForm.taskName = ''
@@ -353,13 +342,6 @@ export default {
 
     const handleCurrentChange = (val) => {
       pagination.currentPage = val
-      fetchLogsData()
-    }
-
-    // 处理排序
-    const handleSortChange = ({prop, order}) => {
-      sortParams.prop = prop
-      sortParams.order = order || 'descending'
       fetchLogsData()
     }
 
@@ -534,13 +516,12 @@ export default {
       selectedLog,
       searchForm,
       pagination,
-      sortParams,
       parsedNotificationContent,
       handleSearch,
+      handleSearchInput,
       handleReset,
       handleSizeChange,
       handleCurrentChange,
-      handleSortChange,
       viewDetail,
       handleDetailDialogClose,
       formatDate,
@@ -554,22 +535,51 @@ export default {
 <style scoped>
 .notification-logs-container {
   padding: 20px;
+}
+
+.page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.page-title {
+  margin: 0;
+  color: #303133;
+  font-size: 20px;
+  font-weight: 600;
+}
+
+.card-container {
   background: #fff;
-  border-radius: 8px;
+  padding: 20px;
+  border-radius: 4px;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
-.page-actions {
-  margin-bottom: 20px;
-  padding: 20px;
-  background: #f8f9fa;
-  border-radius: 6px;
-}
-
-.filter-row {
+.filter-bar {
   display: flex;
   align-items: center;
-  gap: 15px;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-bar :deep(.filter-item--search) {
+  width: 254px;
+}
+
+.filter-bar :deep(.filter-item--select) {
+  width: 100px;
+}
+
+.filter-bar :deep(.filter-item--date) {
+  width: 240px !important;
+  max-width: 240px !important;
+  flex: 0 0 240px !important;
+  --el-date-editor-width: 240px;
+  --el-date-editor-daterange-width: 240px;
 }
 
 .logs-table-container {

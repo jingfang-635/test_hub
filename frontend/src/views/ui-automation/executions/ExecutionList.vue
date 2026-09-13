@@ -2,56 +2,64 @@
   <div class="page-container">
     <div class="page-header">
       <h1 class="page-title">{{ $t('uiAutomation.execution.title') }}</h1>
-      <el-select v-model="projectId" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
-        <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
-        <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
-      </el-select>
+      <el-button
+        type="danger"
+        :disabled="selectedIds.length === 0"
+        @click="handleBatchDelete"
+      >
+        <el-icon><Delete /></el-icon>
+        {{ $t('uiAutomation.common.batchDelete') }}
+      </el-button>
     </div>
 
     <div class="card-container">
       <div class="filter-bar">
-        <el-form :inline="true" :model="queryParams" class="demo-form-inline">
-          <el-form-item :label="$t('uiAutomation.common.search')">
-            <el-input
-              v-model="queryParams.search"
-              :placeholder="$t('uiAutomation.execution.searchPlaceholder')"
-              clearable
-              @keyup.enter="handleSearch"
-            >
-              <template #prefix>
-                <el-icon><Search /></el-icon>
-              </template>
-            </el-input>
-          </el-form-item>
-          <el-form-item :label="$t('uiAutomation.common.status')">
-            <el-select v-model="queryParams.status" :placeholder="$t('uiAutomation.execution.statusFilter')" clearable>
-              <el-option :label="$t('uiAutomation.status.pending')" value="pending" />
-              <el-option :label="$t('uiAutomation.status.running')" value="running" />
-              <el-option :label="$t('uiAutomation.status.passed')" value="passed" />
-              <el-option :label="$t('uiAutomation.status.failed')" value="failed" />
-              <el-option :label="$t('uiAutomation.status.error')" value="error" />
-            </el-select>
-          </el-form-item>
-          <el-form-item :label="$t('uiAutomation.execution.browserFilter')">
-            <el-select v-model="queryParams.browser" :placeholder="$t('uiAutomation.execution.browserFilter')" clearable>
-              <el-option label="Chrome" value="chrome" />
-              <el-option label="Firefox" value="firefox" />
-              <el-option label="Safari" value="safari" />
-              <el-option label="Edge" value="edge" />
-            </el-select>
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleSearch">{{ $t('uiAutomation.common.query') }}</el-button>
-            <el-button @click="resetQuery">{{ $t('uiAutomation.common.reset') }}</el-button>
-            <el-button
-              type="danger"
-              :disabled="selectedIds.length === 0"
-              @click="handleBatchDelete"
-            >
-              {{ $t('uiAutomation.common.batchDelete') }}
-            </el-button>
-          </el-form-item>
-        </el-form>
+        <el-select
+          v-model="projectId"
+          class="filter-item filter-item--project"
+          :placeholder="$t('uiAutomation.common.selectProject')"
+          @change="onProjectChange"
+        >
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
+          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        </el-select>
+        <el-input
+          v-model="queryParams.search"
+          class="filter-item filter-item--search"
+          :placeholder="$t('uiAutomation.execution.searchPlaceholder')"
+          clearable
+          @input="handleSearchInput"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-select
+          v-model="queryParams.status"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.execution.statusFilter')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.status.pending')" value="pending" />
+          <el-option :label="$t('uiAutomation.status.running')" value="running" />
+          <el-option :label="$t('uiAutomation.status.passed')" value="passed" />
+          <el-option :label="$t('uiAutomation.status.failed')" value="failed" />
+          <el-option :label="$t('uiAutomation.status.error')" value="error" />
+        </el-select>
+        <el-select
+          v-model="queryParams.related_object"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.execution.relatedObject')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.execution.case')" value="case" />
+          <el-option :label="$t('uiAutomation.execution.suiteTag')" value="suite" />
+        </el-select>
+        <el-button @click="resetQuery">
+          {{ $t('uiAutomation.common.reset') }}
+        </el-button>
       </div>
 
       <el-table :data="executions" v-loading="loading" style="width: 100%" @selection-change="handleSelectionChange">
@@ -90,7 +98,6 @@
             {{ getBrowserText(row.browser) }}
           </template>
         </el-table-column>
-        <el-table-column prop="created_by_name" :label="$t('uiAutomation.execution.executor')" width="120" align="center" />
         <el-table-column prop="started_at" :label="$t('uiAutomation.execution.startTime')" width="180" align="center">
           <template #default="{ row }">
             {{ formatDateTime(row.started_at) }}
@@ -106,28 +113,20 @@
             {{ formatDuration(row.execution_time) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('uiAutomation.common.operation')" width="150" fixed="right" align="center">
+        <el-table-column :label="$t('uiAutomation.common.operation')" width="200" fixed="right" align="left">
           <template #default="{ row }">
-            <el-button size="small" type="primary" link @click="viewExecutionDetail(row)">
+            <el-button size="small" type="primary" round @click="viewExecutionDetail(row)">
               <el-icon><View /></el-icon>
               {{ $t('uiAutomation.common.details') }}
             </el-button>
             <el-button
-              v-if="row.status === 'failed' || row.status === 'error'"
               size="small"
               type="warning"
-              link
+              round
               @click="showRerunDialog(row)"
             >
               <el-icon><Refresh /></el-icon>
               {{ $t('uiAutomation.common.rerun') }}
-            </el-button>
-            <el-button
-              link
-              type="danger"
-              @click="handleDelete(row)"
-            >
-              {{ $t('uiAutomation.common.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -147,7 +146,13 @@
     </div>
 
     <!-- 执行详情对话框 -->
-    <el-dialog v-model="showDetailDialog" :title="$t('uiAutomation.execution.executionDetail')" width="900px">
+    <el-dialog
+      v-model="showDetailDialog"
+      :title="$t('uiAutomation.execution.executionDetail')"
+      width="900px"
+      class="execution-detail-dialog"
+      align-center
+    >
       <div v-if="currentExecution" class="execution-detail">
         <!-- 基本信息 -->
         <el-descriptions :column="2" border>
@@ -283,14 +288,14 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Search, View, WarningFilled, Refresh } from '@element-plus/icons-vue'
+import { debounce } from 'lodash-es'
+import { Search, View, WarningFilled, Refresh, Delete } from '@element-plus/icons-vue'
 import { useI18n } from 'vue-i18n'
 import {
   getTestCaseExecutions,
   loadUiAutomationProjects,
-  deleteTestCaseExecution,
   batchDeleteTestCaseExecutions,
   runTestCase
 } from '@/api/ui_automation'
@@ -315,7 +320,7 @@ const queryParams = reactive({
   project: undefined,
   search: '',
   status: '',
-  browser: ''
+  related_object: ''
 })
 const selectedIds = ref([])
 
@@ -506,11 +511,8 @@ const loadExecutions = async () => {
   }
 }
 
-// 项目变更处理
+// 项目变更处理（项目与其它筛选条件是并列关系，切换项目不清空其它条件）
 const onProjectChange = () => {
-  queryParams.search = ''
-  queryParams.status = ''
-  queryParams.browser = ''
   pagination.currentPage = 1
   loadExecutions()
 }
@@ -521,11 +523,17 @@ const handleSearch = () => {
   loadExecutions()
 }
 
+// 关键字输入即时搜索（防抖 400ms）
+const handleSearchInput = debounce(() => {
+  handleSearch()
+}, 400)
+
 // 重置查询
 const resetQuery = () => {
+  projectId.value = ALL_PROJECTS
   queryParams.search = ''
   queryParams.status = ''
-  queryParams.browser = ''
+  queryParams.related_object = ''
   pagination.currentPage = 1
   loadExecutions()
 }
@@ -545,24 +553,6 @@ const handleCurrentChange = (val) => {
 // 表格多选
 const handleSelectionChange = (selection) => {
   selectedIds.value = selection.map(item => item.id)
-}
-
-// 删除单个执行记录
-const handleDelete = (row) => {
-  ElMessageBox.confirm(t('uiAutomation.execution.messages.deleteConfirm'), t('uiAutomation.messages.confirm.tip'), {
-    confirmButtonText: t('uiAutomation.common.confirm'),
-    cancelButtonText: t('uiAutomation.common.cancel'),
-    type: 'warning'
-  }).then(async () => {
-    try {
-      await deleteTestCaseExecution(row.id)
-      ElMessage.success(t('uiAutomation.execution.messages.deleteSuccess'))
-      loadExecutions()
-    } catch (error) {
-      console.error('删除失败:', error)
-      ElMessage.error(t('uiAutomation.execution.messages.deleteFailed'))
-    }
-  })
 }
 
 // 批量删除执行记录
@@ -650,41 +640,64 @@ onMounted(async () => {
   projectId.value = ALL_PROJECTS
   await loadExecutions()
 })
+
+onUnmounted(() => {
+  handleSearchInput.cancel()
+})
+
+onUnmounted(() => {
+  handleSearchInput.cancel()
+})
+
+onUnmounted(() => {
+  handleSearchInput.cancel()
+})
 </script>
 
 <style scoped lang="scss">
 .page-container {
   padding: 20px;
-  height: 100%;
-  overflow-y: auto;
-  background: #f5f5f5;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  background: white;
-  padding: 20px;
-  border-radius: 4px;
-}
+  margin-bottom: 16px;
 
-.page-title {
-  margin: 0;
-  font-size: 24px;
-  color: #303133;
+  .page-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+    color: #303133;
+  }
 }
 
 .card-container {
   background-color: #fff;
-  border-radius: 8px;
+  border-radius: 4px;
   padding: 20px;
-  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
 .filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-bar :deep(.filter-item--project) {
+  width: 160px;
+}
+
+.filter-bar :deep(.filter-item--search) {
+  width: 254px;
+}
+
+.filter-bar :deep(.filter-item--select) {
+  width: 130px;
 }
 
 .pagination-container {
@@ -693,14 +706,21 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
+// 执行详情对话框：固定高度并可滚动
+:deep(.execution-detail-dialog) {
+  .el-dialog__body {
+    height: 700px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
 .execution-detail {
   .execution-tabs {
     margin-top: 20px;
   }
 
   .logs-container {
-    max-height: 500px;
-    overflow-y: auto;
     background: #f5f7fa;
     padding: 15px;
     border-radius: 4px;
@@ -795,8 +815,6 @@ onMounted(async () => {
   }
 
   .screenshots-container {
-    max-height: 600px;
-    overflow-y: auto;
     padding: 10px;
 
     .screenshot-item {

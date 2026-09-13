@@ -1269,6 +1269,209 @@ def _filter_has_text(raw: str) -> str:
     return (m.group(1) or m.group(2) or '').strip()
 
 
+# 位置型定位表达式特征：以 / 或 ( 开头的 XPath、显式 xpath= 前缀。
+_XPATH_EXPR_RE = re.compile(r'^(?:xpath\s*=\s*)?[/(]', re.I)
+# 元素名被定位表达式污染的特征（历史脏数据，如「xpath html body div…按钮 2」）。
+_LABEL_JUNK_TOKENS = {
+    'xpath', 'css', 'html', 'body', 'head', 'div', 'span', 'section', 'article',
+    'main', 'header', 'footer', 'nav', 'ul', 'ol', 'li', 'table', 'thead', 'tbody',
+    'tr', 'td', 'th', 'form', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+}
+_LOCATOR_METHOD_RE = re.compile(r'^(?:page\.)?(?:get_by_|getBy|locator\()', re.I)
+
+
+def _looks_like_positional_locator(text: str) -> bool:
+    """判断定位表达式是否是「位置型」（绝对 XPath 等），而非语义型。"""
+    s = _strip_page_prefix(str(text or '')).strip()
+    if not s:
+        return False
+    if _XPATH_EXPR_RE.match(s):
+        return True
+    # locator("xpath=/...") / locator("/html/...")：只有选择器本身是 XPath 才算位置型；
+    # locator(".item") / locator("#id") 这类 css 仍属语义型，不替换。
+    m = re.search(r'''locator\(\s*["'](.*)["']\s*\)''', s, re.I)
+    if m and _XPATH_EXPR_RE.match(m.group(1).strip()):
+        return True
+    return False
+
+
+# 带「无障碍名称/属性」的语义定位器：能反推出真正的元素名。
+_SEMANTIC_LOCATOR_RE = re.compile(
+    r'get_by_(?:test_id|placeholder|label|role|text|alt_text|title)|'
+    r'getBy(?:TestId|Placeholder|Label|Role|Text|AltText|Title)|'
+    r'''locator\(\s*["'][^"']*(?:name|placeholder|aria-label|data-testid|title)\s*[:=]|'''
+    "locator\\(\\s*[\"'][#\\[]|"
+    r'\.filter\(',
+    re.I,
+)
+
+
+def _is_semantic_locator(locator: str) -> bool:
+    """判断定位器是否带无障碍名称/属性（role/name、placeholder、test-id、#id 等）。
+
+    只有这类定位器反推出的元素名才可信；纯 class / 绝对 XPath 只能给出
+    「item」「xpath html body div…」这种对用户无意义的标签。
+    """
+    s = _strip_page_prefix(str(locator or '')).strip()
+    return bool(s) and bool(_SEMANTIC_LOCATOR_RE.search(s))
+
+
+def _looks_like_locator_junk_label(text: str) -> bool:
+    """判断标签是否是被定位表达式污染出来的噪声（不可读，应弃用）。"""
+    t = _clean_display_label(text).strip().lower()
+    if not t:
+        return True
+    if t.startswith(('xpath ', 'xpath=', 'css ', 'css=')):
+        return True
+    if _LOCATOR_METHOD_RE.match(t):
+        return True
+    if '=' in t or '::' in t:
+        return True
+    # 含 / 且没有中文：XPath 片段
+    if '/' in t and not re.search(r'[\u4e00-\u9fff]', t):
+        return True
+    # 标签名 + 纯数字下标的序列（XPath 被标点替换后的形态）
+    tokens = t.split()
+    if tokens and all(
+        tok in _LABEL_JUNK_TOKENS or re.fullmatch(r'\d+', tok) for tok in tokens
+    ):
+        return True
+    return False
+
+
+def _is_meaningful_label(text: str) -> bool:
+    """可读标签：排除空值、纯标点，以及被当成名字的定位表达式噪声。"""
+    s = _clean_display_label(text)
+    if not s:
+        return False
+    if _looks_like_locator_junk_label(text):
+        return False
+    return bool(re.search(r'[\w\u4e00-\u9fff]', s))
+
+
+# AI 步骤文案的动作前缀；剥离后可得到更接近元素名的短语。
+_AI_STEP_VERB_PREFIXES = (
+    '点击', '单击', '进入', '打开', '选择', '选中', '勾选', '输入', '填写', '填入',
+    '搜索', '切换', '悬停', '滚动', '关闭', '返回', '刷新', '提交', '上传', '下载',
+)
+
+
+def _label_from_ai_step(text: str, action: str = 'click') -> str:
+    """从 AI 步骤文案提取元素名候选。
+
+    例：「点击搜索出来的第一个商品进入商品详情」→「搜索出来的第一个商品」。
+    仅在元素缺失可读名称（绝对 XPath 场景）时兜底，故只取保守的名词短语。
+    """
+    s = str(text or '').strip()
+    if not s:
+        return ''
+    # 丢掉预期描述的尾巴，避免把「预期…」当成元素名
+    s = re.split(r'[，,；;。]|预期|期望', s, maxsplit=1)[0].strip()
+    if not s:
+        return ''
+    for prefix in _AI_STEP_VERB_PREFIXES:
+        if s.startswith(prefix):
+            s = s[len(prefix):]
+            break
+    s = s.strip('【】「」《》<>“”"\'（）()[] 　').strip()
+    # 动作后缀无信息量，去掉后更像元素名
+    s = re.sub(r'的?(?:按钮|输入框|图标|链接|菜单|选项卡|页面|窗口)$', '', s).strip()
+    # 动作链尾部（「进入商品详情」「查看结果」）不是名称的一部分，截掉让标签更像元素名
+    s = re.split(
+        r'(?:进入|打开|跳转到|跳转至|查看|返回|并|然后|接着|再|，|,)',
+        s, maxsplit=1,
+    )[0].strip()
+    if len(s) < 2 or _looks_like_locator_junk_label(s):
+        return ''
+    return s[:30]
+
+
+def _label_from_capture(capture: dict[str, Any] | None) -> str:
+    """从采集 sidecar 提取可读文案（placeholder / role name / text / title）。"""
+    if not capture:
+        return ''
+    for loc in capture.get('locators') or []:
+        strategy = (loc.get('strategy') or '').strip().lower()
+        value = (loc.get('value') or '').strip()
+        if not value or _is_junk_capture_locator(strategy, value):
+            continue
+        if strategy in ('placeholder', 'text', 'title', 'label', 'alt', 'alt_text'):
+            label = _clean_display_label(value)
+            if _is_meaningful_label(label):
+                return label[:40]
+        if strategy == 'role':
+            m = re.search(r'''name\s*=\s*["']([^"']+)["']''', value, re.I)
+            if m:
+                label = _clean_display_label(m.group(1))
+                if _is_meaningful_label(label):
+                    return label[:40]
+    return ''
+
+
+def _resolve_element_display_label(
+    *,
+    locator: str = '',
+    action: str = '',
+    element_name: str = '',
+    capture: dict[str, Any] | None = None,
+    ai_description: str = '',
+) -> tuple[str, str, str]:
+    """统一解析可读标签 / 控件中文名 / element_type，绝不返回定位器噪声。"""
+    label, kind, el_type = _extract_locator_label_and_kind(locator, action)
+    if _looks_like_locator_junk_label(label):
+        label = ''
+    # 非语义定位器（绝对 XPath / 纯 class）反推的标签不可信
+    if label and not _is_semantic_locator(locator):
+        label = ''
+    if not label:
+        cap_label = _label_from_capture(capture)
+        if cap_label:
+            label = cap_label
+    if not label:
+        ai_label = _label_from_ai_step(ai_description, action) if ai_description else ''
+        if ai_label:
+            label = ai_label
+    if not label and _is_meaningful_label(element_name):
+        # 去掉末尾类型后缀，避免「登录按钮」+「按钮」重复
+        cleaned = _clean_display_label(element_name)
+        for suffix in ('按钮', '输入框', '链接', '下拉框', '复选框', '单选框', '文本', '图片', '元素'):
+            if cleaned.endswith(suffix) and len(cleaned) > len(suffix):
+                cleaned = cleaned[: -len(suffix)]
+                break
+        if _is_meaningful_label(cleaned):
+            label = cleaned
+    if _looks_like_locator_junk_label(label):
+        label = ''
+    return label, kind, el_type
+
+
+def _capture_locator_priority(capture: dict[str, Any] | None) -> tuple[int, str]:
+    """按「稳定性」给采集结果排序：语义定位器优先，绝对 XPath 最后。"""
+    if not capture:
+        return (99, '')
+    from .ai_capture import locator_expr_from_capture
+
+    expr = locator_expr_from_capture(capture)
+    if not expr:
+        return (99, '')
+    raw = _strip_page_prefix(expr)
+    priorities = (
+        (0, r'get_by_test_id|getByTestId'),
+        (1, r'get_by_placeholder|getByPlaceholder'),
+        (2, r'get_by_label|getByLabel'),
+        (3, r'get_by_role|getByRole'),
+        (4, r'get_by_alt_text|getByAltText|get_by_title|getByTitle'),
+        (5, r'get_by_text|getByText'),
+        (6, r'''locator\(\s*["'](?:#|\[|\.|[a-z]+\s*\[)'''),
+    )
+    for score, pattern in priorities:
+        if re.search(pattern, raw, re.I):
+            return (score, expr)
+    if r'xpath=' in raw.lower() or raw.strip().startswith('/'):
+        return (8, expr)
+    return (7, expr)
+
+
 def _extract_locator_label_and_kind(locator: str, action: str = '') -> tuple[str, str, str]:
     """
     从 Playwright 定位表达式提取 (显示标签, 控件类型中文, Element.element_type)。
@@ -1334,19 +1537,23 @@ def _extract_locator_label_and_kind(locator: str, action: str = '') -> tuple[str
             return label or kind, kind, default_type
         # 取末段有意义文本
         text_m = re.search(r'''["']([^"']{1,40})["']\s*$''', val)
-        if text_m:
-            return _clean_display_label(text_m.group(1)) or default_kind, default_kind, default_type
-        cleaned = _clean_display_label(re.sub(r'[^\w\u4e00-\u9fff\-]+', ' ', val))
-        if cleaned:
-            return cleaned[:40], default_kind, default_type
+        if text_m and _is_meaningful_label(text_m.group(1)):
+            return _clean_display_label(text_m.group(1)), default_kind, default_type
+        # 位置型选择器值（如 /html/body/div[3]）不能当名字用，跳过文本化兜底
+        if not _looks_like_positional_locator(val):
+            cleaned = _clean_display_label(re.sub(r'[^\w\u4e00-\u9fff\-]+', ' ', val))
+            if _is_meaningful_label(cleaned):
+                return cleaned[:40], default_kind, default_type
 
     # 回退：任意引号内文案
     m = re.search(r'''["']([^"']{1,40})["']''', raw)
-    if m:
-        return _clean_display_label(m.group(1)) or default_kind, default_kind, default_type
+    if m and _is_meaningful_label(m.group(1)):
+        return _clean_display_label(m.group(1)), default_kind, default_type
 
-    method = _clean_display_label(_method_name_from_locator(raw, 0))
-    return method or default_kind, default_kind, default_type
+    # 位置型表达式（绝对 XPath / 无语义方法的 locator）不是可读标签：
+    # 返回空标签，交由调用方用 element_name / 采集文案 / AI 规划文案兜底，
+    # 避免出现「点击「xpath html body div div...」按钮」这种描述。
+    return '', default_kind, default_type
 
 
 def _build_step_description(
@@ -1358,15 +1565,34 @@ def _build_step_description(
     raw: str = '',
     element_name: str = '',
     element_type: str = '',
+    ai_description: str = '',
+    capture: dict[str, Any] | None = None,
 ) -> str:
-    """生成可读的步骤描述，如「点击「登录」按钮」，不含 recorded_ 前缀。"""
+    """生成可读的步骤描述，如「点击「登录」按钮」，不含 recorded_ 前缀。
+
+    ai_description: AI 执行时的自然语言步骤（规划任务）文案；元素无任何可读名称时
+    用它兜底，避免把绝对 XPath 当成元素名写进描述。
+    capture: 执行期采集结果，优先取 placeholder / role name / text。
+    """
     action_l = (action or '').lower()
-    label, kind, inferred_type = _extract_locator_label_and_kind(locator, action_l)
+    label, kind, inferred_type = _resolve_element_display_label(
+        locator=locator,
+        action=action_l,
+        element_name=element_name,
+        capture=capture,
+        ai_description=ai_description,
+    )
     el_type = element_type or inferred_type
     if not kind and el_type:
         kind = _ELEMENT_TYPE_ZH.get(el_type, '元素')
     if not label:
-        label = _clean_display_label(element_name) or kind or '元素'
+        # 元素名本身是定位表达式（如「xpath html body div...」）：退回 AI 步骤文案
+        ai_text = _clean_display_label(ai_description)
+        if ai_text and not _looks_like_locator_junk_label(ai_text):
+            return ai_text[:500]
+        label = kind or '元素'
+    elif _looks_like_locator_junk_label(label):
+        label = kind or '元素'
 
     if action_l == 'navigate':
         return f'跳转到 {url}' if url else '跳转到页面'
@@ -1428,6 +1654,32 @@ def _extract_locator_nth_suffix(raw: str) -> str:
     return ' >> ' + ' >> '.join(parts)
 
 
+def _extract_quoted_call_arg(raw: str, method: str) -> str:
+    """提取 method("...") / method('...') 的首参，支持参数内含另一种引号。"""
+    m = re.search(rf'{method}\s*\(\s*', raw or '', re.I)
+    if not m:
+        return ''
+    i = m.end()
+    if i >= len(raw):
+        return ''
+    quote = raw[i]
+    if quote not in '"\'':
+        return ''
+    i += 1
+    out: list[str] = []
+    while i < len(raw):
+        ch = raw[i]
+        if ch == '\\' and i + 1 < len(raw):
+            out.append(raw[i + 1])
+            i += 2
+            continue
+        if ch == quote:
+            return ''.join(out)
+        out.append(ch)
+        i += 1
+    return ''
+
+
 def _parse_playwright_locator(locator: str) -> tuple[str, str]:
     """将 codegen 定位表达式转为 (strategy_name, locator_value)。"""
     raw = _strip_page_prefix(locator or '')
@@ -1481,9 +1733,9 @@ def _parse_playwright_locator(locator: str) -> tuple[str, str]:
         if m:
             return strategy, f'{m.group(1)}{nth_suffix}'
 
-    loc_m = re.search(r'''(?:locator)\(\s*["']([^"']+)["']''', raw, re.I)
-    if loc_m:
-        val = loc_m.group(1)
+    # locator("...")：支持参数内含另一种引号（xpath contains(@class,'item-a')）
+    val = _extract_quoted_call_arg(raw, 'locator')
+    if val:
         if val.startswith('xpath=') or val.startswith('//') or val.startswith('(//'):
             return 'xpath', f"{val[6:] if val.startswith('xpath=') else val}{nth_suffix}"
         if val.startswith('#'):
@@ -1559,6 +1811,51 @@ def _resolve_page_group(project, page_name: str):
     )
 
 
+def _unique_element_name(project, base_name: str) -> str:
+    from .models import Element
+
+    name = (base_name or '元素')[:200]
+    n = 1
+    while Element.objects.filter(project=project, name=name).exists():
+        name = f'{base_name}_{n}'[:200]
+        n += 1
+    return name
+
+
+def _compose_element_base_name(label: str, kind: str, idx: int) -> str:
+    """拼元素库显示名；禁止把定位器噪声写进名称。"""
+    if label and _looks_like_locator_junk_label(label):
+        label = ''
+    if label and kind and label != kind:
+        return f'{label}{kind}'[:200]
+    if label:
+        return label[:200]
+    return (kind or f'元素{idx + 1}')[:200]
+
+
+def _maybe_rename_junk_element(element, *, locator: str, action: str, capture, ai_description: str, idx: int) -> None:
+    """历史脏名（xpath html body…）在再次生成时改成可读名。"""
+    if not element or not _looks_like_locator_junk_label(element.name or ''):
+        return
+    label, kind, el_type = _resolve_element_display_label(
+        locator=locator,
+        action=action,
+        element_name='',
+        capture=capture,
+        ai_description=ai_description,
+    )
+    base_name = _compose_element_base_name(label, kind, idx)
+    if not base_name or _looks_like_locator_junk_label(base_name):
+        return
+    new_name = _unique_element_name(element.project, base_name)
+    dirty = ['name']
+    element.name = new_name
+    if el_type and element.element_type != el_type:
+        element.element_type = el_type
+        dirty.append('element_type')
+    element.save(update_fields=dirty)
+
+
 def _get_or_create_element_from_locator(
     *,
     project,
@@ -1569,8 +1866,13 @@ def _get_or_create_element_from_locator(
     cache: dict[str, Any],
     idx: int,
     capture: dict[str, Any] | None = None,
+    ai_description: str = '',
 ) -> tuple[Any, bool] | tuple[None, bool]:
-    """按定位表达式匹配或创建 Element，返回 (element, created)。"""
+    """按定位表达式匹配或创建 Element，返回 (element, created)。
+
+    ai_description: AI 步骤文案；定位器无可读名称时（纯 class / 绝对 XPath）用它给新元素命名，
+    避免出现「item按钮」「xpath html body div…按钮」这类元素名。
+    """
     from .models import Element
 
     key = (locator or '').strip()
@@ -1580,6 +1882,10 @@ def _get_or_create_element_from_locator(
         element = cache[key]
         if capture:
             _apply_capture_to_element(element, capture, primary_strategy=_parse_playwright_locator(key)[0], primary_value=_parse_playwright_locator(key)[1])
+        _maybe_rename_junk_element(
+            element, locator=key, action=action, capture=capture,
+            ai_description=ai_description, idx=idx,
+        )
         return element, False
 
     strategy_name, locator_value = _parse_playwright_locator(key)
@@ -1606,22 +1912,22 @@ def _get_or_create_element_from_locator(
                 existing.save(update_fields=['group', 'page'])
         if capture:
             _apply_capture_to_element(existing, capture, primary_strategy=strategy_name, primary_value=locator_value)
+        _maybe_rename_junk_element(
+            existing, locator=key, action=action, capture=capture,
+            ai_description=ai_description, idx=idx,
+        )
         cache[key] = existing
         return existing, False
 
-    label, kind, el_type = _extract_locator_label_and_kind(key, action)
-    # 可读名称：如「登录按钮」「用户名输入框」，避免 recorded_ 前缀
-    if label and kind and label != kind:
-        base_name = f'{label}{kind}'[:200]
-    elif label:
-        base_name = label[:200]
-    else:
-        base_name = kind or _clean_display_label(_method_name_from_locator(key, idx)) or f'元素{idx + 1}'
-    name = base_name
-    n = 1
-    while Element.objects.filter(project=project, name=name).exists():
-        name = f'{base_name}_{n}'[:200]
-        n += 1
+    label, kind, el_type = _resolve_element_display_label(
+        locator=key,
+        action=action,
+        element_name='',
+        capture=capture,
+        ai_description=ai_description,
+    )
+    base_name = _compose_element_base_name(label, kind, idx)
+    name = _unique_element_name(project, base_name)
 
     # 解析页面分组，使元素归属于对应页面，而非「未关联页面」
     page_group = _resolve_page_group(project, page_name)
@@ -1710,6 +2016,18 @@ def _is_junk_capture(capture: dict[str, Any]) -> bool:
     return all(_is_junk_capture_locator(l.get('strategy') or '', l.get('value') or '') for l in locs)
 
 
+def _strip_nth_suffix(value: str) -> str:
+    """去掉 Playwright 链上的 >> nth=N，便于与录制采集（无 nth）对齐。"""
+    return re.sub(r'(?:\s*>>\s*nth=-?\d+)+\s*$', '', (value or '').strip()).strip()
+
+
+def _normalize_locator_for_match(value: str) -> str:
+    """匹配用：去 nth、统一引号、小写。"""
+    s = _strip_nth_suffix(value)
+    s = s.replace("'", '"')
+    return s.lower()
+
+
 def _capture_match_score(capture: dict[str, Any], primary_strategy: str, primary_value: str) -> int:
     """录制采集与 codegen 主定位器的相似度（越高越匹配）。"""
     if _is_junk_capture(capture):
@@ -1718,18 +2036,24 @@ def _capture_match_score(capture: dict[str, Any], primary_strategy: str, primary
     primary_v = (primary_value or '').strip()
     if not primary_v:
         return 0
+    primary_norm = _normalize_locator_for_match(primary_v)
+    primary_base = _normalize_locator_for_match(_strip_nth_suffix(primary_v))
     score = 0
     for loc in capture.get('locators') or []:
         strategy = (loc.get('strategy') or '').strip().lower()
         value = (loc.get('value') or '').strip()
         if not value or _is_junk_capture_locator(strategy, value):
             continue
-        if value == primary_v:
+        value_norm = _normalize_locator_for_match(value)
+        if value_norm == primary_norm:
             score = max(score, 100 if strategy == primary_s else 80)
-        elif primary_v in value or value in primary_v:
+        elif value_norm == primary_base:
+            # 采集无 nth、主定位带 nth：仍视为同一控件
+            score = max(score, 90 if strategy == primary_s else 70)
+        elif primary_norm in value_norm or value_norm in primary_norm or primary_base in value_norm:
             score = max(score, 40)
         elif primary_s and strategy == primary_s and (
-            primary_v[:20] in value or value[:20] in primary_v
+            primary_base[:20] in value_norm or value_norm[:20] in primary_base
         ):
             score = max(score, 30)
     return score
@@ -1743,26 +2067,52 @@ def _take_best_capture(
     primary_value: str,
     sequential_idx: int,
 ) -> dict[str, Any] | None:
-    """优先按内容匹配未使用的 capture，其次按顺序消费。不分配 junk/零分 capture。"""
+    """按内容匹配未使用的 capture；同分就近顺序。
+
+    绝不盲取 sequential：click+fill 同控件只采一次时，盲取会错位，导致后面步骤丢 class/css。
+    """
     best_i = -1
     best_score = 0
     for i, cap in enumerate(captures):
         if i in used or _is_junk_capture(cap):
             continue
         score = _capture_match_score(cap, primary_strategy, primary_value)
-        if score > best_score:
+        if score <= 0:
+            continue
+        closer = best_i < 0 or abs(i - sequential_idx) < abs(best_i - sequential_idx)
+        if score > best_score or (score == best_score and closer):
             best_score = score
             best_i = i
+
     if best_i >= 0 and best_score >= 30:
         used.add(best_i)
         return captures[best_i]
-    # 回退顺序：仅当尚未用过 sequential_idx 且非 junk
+
+    # 顺序兜底：仅当该序号 capture 本身也相关
     if 0 <= sequential_idx < len(captures) and sequential_idx not in used:
         cap = captures[sequential_idx]
         if not _is_junk_capture(cap):
-            used.add(sequential_idx)
-            return cap
+            score = _capture_match_score(cap, primary_strategy, primary_value)
+            if score >= 30:
+                used.add(sequential_idx)
+                return cap
     return None
+
+
+# 备用选择器展示/兜底优先级：class/css 等稳定特征靠前
+_BACKUP_STRATEGY_PRIORITY = {
+    'id': 0,
+    'test-id': 1,
+    'class': 2,
+    'css': 3,
+    'name': 4,
+    'placeholder': 5,
+    'label': 6,
+    'title': 7,
+    'role': 8,
+    'text': 9,
+    'xpath': 10,
+}
 
 
 def _canonicalize_backup_strategy(strategy_name: str) -> str:
@@ -1809,6 +2159,7 @@ def _apply_capture_to_element(
     """把录制采集的备用定位器与控件截图写入 Element。
 
     规则：定位策略可重复；同一策略下同一表达式不可重复（大小写不敏感的策略名 + 精确表达式）。
+    class/css/id 等稳定特征排在备用列表前面，便于导入后直接兜底。
     """
     from django.core.files.base import ContentFile
     import base64
@@ -1819,6 +2170,8 @@ def _apply_capture_to_element(
     seen: set[tuple[str, str]] = set()
     primary_s = (primary_strategy or '').strip().lower()
     primary_v = (primary_value or '').strip()
+    primary_base = _strip_nth_suffix(primary_v)
+    primary_base_norm = _normalize_locator_for_match(primary_base)
     for loc in locators:
         raw_strategy = (loc.get('strategy') or '').strip()
         value = (loc.get('value') or '').strip()
@@ -1826,16 +2179,28 @@ def _apply_capture_to_element(
             continue
         if _is_junk_capture_locator(raw_strategy, value):
             continue
-        if raw_strategy.lower() == primary_s and value == primary_v:
-            continue
         strategy = _canonicalize_backup_strategy(raw_strategy)
-        key = (strategy.lower(), value)
+        strategy_l = strategy.lower()
+        value_norm = _normalize_locator_for_match(value)
+        # 跳过与主选择器相同（含「主带 nth、采集无 nth」）的弱定位，避免备用再次点错同名控件
+        if strategy_l == primary_s and value_norm in {
+            _normalize_locator_for_match(primary_v),
+            primary_base_norm,
+        }:
+            continue
+        key = (strategy_l, value)
         if key in seen:
             continue
         seen.add(key)
         backups.append({'strategy': strategy, 'value': value[:500]})
 
     if backups:
+        backups.sort(
+            key=lambda b: (
+                _BACKUP_STRATEGY_PRIORITY.get(str(b.get('strategy') or '').lower(), 50),
+                len(str(b.get('value') or '')),
+            )
+        )
         # 录制采集为准：覆盖旧备用，避免历史空/脏数据挡掉新结果
         element.backup_locators = backups
         update_fields.append('backup_locators')
@@ -1958,6 +2323,7 @@ def map_parse_to_case_steps(
     created_ids: list[int] = []
     mapped: list[dict[str, Any]] = []
     current_page = default_page
+    prev_locator_key = ''
 
     for idx, step in enumerate(parse.get('steps') or []):
         action = (step.get('action') or '').lower()
@@ -1980,20 +2346,25 @@ def map_parse_to_case_steps(
                 'raw': raw,
                 **_element_step_extras(None),
             })
+            prev_locator_key = ''
             continue
 
         element = None
         capture = None
         if create_elements and locator:
             strategy_name, locator_value = _parse_playwright_locator(locator)
-            capture = _take_best_capture(
-                captures,
-                capture_used,
-                primary_strategy=strategy_name,
-                primary_value=locator_value,
-                sequential_idx=capture_seq,
-            )
-            capture_seq += 1
+            locator_key = f'{strategy_name}|{locator_value}'
+            # click 后 fill 同一控件：录制只采一次，fill 不再抢 capture
+            same_as_prev = bool(prev_locator_key and locator_key == prev_locator_key)
+            if not (action in ('fill', 'select') and same_as_prev):
+                capture = _take_best_capture(
+                    captures,
+                    capture_used,
+                    primary_strategy=strategy_name,
+                    primary_value=locator_value,
+                    sequential_idx=capture_seq,
+                )
+                capture_seq += 1
             element, created = _get_or_create_element_from_locator(
                 project=project,
                 user=user,
@@ -2006,6 +2377,9 @@ def map_parse_to_case_steps(
             )
             if created and element:
                 created_ids.append(element.id)
+            prev_locator_key = locator_key
+        else:
+            prev_locator_key = ''
 
         extras = _element_step_extras(element)
 
@@ -2025,6 +2399,7 @@ def map_parse_to_case_steps(
                     raw=raw,
                     element_name=element.name if element else '',
                     element_type=element.element_type if element else '',
+                    capture=capture,
                 )[:500],
                 'raw': raw,
                 **extras,
@@ -2041,6 +2416,7 @@ def map_parse_to_case_steps(
             raw=raw,
             element_name=element.name if element else '',
             element_type=element.element_type if element else '',
+            capture=capture,
         )
 
         mapped.append({
@@ -2184,6 +2560,85 @@ if __name__ == '__main__':
         _caps, _used, primary_strategy='role', primary_value='button[name="登录"]', sequential_idx=0
     ) is _caps[1]
     assert _capture_match_score(_caps[0], 'css', 'input[name="password"]') >= 80
+
+    # nth 主定位应能命中无 nth 的采集，且多个「删除」按内容各挂一份（不盲取 sequential）
+    _del_caps = [
+        {'locators': [
+            {'strategy': 'role', 'value': 'link[name="删除"]'},
+            {'strategy': 'class', 'value': 'action-a del'},
+            {'strategy': 'css', 'value': 'a.action-a.del'},
+        ]},
+        {'locators': [
+            {'strategy': 'role', 'value': 'link[name="删除"]'},
+            {'strategy': 'class', 'value': 'btn-r'},
+            {'strategy': 'css', 'value': 'a.btn-r'},
+        ]},
+    ]
+    assert _capture_match_score(
+        _del_caps[1], 'role', 'link[name="删除"] >> nth=2'
+    ) >= 80
+    _del_used: set[int] = set()
+    assert _take_best_capture(
+        _del_caps, _del_used,
+        primary_strategy='role', primary_value='link[name="删除"]',
+        sequential_idx=0,
+    ) is _del_caps[0]
+    assert _take_best_capture(
+        _del_caps, _del_used,
+        primary_strategy='role', primary_value='link[name="删除"] >> nth=2',
+        sequential_idx=1,
+    ) is _del_caps[1]
+    # click+fill 同控件：第二次不应靠盲取抢走下一个无关 capture
+    _fill_used: set[int] = set([0])
+    assert _take_best_capture(
+        _del_caps, _fill_used,
+        primary_strategy='role', primary_value='textbox[name="请输入商品名称"]',
+        sequential_idx=1,
+    ) is None
+
+    # 备用排序：class/css 靠前；弱 role 副本不进备用
+    class _FakeEl:
+        backup_locators = None
+        screenshot = None
+        pk = 1
+
+        def save(self, update_fields=None):
+            pass
+
+    _el = _FakeEl()
+    _apply_capture_to_element(
+        _el,
+        _del_caps[1],
+        primary_strategy='role',
+        primary_value='link[name="删除"] >> nth=2',
+    )
+    assert _el.backup_locators, _el.backup_locators
+    assert _el.backup_locators[0]['strategy'].lower() in {'class', 'css'}
+    assert not any(
+        (b.get('strategy') or '').lower() == 'role' for b in _el.backup_locators
+    ), _el.backup_locators
+
+    # 绝对 XPath 不得泄漏进步骤描述 / 元素名
+    _xpath_loc = 'page.locator("xpath=/html/body/div/div/div/div[3]/div[2]")'
+    _junk_name = 'xpath html body div div div div 3 div 2按钮'
+    _d1 = _build_step_description(
+        action='click', locator=_xpath_loc, element_name=_junk_name, element_type='BUTTON',
+        ai_description='点击搜索出来的第一个商品进入商品详情',
+    )
+    _d2 = _build_step_description(
+        action='click', locator=_xpath_loc, element_name=_junk_name, element_type='BUTTON',
+    )
+    assert 'xpath' not in _d1.lower() and '搜索出来的第一个商品' in _d1, _d1
+    assert 'xpath' not in _d2.lower(), _d2
+    assert not _looks_like_locator_junk_label(_compose_element_base_name('', '按钮', 0))
+    _cap_del = {'locators': [
+        {'strategy': 'role', 'value': 'link[name="删除"]'},
+        {'strategy': 'xpath', 'value': '/html/body/div'},
+    ]}
+    assert _label_from_capture(_cap_del) == '删除'
+    assert '删除' in _build_step_description(
+        action='click', locator=_xpath_loc, element_name=_junk_name, capture=_cap_del,
+    )
 
     # 同策略多表达式：均可保留；同策略同表达式去重
     _multi = [

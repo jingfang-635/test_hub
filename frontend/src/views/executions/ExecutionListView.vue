@@ -1,7 +1,7 @@
 <template>
-  <div class="execution-list">
-    <div class="header">
-      <h1>{{ $t('execution.testPlan') }}</h1>
+  <div class="page-container execution-list">
+    <div class="page-header">
+      <h1 class="page-title">{{ $t('execution.testPlan') }}</h1>
       <div class="header-actions">
         <el-button
           v-if="selectedPlans.length > 0"
@@ -20,7 +20,18 @@
 
     <div class="list-card">
       <div class="filter-bar">
-        <el-form :inline="true">
+        <el-form :inline="true" @submit.prevent>
+          <el-form-item>
+            <el-input
+              v-model="filters.name"
+              :placeholder="$t('execution.planNamePlaceholder')"
+              clearable
+              style="width: 220px"
+              @keyup.enter="applyFilters"
+              @change="applyFilters"
+              @clear="applyFilters"
+            />
+          </el-form-item>
           <el-form-item>
             <el-select v-model="filters.project" :placeholder="$t('execution.selectProject')" clearable style="width: 200px" @change="applyFilters">
               <el-option v-for="item in projects" :key="item.id" :label="item.name" :value="item.id"></el-option>
@@ -44,16 +55,17 @@
         style="width: 100%"
         v-loading="loading"
         @selection-change="handleSelectionChange">
-        <el-table-column
-          type="index"
-          :label="$t('execution.serialNumber')"
-          width="80"
-          :index="getSerialNumber" />
+        <el-table-column prop="id" :label="$t('execution.id')" width="80" />
         <el-table-column prop="name" :label="$t('execution.planName')" min-width="200">
           <template #default="scope">
             <el-link type="primary" @click="viewPlan(scope.row.id)">
               {{ scope.row.name }}
             </el-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="description" :label="$t('execution.planDescription')" min-width="200" show-overflow-tooltip>
+          <template #default="scope">
+            {{ scope.row.description || $t('execution.noData') }}
           </template>
         </el-table-column>
         <el-table-column prop="projects" :label="$t('execution.projects')" width="200">
@@ -65,7 +77,6 @@
           </template>
         </el-table-column>
         <el-table-column prop="version" :label="$t('execution.version')" width="120"></el-table-column>
-        <el-table-column prop="creator.username" :label="$t('execution.creator')" width="120"></el-table-column>
         <el-table-column :label="$t('execution.status')" width="100">
           <template #default="scope">
             <el-tag class="status-tag" :type="scope.row.is_active ? 'success' : 'info'">
@@ -390,6 +401,7 @@ const total = ref(0)
 
 // 筛选
 const filters = reactive({
+  name: '',
   project: null,
   is_active: null
 })
@@ -470,7 +482,8 @@ const fetchTestPlans = async () => {
     const params = {
       page: currentPage.value,
       page_size: pageSize.value,
-      ...filters
+      ...filters,
+      name: (filters.name || '').trim()
     }
     // 过滤掉空值
     Object.keys(params).forEach(key => {
@@ -811,11 +824,16 @@ const editPlan = async (plan) => {
     // 设置当前编辑的计划
     currentEditingPlan.value = planDetail
 
-    const projectIds = planDetail.projects?.map(p => {
-      // 如果是字符串，需要找到对应的项目ID
-      const project = projects.value.find(proj => proj.name === p)
-      return project ? project.id : p
-    }) || []
+    // 优先使用详情接口返回的 project_ids / version_id，避免名称反查失败
+    const projectIds = (planDetail.project_ids && planDetail.project_ids.length > 0)
+      ? planDetail.project_ids.map(p => (typeof p === 'object' ? p.id : p))
+      : (planDetail.projects || []).map(p => {
+          if (typeof p === 'number') return p
+          const project = projects.value.find(proj => proj.name === p)
+          return project ? project.id : null
+        }).filter(Boolean)
+
+    const assigneeIds = (planDetail.assignees || []).map(a => (typeof a === 'object' ? a.id : a))
 
     // 填充编辑表单数据
     Object.assign(editPlanForm, {
@@ -824,13 +842,13 @@ const editPlan = async (plan) => {
       description: planDetail.description || '',
       projects: projectIds,
       version: null,
-      assignees: planDetail.assignees || [],
+      assignees: assigneeIds,
       is_active: planDetail.is_active
     })
 
     // 按关联项目加载版本分组后再回填版本
     await loadVersionsByProjects(projectIds, editPlanForm)
-    editPlanForm.version = findVersionIdByName(planDetail.version)
+    editPlanForm.version = planDetail.version_id ?? findVersionIdByName(planDetail.version)
 
     isEditPlanDialogOpen.value = true
   } catch (error) {
@@ -845,14 +863,14 @@ const updatePlan = async () => {
 
     const updateData = {
       name: editPlanForm.name,
-      description: editPlanForm.description,
-      projects: editPlanForm.projects,
-      version: editPlanForm.version,
-      assignees: editPlanForm.assignees,
+      description: editPlanForm.description ?? '',
+      projects: editPlanForm.projects || [],
+      version: editPlanForm.version || null,
+      assignees: editPlanForm.assignees || [],
       is_active: editPlanForm.is_active
     }
 
-    await api.put(`/executions/plans/${editPlanForm.id}/`, updateData)
+    await api.patch(`/executions/plans/${editPlanForm.id}/`, updateData)
     ElMessage.success(t('execution.updateSuccess'))
     isEditPlanDialogOpen.value = false
     resetEditForm()
@@ -929,6 +947,7 @@ const applyFilters = () => {
 
 const resetFilters = () => {
   Object.assign(filters, {
+    name: '',
     project: null,
     is_active: null
   })
@@ -955,11 +974,6 @@ const formatDate = (dateString) => {
 // 处理选择变化
 const handleSelectionChange = (selection) => {
   selectedPlans.value = selection
-}
-
-// 获取序号
-const getSerialNumber = (index) => {
-  return (currentPage.value - 1) * pageSize.value + index + 1
 }
 
 // 批量删除
@@ -1024,15 +1038,26 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* 顶部高度与用例库（TestCaseList）保持一致 */
 .execution-list {
   padding: 20px;
 }
 
-.header {
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
   margin-bottom: 20px;
+  flex-shrink: 0;
+}
+
+/* 与用例库标题一致：沿用全局 page-title（22px / 700） */
+.page-header .page-title {
+  margin: 0;
+  font-size: 22px;
+  font-weight: 700;
+  color: var(--th-text-primary);
+  letter-spacing: -0.02em;
 }
 
 .header-actions {

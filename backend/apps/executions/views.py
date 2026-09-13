@@ -5,8 +5,8 @@ from django.utils import timezone
 from .models import TestPlan, TestRun, TestRunCase, TestRunCaseHistory
 from apps.testcases.models import TestCase
 from apps.projects.models import Project
-from .serializers import (TestPlanSerializer, TestRunSerializer, TestRunCaseSerializer, 
-                         TestPlanDetailSerializer, TestRunCaseDetailSerializer, 
+from .serializers import (TestPlanSerializer, TestPlanWriteSerializer, TestRunSerializer, TestRunCaseSerializer,
+                         TestPlanDetailSerializer, TestRunCaseDetailSerializer,
                          TestRunCaseHistorySerializer)
 
 class TestPlanViewSet(viewsets.ModelViewSet):
@@ -19,12 +19,18 @@ class TestPlanViewSet(viewsets.ModelViewSet):
     def get_serializer_class(self):
         if self.action == 'retrieve':
             return TestPlanDetailSerializer
+        if self.action in ('create', 'update', 'partial_update'):
+            return TestPlanWriteSerializer
         return TestPlanSerializer
 
     def get_queryset(self):
         queryset = TestPlan.objects.all().order_by('-created_at')
+        name = self.request.query_params.get('name')
         project_id = self.request.query_params.get('project')
         is_active = self.request.query_params.get('is_active')
+
+        if name not in (None, ''):
+            queryset = queryset.filter(name__icontains=str(name).strip())
 
         if project_id not in (None, ''):
             try:
@@ -151,28 +157,8 @@ class TestPlanViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def perform_update(self, serializer):
-        # 在更新TestPlan时，处理版本信息
-        version_id = self.request.data.get('version')
-        version = None
-        if version_id:
-            from apps.versions.models import Version
-            try:
-                version = Version.objects.get(id=version_id)
-            except Version.DoesNotExist:
-                pass
-        
-        # 更新测试计划
-        test_plan = serializer.save(version=version)
-        
-        # 更新项目关联
-        project_ids = self.request.data.get('projects', [])
-        if project_ids:
-            test_plan.projects.set(project_ids)
-        
-        # 更新指派人员
-        assignee_ids = self.request.data.get('assignees', [])
-        if assignee_ids:
-            test_plan.assignees.set(assignee_ids)
+        # 由 WriteSerializer 负责写入 name/description/version/projects/assignees/is_active
+        serializer.save()
 
     @action(detail=True, methods=['get'])
     def assigned_testcases(self, request, pk=None):

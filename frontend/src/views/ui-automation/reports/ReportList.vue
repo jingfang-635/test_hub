@@ -1,12 +1,16 @@
 <template>
   <div class="report-view">
-    <div class="header">
-      <h3>{{ $t('uiAutomation.report.title') }}</h3>
-      <div class="actions">
-        <el-select v-model="selectedProject" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
-          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
-          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
-        </el-select>
+    <div class="page-header">
+      <h3 class="page-title">{{ $t('uiAutomation.report.title') }}</h3>
+      <div class="header-actions">
+        <el-button
+          type="danger"
+          :disabled="selectedIds.length === 0"
+          @click="handleBatchDelete"
+        >
+          <el-icon><Delete /></el-icon>
+          {{ $t('uiAutomation.common.batchDelete') }}
+        </el-button>
         <el-button type="primary" @click="refreshReports">
           <el-icon><Refresh /></el-icon>
           {{ $t('uiAutomation.report.refreshReport') }}
@@ -14,10 +18,66 @@
       </div>
     </div>
 
-    <div class="content">
-      <el-table :data="reports" v-loading="loading" style="width: 100%">
+    <div class="card-container">
+      <div class="filter-bar">
+        <el-select
+          v-model="selectedProject"
+          class="filter-item filter-item--project"
+          :placeholder="$t('uiAutomation.common.selectProject')"
+          @change="onProjectChange"
+        >
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
+          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        </el-select>
+        <el-input
+          v-model="suiteSearch"
+          class="filter-item filter-item--suite"
+          :placeholder="$t('uiAutomation.report.testSuite')"
+          clearable
+          @input="handleSuiteSearchInput"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-select
+          v-model="selectedStatus"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.common.status')"
+          clearable
+          @change="handleFilterChange"
+        >
+          <el-option :label="$t('uiAutomation.report.statusPending')" value="PENDING" />
+          <el-option :label="$t('uiAutomation.report.statusRunning')" value="RUNNING" />
+          <el-option :label="$t('uiAutomation.report.statusSuccess')" value="SUCCESS" />
+          <el-option :label="$t('uiAutomation.report.statusFailed')" value="FAILED" />
+          <el-option :label="$t('uiAutomation.report.statusAborted')" value="ABORTED" />
+        </el-select>
+        <el-button @click="handleResetFilter">
+          {{ $t('uiAutomation.common.reset') }}
+        </el-button>
+      </div>
+
+      <el-table
+        :data="reports"
+        v-loading="loading"
+        style="width: 100%"
+        @selection-change="handleSelectionChange"
+      >
+        <el-table-column type="selection" width="50" />
         <el-table-column prop="id" label="ID" width="80" />
-        <el-table-column prop="test_suite_name" :label="$t('uiAutomation.report.testSuite')" min-width="200" />
+        <el-table-column :label="$t('uiAutomation.report.testSuite')" min-width="200">
+          <template #default="{ row }">
+            <el-link
+              type="primary"
+              class="suite-name-link"
+              :underline="false"
+              @click="viewReportDetail(row)"
+            >
+              {{ row.test_suite_name }}
+            </el-link>
+          </template>
+        </el-table-column>
         <el-table-column prop="status" :label="$t('uiAutomation.common.status')" width="120">
           <template #default="{ row }">
             <el-tag :type="getStatusType(row.status)">
@@ -60,17 +120,13 @@
             {{ formatDuration(row.duration) }}
           </template>
         </el-table-column>
-        <el-table-column prop="executed_by_name" :label="$t('uiAutomation.report.executor')" width="120" />
         <el-table-column prop="created_at" :label="$t('uiAutomation.report.executionTime')" width="180">
           <template #default="{ row }">
             {{ formatDate(row.created_at) }}
           </template>
         </el-table-column>
-        <el-table-column :label="$t('uiAutomation.common.operation')" width="360" fixed="right">
+        <el-table-column :label="$t('uiAutomation.common.operation')" width="220" fixed="right">
           <template #default="{ row }">
-            <el-button link class="op-btn op-simple" size="small" @click="viewReportDetail(row)">
-              {{ $t('uiAutomation.report.viewDetail') }}
-            </el-button>
             <el-button
               link
               class="op-btn op-online"
@@ -88,9 +144,6 @@
               @click="downloadOfflineReport(row)"
             >
               {{ $t('uiAutomation.report.downloadOfflineReport') }}
-            </el-button>
-            <el-button link class="op-btn op-delete" size="small" @click="deleteReport(row)">
-              {{ $t('uiAutomation.common.delete') }}
             </el-button>
           </template>
         </el-table-column>
@@ -112,8 +165,10 @@
     <!-- 报告详情对话框 -->
     <el-dialog
       v-model="showDetailDialog"
+      class="report-detail-dialog"
       :title="$t('uiAutomation.report.reportDetail')"
       width="80%"
+      align-center
       :close-on-click-modal="false"
     >
       <div v-if="currentReport" class="report-detail">
@@ -199,6 +254,7 @@
                 <el-button
                   type="primary"
                   link
+                  class="case-detail-btn"
                   @click="viewCaseDetail(row)"
                 >
                   {{ $t('uiAutomation.report.viewDetail') }}
@@ -308,14 +364,15 @@
 </template>
 
 <script setup>
-import { ref, reactive, onMounted } from 'vue'
+import { ref, reactive, onMounted, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Refresh, WarningFilled } from '@element-plus/icons-vue'
+import { Refresh, WarningFilled, Search, Delete } from '@element-plus/icons-vue'
+import { debounce } from 'lodash-es'
 import {
   loadUiAutomationProjects,
   getTestExecutions,
-  deleteTestExecution,
+  batchDeleteTestExecutions,
   generateUiHtmlReport,
   downloadUiHtmlReport
 } from '@/api/ui_automation'
@@ -325,10 +382,13 @@ const { t } = useI18n()
 const reports = ref([])
 const projects = ref([])
 const selectedProject = ref('all')
+const suiteSearch = ref('')
+const selectedStatus = ref('')
 const ALL_PROJECTS = 'all'
 const isAllProjectsSelected = () => selectedProject.value === ALL_PROJECTS || selectedProject.value === ''
 const loading = ref(false)
 const total = ref(0)
+const selectedIds = ref([])
 const onlineLoadingId = ref(null)
 const downloadLoadingId = ref(null)
 const pagination = reactive({
@@ -375,6 +435,12 @@ const loadReports = async () => {
     if (selectedProject.value && !isAllProjectsSelected()) {
       params.project = selectedProject.value
     }
+    if (suiteSearch.value) {
+      params.search = suiteSearch.value
+    }
+    if (selectedStatus.value) {
+      params.status = selectedStatus.value
+    }
 
     const response = await getTestExecutions(params)
 
@@ -395,6 +461,26 @@ const loadReports = async () => {
 
 // 项目切换
 const onProjectChange = async () => {
+  pagination.currentPage = 1
+  await loadReports()
+}
+
+// 套件名称模糊搜索（防抖 400ms）
+const handleSuiteSearchInput = debounce(() => {
+  handleFilterChange()
+}, 400)
+
+// 状态筛选变化
+const handleFilterChange = async () => {
+  pagination.currentPage = 1
+  await loadReports()
+}
+
+// 重置筛选
+const handleResetFilter = async () => {
+  selectedProject.value = ALL_PROJECTS
+  suiteSearch.value = ''
+  selectedStatus.value = ''
   pagination.currentPage = 1
   await loadReports()
 }
@@ -517,11 +603,17 @@ const getActionText = (actionType) => {
   return actionMap[actionType] || actionType
 }
 
-// 删除报告
-const deleteReport = async (report) => {
+// 表格勾选变化
+const handleSelectionChange = (selection) => {
+  selectedIds.value = selection.map((row) => row.id)
+}
+
+// 批量删除报告
+const handleBatchDelete = async () => {
+  if (selectedIds.value.length === 0) return
   try {
     await ElMessageBox.confirm(
-      t('uiAutomation.report.messages.deleteConfirm', { name: report.test_suite_name }),
+      t('uiAutomation.report.messages.batchDeleteConfirm', { count: selectedIds.value.length }),
       t('uiAutomation.report.messages.confirmDelete'),
       {
         confirmButtonText: t('uiAutomation.common.confirm'),
@@ -530,12 +622,13 @@ const deleteReport = async (report) => {
       }
     )
 
-    await deleteTestExecution(report.id)
+    await batchDeleteTestExecutions(selectedIds.value)
     ElMessage.success(t('uiAutomation.report.messages.deleteSuccess'))
+    selectedIds.value = []
     await loadReports()
   } catch (error) {
     if (error !== 'cancel') {
-      console.error('Failed to delete report:', error)
+      console.error('Failed to batch delete reports:', error)
       ElMessage.error(t('uiAutomation.report.messages.deleteFailed'))
     }
   }
@@ -606,44 +699,62 @@ onMounted(async () => {
   selectedProject.value = ALL_PROJECTS
   await loadReports()
 })
+
+onUnmounted(() => {
+  handleSuiteSearchInput.cancel()
+})
 </script>
 
 <style scoped lang="scss">
 .report-view {
   padding: 20px;
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-  background: #f5f5f5;
 }
 
-.header {
+.page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  background: white;
-  padding: 20px;
-  border-radius: 4px;
+  margin-bottom: 16px;
 
-  h3 {
+  .page-title {
     margin: 0;
     color: #303133;
-    font-size: 24px;
+    font-size: 20px;
+    font-weight: 600;
   }
 
-  .actions {
+  .header-actions {
     display: flex;
     align-items: center;
+    gap: 12px;
   }
 }
 
-.content {
-  flex: 1;
-  overflow: auto;
+.card-container {
   background: white;
   padding: 20px;
   border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+}
+
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-bar :deep(.filter-item--project) {
+  width: 160px;
+}
+
+.filter-bar :deep(.filter-item--suite) {
+  width: 254px;
+}
+
+.filter-bar :deep(.filter-item--select) {
+  width: 130px;
 }
 
 .pagination-container {
@@ -652,8 +763,23 @@ onMounted(async () => {
   justify-content: flex-end;
 }
 
-// 报告详情样式
+// 报告详情对话框：固定高度并可滚动
+:deep(.report-detail-dialog) {
+  .el-dialog__body {
+    height: 700px;
+    overflow-y: auto;
+    overflow-x: hidden;
+  }
+}
+
 .report-detail {
+  .case-detail-btn,
+  .case-detail-btn:hover,
+  .case-detail-btn:focus,
+  .case-detail-btn:active {
+    box-shadow: none !important;
+  }
+
   .statistics-section {
     margin-top: 30px;
 
@@ -878,6 +1004,11 @@ onMounted(async () => {
   }
 }
 
+.suite-name-link {
+  font-size: 13px;
+  font-weight: 500;
+}
+
 .op-btn {
   font-size: 12px !important;
   height: auto !important;
@@ -896,12 +1027,6 @@ onMounted(async () => {
   background: transparent !important;
 }
 
-.op-simple,
-.op-simple:hover,
-.op-simple:focus {
-  color: #67c23a !important;
-}
-
 .op-online,
 .op-online:hover,
 .op-online:focus {
@@ -912,11 +1037,5 @@ onMounted(async () => {
 .op-download:hover,
 .op-download:focus {
   color: #e6a23c !important;
-}
-
-.op-delete,
-.op-delete:hover,
-.op-delete:focus {
-  color: #f56c6c !important;
 }
 </style>

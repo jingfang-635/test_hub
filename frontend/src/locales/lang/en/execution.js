@@ -21,6 +21,7 @@ export default {
 
   // Table columns
   serialNumber: 'No.',
+  id: 'ID',
   planName: 'Plan Name',
   project: 'Project',
   projects: 'Projects',

@@ -1236,16 +1236,37 @@ async def _execute_step(page, step: dict[str, Any], elements: list[dict],
                 })
             heal = await suggest_healed_locators(
                 page,
-                {'name': target, 'element_desc': description, 'element_type': action},
+                {
+                    'name': target,
+                    'description': description,
+                    'step_description': description or target,
+                    'element_type': action,
+                },
                 failed_cands,
                 last_err,
             )
+            from .ai_locator_healer import is_too_generic_locator
+            phrases = heal.get('intent_phrases') or []
             for sug in heal.get('locators') or []:
+                if is_too_generic_locator(sug.get('strategy', ''), sug.get('value', '')):
+                    continue
                 loc = _healed_strategy_locator(page, sug.get('strategy', ''), sug.get('value', ''))
                 if loc is None:
                     continue
                 try:
                     await loc.wait_for(state='attached', timeout=3000)
+                    # 有明确意图时，命中控件须覆盖步骤语义
+                    if phrases:
+                        try:
+                            info = await loc.evaluate(
+                                """(el) => (el.innerText || el.value || el.getAttribute('aria-label') ||
+                                  el.title || el.className || '').toString().slice(0, 200)"""
+                            )
+                        except Exception:
+                            info = ''
+                        from .ai_locator_healer import _phrase_in_text
+                        if not any(_phrase_in_text(p, str(info or '')) for p in phrases):
+                            continue
                     await _apply_action_to_handle(loc, action, value)
                     result['status'] = 'done'
                     result['healed'] = True

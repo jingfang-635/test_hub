@@ -91,7 +91,127 @@ class PlaywrightTestEngine:
     def _is_goods_entry_locator(locator_value: str) -> bool:
         """是否为商城商品入口（列表点进详情），点击后需确认完成跳转。"""
         v = (locator_value or '').lower()
-        return 'goods-img' in v or 'goods-list' in v or 'goods-item' in v
+        return any(
+            k in v
+            for k in (
+                'goods-img', 'goods-msg', 'goods-list', 'goods-item',
+                'goods-tit', 'goods-info', 'goods-name',
+            )
+        )
+
+    @staticmethod
+    def _is_goods_entry_intent(element_data: Optional[Dict], locator_value: str) -> bool:
+        """定位器或步骤语义表明要进商品详情时，走「点击并确认跳转」路径。"""
+        if PlaywrightTestEngine._is_goods_entry_locator(locator_value):
+            return True
+        text = ' '.join(
+            str((element_data or {}).get(k) or '')
+            for k in ('name', 'step_description', 'description')
+        )
+        return any(
+            k in text
+            for k in ('第一个商品', '商品详情', '进入详情', '搜索出来的', '商品图片', '商品入口')
+        )
+
+    @staticmethod
+    def _is_cart_nav_intent(element_data: Optional[Dict], locator_value: str) -> bool:
+        """是否为「进入购物车页」导航（非「加入购物车」）。"""
+        v = (locator_value or '').lower()
+        # 柠檬班商城顶部购物车入口
+        if 'item-a' in v:
+            return True
+        text = ' '.join(
+            str((element_data or {}).get(k) or '')
+            for k in ('name', 'step_description', 'description')
+        )
+        if '加入购物车' in text:
+            return False
+        if '购物车' not in text:
+            return False
+        return any(k in text for k in ('顶部', '进入', '打开', '查看', '跳转', '前往'))
+
+    def _is_on_cart_page(self) -> bool:
+        url = (self.page.url if self.page else '') or ''
+        return '/cart' in url
+
+    async def _wait_for_cart_page(self, timeout_ms: int) -> bool:
+        """等待进入购物车页（URL /cart，或出现删除/空车文案）。"""
+        import re
+
+        if self._is_on_cart_page():
+            return True
+        try:
+            await self.page.wait_for_url(re.compile(r'.*/cart'), timeout=max(timeout_ms, 1000))
+            return True
+        except Exception:
+            pass
+        # DOM 兜底：购物车列表删除 / 空车提示
+        markers = [
+            self.page.get_by_role('link', name=re.compile(r'^删除$')),
+            self.page.get_by_text(re.compile(r'购物车空空|您的购物车')),
+            self.page.locator('.action-a.del, a.btn-r, .cart-list, .cart-empty'),
+        ]
+        for loc in markers:
+            try:
+                await loc.first.wait_for(state='visible', timeout=min(1500, max(timeout_ms, 800)))
+                return True
+            except Exception:
+                continue
+        return self._is_on_cart_page()
+
+    async def _click_cart_nav(
+        self,
+        locator,
+        timeout_ms: int,
+        force_action: bool = False,
+    ) -> Tuple[bool, str]:
+        """点击顶部购物车并确认进入 /cart；点到但不跳转则失败（禁止假通过）。"""
+        await self._dismiss_blocking_overlays()
+        await locator.wait_for(state='visible', timeout=timeout_ms)
+        await asyncio.sleep(0.4)
+
+        attempts_desc = []
+        for attempt in range(1, 4):
+            await self._dismiss_blocking_overlays()
+            try:
+                if attempt == 1:
+                    # 优先：带「购物车」文案的 item-a（避免点到其它同 class）
+                    import re as _re
+                    cart_span = self.page.locator('span.item-a').filter(
+                        has_text=_re.compile(r'购物车')
+                    ).first
+                    if await cart_span.count() > 0:
+                        await cart_span.wait_for(state='visible', timeout=min(2000, timeout_ms))
+                        await cart_span.click(timeout=timeout_ms, force=force_action)
+                        attempts_desc.append('span.item-a+购物车')
+                    else:
+                        await locator.click(timeout=timeout_ms, force=force_action)
+                        attempts_desc.append('locator')
+                elif attempt == 2:
+                    alt = self.page.locator('span.item-a, a[href*="cart"]').first
+                    await alt.wait_for(state='visible', timeout=timeout_ms)
+                    await alt.click(timeout=timeout_ms, force=force_action)
+                    attempts_desc.append('item-a/href')
+                else:
+                    await locator.evaluate('el => el.click()')
+                    attempts_desc.append('js-click')
+            except Exception as e:
+                attempts_desc.append(f'fail:{e}')
+                await asyncio.sleep(0.3)
+                continue
+
+            nav_timeout = min(max(timeout_ms, 3000), 8000)
+            if await self._wait_for_cart_page(nav_timeout):
+                return True, (
+                    f'进入购物车成功（第{attempt}次，方式={"/".join(attempts_desc)}，'
+                    f'URL={self.page.url}）'
+                )
+            await asyncio.sleep(0.4)
+
+        return False, (
+            f'点击购物车后未进入购物车页（当前URL: {self.page.url}，'
+            f'尝试: {"/".join(attempts_desc)}）'
+        )
 
     def _is_on_goods_detail(self) -> bool:
         url = (self.page.url if self.page else '') or ''
@@ -123,31 +243,45 @@ class PlaywrightTestEngine:
         locator,
         timeout_ms: int,
         force_action: bool = False,
+        locator_value: str = '',
     ) -> Tuple[bool, str]:
         """
         点击商品入口并确认进入详情。
-        列表页 .goods-img 点击偶发不触发路由（仍停在 /list），需等待结果并重试。
+        列表页 .goods-img / .goods-msg 点击偶发不触发路由（仍停在 /list），需等待结果并重试。
+        .goods-msg 是标题区，常点中但不跳转；优先改点 .goods-img。
         """
         await self._dismiss_blocking_overlays()
         await locator.wait_for(state='visible', timeout=timeout_ms)
         # 搜索结果刚渲染时立刻点可能无效，稍候再点
         await asyncio.sleep(0.6)
 
+        prefer_img = 'goods-msg' in (locator_value or '').lower()
         attempts_desc = []
         for attempt in range(1, 4):
             await self._dismiss_blocking_overlays()
             try:
-                if attempt == 1:
+                if prefer_img and attempt == 1:
+                    parent = self.page.locator('.goods-img').first
+                    await parent.wait_for(state='visible', timeout=timeout_ms)
+                    await parent.click(timeout=timeout_ms, force=force_action)
+                    attempts_desc.append('goods-img-first')
+                elif attempt == 1 or (prefer_img and attempt == 2):
                     await locator.click(timeout=timeout_ms, force=force_action)
-                    attempts_desc.append('img')
+                    attempts_desc.append('locator')
                 elif attempt == 2:
                     parent = self.page.locator('.goods-img').first
                     await parent.wait_for(state='visible', timeout=timeout_ms)
                     await parent.click(timeout=timeout_ms, force=force_action)
                     attempts_desc.append('goods-img')
                 else:
-                    await locator.evaluate('el => el.click()')
-                    attempts_desc.append('js-click')
+                    # 最后：img 子节点 JS 点击
+                    img = self.page.locator('.goods-img > img, .goods-img img').first
+                    if await img.count() > 0:
+                        await img.evaluate('el => el.click()')
+                        attempts_desc.append('img-js')
+                    else:
+                        await locator.evaluate('el => el.click()')
+                        attempts_desc.append('js-click')
             except Exception as e:
                 attempts_desc.append(f'fail:{e}')
                 await asyncio.sleep(0.3)
@@ -410,6 +544,30 @@ class PlaywrightTestEngine:
         )
         return (log or '') + note
 
+    async def _healed_locator_matches_intent(self, locator, phrases: List[str]) -> bool:
+        """探针命中后，再校验控件文案/属性是否覆盖步骤意图；无意图短语则放行。"""
+        if not phrases:
+            return True
+        try:
+            info = await locator.evaluate(
+                """(el) => ({
+                  text: (el.innerText || el.value || el.placeholder || '').trim().slice(0, 160),
+                  aria: el.getAttribute('aria-label') || '',
+                  title: el.getAttribute('title') || '',
+                  name: el.getAttribute('name') || '',
+                  id: el.id || '',
+                  cls: (el.className || '').toString().slice(0, 160),
+                  testid: el.getAttribute('data-testid') || '',
+                })"""
+            )
+        except Exception:  # noqa: BLE001
+            return False
+        hay = ' '.join(str((info or {}).get(k) or '') for k in (
+            'text', 'aria', 'title', 'name', 'id', 'cls', 'testid',
+        ))
+        from .ai_locator_healer import _phrase_in_text
+        return any(_phrase_in_text(p, hay) for p in phrases)
+
     async def _try_ai_heal_locator(
         self,
         element_data: Dict,
@@ -421,6 +579,7 @@ class PlaywrightTestEngine:
         主/备用定位器均失效后，调用 AI 分析并临时尝试推荐定位器。
         仅当次执行生效，不写回元素库/步骤。
         成功返回 (locator, strategy, value)，失败返回 None。
+        必须锚定步骤说明语义；页面无目标或建议过宽时拒绝自愈。
         """
         # 清理上次自愈痕迹
         element_data.pop('_healed', None)
@@ -428,7 +587,7 @@ class PlaywrightTestEngine:
         element_data.pop('_healing_reason', None)
 
         try:
-            from .ai_locator_healer import suggest_healed_locators
+            from .ai_locator_healer import is_too_generic_locator, suggest_healed_locators
 
             heal = await suggest_healed_locators(
                 self.page,
@@ -442,6 +601,7 @@ class PlaywrightTestEngine:
 
         failure_reason = (heal or {}).get('failure_reason') or '主/备用定位器均失效'
         suggestions = (heal or {}).get('locators') or []
+        phrases = (heal or {}).get('intent_phrases') or []
         if not suggestions:
             element_data['_healing_reason'] = failure_reason
             element_data['_healed'] = False
@@ -456,6 +616,9 @@ class PlaywrightTestEngine:
                 continue
             if self._is_junk_locator(strategy, value):
                 continue
+            if is_too_generic_locator(strategy, value):
+                logger.info('skip generic AI heal locator %s=%s', strategy, value[:80])
+                continue
             # 跳过与已失败定位器完全相同的建议
             dup = any(
                 (c.get('strategy') or '').lower() == strategy.lower()
@@ -467,11 +630,23 @@ class PlaywrightTestEngine:
             try:
                 locator = self._build_locator(strategy, value)
                 await locator.wait_for(state='attached', timeout=probe_timeout)
+                if not await self._healed_locator_matches_intent(locator, phrases):
+                    logger.info(
+                        'AI heal locator attached but off-intent %s=%s phrases=%s',
+                        strategy, value[:80], phrases,
+                    )
+                    continue
                 element_data['_healed'] = True
                 element_data['_healed_locator'] = {
                     'strategy': strategy,
                     'value': value,
                     'note': sug.get('note') or '',
+                }
+                element_data['_used_locator'] = {
+                    'strategy': strategy,
+                    'value': value,
+                    'source': 'ai',
+                    'index': -1,
                 }
                 element_data['_healing_reason'] = failure_reason
                 element_data['_candidate_index'] = -1
@@ -503,6 +678,7 @@ class PlaywrightTestEngine:
         element_data.pop('_healed', None)
         element_data.pop('_healed_locator', None)
         element_data.pop('_healing_reason', None)
+        element_data.pop('_used_locator', None)
 
         if not candidates:
             raise PlaywrightTimeout('无可用定位器（主/备用均为空或已过滤）')
@@ -519,6 +695,12 @@ class PlaywrightTestEngine:
                     probe_timeout = min(2000, max(timeout_ms, 1))
                 await locator.wait_for(state='attached', timeout=probe_timeout)
                 element_data['_candidate_index'] = i
+                element_data['_used_locator'] = {
+                    'strategy': cand['strategy'],
+                    'value': cand['value'],
+                    'source': 'primary' if i == 0 else 'backup',
+                    'index': i,
+                }
                 if i > 0:
                     logger.info(
                         'primary locator failed, using backup #%s %s=%s',
@@ -559,6 +741,12 @@ class PlaywrightTestEngine:
                 await locator.wait_for(state='attached', timeout=min(2000, max(timeout_ms, 1)))
                 await action(locator)
                 element_data['_candidate_index'] = i
+                element_data['_used_locator'] = {
+                    'strategy': cand['strategy'],
+                    'value': cand['value'],
+                    'source': 'backup',
+                    'index': i,
+                }
                 logger.info(
                     'action failed on prior locator, using backup #%s %s=%s',
                     i, cand['strategy'], cand['value'][:80],
@@ -580,6 +768,12 @@ class PlaywrightTestEngine:
         Returns:
             (是否成功, 日志信息, 截图base64)
         """
+        element_data = element_data or {}
+        # 自愈必须以步骤说明为语义锚点
+        step_desc = (getattr(step, 'description', None) or '').strip()
+        if step_desc:
+            element_data['step_description'] = step_desc
+
         action_type = step.action_type
         
         # 预先解析变量
@@ -1064,9 +1258,10 @@ class PlaywrightTestEngine:
                         return False, error_log, screenshot_base64
 
                     # 商品列表入口：点击成功不等于已进详情，需确认 URL / 控件
-                    if self._is_goods_entry_locator(locator_value):
+                    if self._is_goods_entry_intent(element_data, locator_value):
                         ok, detail = await self._click_goods_entry(
-                            locator, timeout_ms, force_action=force_action
+                            locator, timeout_ms, force_action=force_action,
+                            locator_value=locator_value,
                         )
                         execution_time = round(time.time() - start_time, 2)
                         if ok:
@@ -1077,6 +1272,30 @@ class PlaywrightTestEngine:
                             log += f"  - 执行时间: {execution_time}秒"
                             return True, log, None
                         error_log = f"✗ 点击商品未进入详情\n  - 元素: '{element_name}'\n"
+                        error_log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                        error_log += f"  - 错误: {detail}\n"
+                        screenshot_base64 = None
+                        try:
+                            screenshot = await self.page.screenshot()
+                            screenshot_base64 = f"data:image/png;base64,{base64.b64encode(screenshot).decode()}"
+                        except Exception:
+                            pass
+                        return False, error_log, screenshot_base64
+
+                    # 顶部购物车入口：点击成功不等于已进 /cart
+                    if self._is_cart_nav_intent(element_data, locator_value):
+                        ok, detail = await self._click_cart_nav(
+                            locator, timeout_ms, force_action=force_action,
+                        )
+                        execution_time = round(time.time() - start_time, 2)
+                        if ok:
+                            log = f"✓ 点击元素 '{element_name}' 成功\n"
+                            log += f"  - 定位器: {locator_strategy}={locator_value}\n"
+                            log += f"  - 购物车跳转: {detail}\n"
+                            log += f"  - 超时设置: {timeout_ms/1000}秒\n"
+                            log += f"  - 执行时间: {execution_time}秒"
+                            return True, log, None
+                        error_log = f"✗ 点击购物车未进入购物车页\n  - 元素: '{element_name}'\n"
                         error_log += f"  - 定位器: {locator_strategy}={locator_value}\n"
                         error_log += f"  - 错误: {detail}\n"
                         screenshot_base64 = None

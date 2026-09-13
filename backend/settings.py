@@ -3,6 +3,16 @@
 from pathlib import Path
 from config_loader import cfg as config  # 统一配置：环境变量 > config.yaml > 默认值
 import os
+import sys
+
+# 统一日志输出编码为 UTF-8：Windows 控制台默认 GBK，
+# 遇到 emoji/特殊字符会抛 UnicodeEncodeError（仅影响日志，不崩溃进程）。
+# 这里重配置标准流，并对无法编码的字符用 backslashreplace 兜底，避免日志丢失。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='backslashreplace')
+    except (AttributeError, ValueError):
+        pass
 
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -422,7 +432,35 @@ if not IS_VERCEL:
     log_dir = os.path.join(BASE_DIR, 'logs')
     os.makedirs(log_dir, exist_ok=True)
 
+# 统一控制台输出编码为 UTF-8，避免 Windows GBK 控制台下写含 emoji 的日志
+# 触发 UnicodeEncodeError: 'gbk' codec can't encode character ...
+for _stream_name in ('stdout', 'stderr'):
+    _stream = getattr(sys, _stream_name, None)
+    if _stream is not None and hasattr(_stream, 'reconfigure'):
+        try:
+            _stream.reconfigure(encoding='utf-8', errors='replace')
+        except Exception:
+            pass
+
+# Windows 控制台默认 GBK，含 emoji 的日志（如 ai_base 的 ✅）会触发
+# UnicodeEncodeError。统一把标准输出/错误流重配置为 UTF-8，避免日志报错。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding='utf-8', errors='replace')
+    except (AttributeError, ValueError):
+        pass
+
 # Logging
+# 统一 UTF-8 输出，避免 Windows 控制台默认 GBK 编码下
+# 日志包含 emoji / 非 GBK 字符时抛出 UnicodeEncodeError
+try:
+    if hasattr(sys.stdout, 'reconfigure'):
+        sys.stdout.reconfigure(encoding='utf-8', errors='replace')
+    if hasattr(sys.stderr, 'reconfigure'):
+        sys.stderr.reconfigure(encoding='utf-8', errors='replace')
+except Exception:
+    pass
+
 # Vercel 等只读环境下用 StreamHandler (输出到 stdout) 替代 FileHandler，
 # 避免 OSError: [Errno 30] Read-only file system
 if IS_VERCEL:
@@ -430,11 +468,16 @@ if IS_VERCEL:
     _error_handler_class = 'logging.StreamHandler'
     _file_handler_filename = None  # StreamHandler 不需要 filename
     _error_handler_filename = None
+    _file_handler_kwargs = {}
+    _error_handler_kwargs = {}
 else:
     _file_handler_class = 'logging.FileHandler'
     _error_handler_class = 'logging.FileHandler'
     _file_handler_filename = os.path.join(BASE_DIR, 'logs', 'app.log')
     _error_handler_filename = os.path.join(BASE_DIR, 'logs', 'error.log')
+    # 文件统一用 UTF-8 写入，保证 emoji / 中文日志可正常落盘
+    _file_handler_kwargs = {'filename': _file_handler_filename, 'encoding': 'utf-8'}
+    _error_handler_kwargs = {'filename': _error_handler_filename, 'encoding': 'utf-8'}
 
 LOGGING = {
     'version': 1,
@@ -455,12 +498,14 @@ LOGGING = {
             'class': _file_handler_class,
             'formatter': 'verbose',
             **({'filename': _file_handler_filename} if _file_handler_filename else {}),
+            **({'encoding': 'utf-8'} if _file_handler_class == 'logging.FileHandler' else {}),
         },
         'error_file': {
             'level': 'ERROR',
             'class': _error_handler_class,
             'formatter': 'verbose',
             **({'filename': _error_handler_filename} if _error_handler_filename else {}),
+            **({'encoding': 'utf-8'} if _error_handler_class == 'logging.FileHandler' else {}),
         },
         'console': {
             'level': 'DEBUG',

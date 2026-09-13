@@ -225,6 +225,25 @@ const features = computed(() => [
   }
 ])
 
+// 提取登录失败的具体原因：后端(DRF)可能返回 detail / error / non_field_errors / 字段错误
+const resolveLoginError = (error) => {
+  const data = error?.response?.data
+  if (!data) {
+    return error?.message || t('auth.loginFailed')
+  }
+  if (typeof data === 'string') return data
+  if (typeof data.error === 'string') return data.error
+  if (typeof data.detail === 'string') return data.detail
+  if (Array.isArray(data.non_field_errors) && data.non_field_errors.length) {
+    return data.non_field_errors.join('；')
+  }
+  // 字段级错误：{ username: ['该字段是必填项。'], password: [...] }
+  const messages = Object.values(data)
+    .flatMap((val) => (Array.isArray(val) ? val : [val]))
+    .filter((msg) => typeof msg === 'string' && msg)
+  return messages.length ? messages.join('；') : t('auth.loginFailed')
+}
+
 const handleLogin = async () => {
   if (!formRef.value) return
 
@@ -253,7 +272,7 @@ const handleLogin = async () => {
 
       } catch (error) {
         console.error('Login failed:', error)
-        ElMessage.error(error.response?.data?.error || t('auth.loginFailed'))
+        ElMessage.error(resolveLoginError(error))
       } finally {
         loading.value = false
       }

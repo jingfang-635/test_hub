@@ -20,6 +20,47 @@
     </div>
 
     <div class="card-container">
+      <div class="filter-bar">
+        <el-input
+          v-model="searchForm.taskName"
+          class="filter-item filter-item--name"
+          :placeholder="$t('uiAutomation.ai.executionRecords.taskName')"
+          clearable
+          @input="handleTaskNameInput"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-select
+          v-model="searchForm.taskSource"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.ai.executionRecords.taskSource')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.ai.taskSourceText')" value="text" />
+          <el-option :label="$t('uiAutomation.ai.taskSourceFile')" value="file" />
+          <el-option :label="$t('uiAutomation.ai.taskSourceCaseConversion')" value="case_conversion" />
+        </el-select>
+        <el-select
+          v-model="searchForm.status"
+          class="filter-item filter-item--select"
+          :placeholder="$t('uiAutomation.ai.executionRecords.status')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.status.pending')" value="pending" />
+          <el-option :label="$t('uiAutomation.status.running')" value="running" />
+          <el-option :label="$t('uiAutomation.status.success')" value="passed" />
+          <el-option :label="$t('uiAutomation.status.failed')" value="failed" />
+          <el-option :label="$t('uiAutomation.status.stopped')" value="stopped" />
+        </el-select>
+        <el-button @click="handleReset">
+          {{ $t('uiAutomation.common.reset') }}
+        </el-button>
+      </div>
+
       <el-table
         :data="records"
         v-loading="loading"
@@ -28,12 +69,13 @@
         ref="tableRef"
       >
         <el-table-column type="selection" width="55" />
-        <el-table-column :label="$t('uiAutomation.ai.executionRecords.serialNumber')" width="80">
-          <template #default="{ $index }">
-            {{ getSerialNumber($index) }}
+        <el-table-column prop="id" :label="$t('uiAutomation.ai.executionRecords.recordId')" width="80" />
+        <el-table-column prop="task_name" :label="$t('uiAutomation.ai.executionRecords.taskName')" min-width="150" show-overflow-tooltip />
+        <el-table-column prop="project_name" :label="$t('uiAutomation.ai.executionRecords.project')" min-width="120" show-overflow-tooltip>
+          <template #default="{ row }">
+            {{ row.project_name || '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="task_name" :label="$t('uiAutomation.ai.executionRecords.taskName')" min-width="150" show-overflow-tooltip />
 
         <el-table-column prop="task_source" :label="$t('uiAutomation.ai.executionRecords.taskSource')" width="120">
           <template #default="{ row }">
@@ -95,6 +137,23 @@
             :placeholder="$t('uiAutomation.ai.taskNamePlaceholder')"
             maxlength="200"
           />
+        </el-form-item>
+
+        <el-form-item :label="$t('uiAutomation.ai.project')">
+          <el-select
+            v-model="taskForm.projectId"
+            :placeholder="$t('uiAutomation.common.selectProject')"
+            clearable
+            style="width: 100%"
+            @change="handleProjectChange"
+          >
+            <el-option
+              v-for="p in projects"
+              :key="p.id"
+              :label="p.name"
+              :value="p.id"
+            />
+          </el-select>
         </el-form-item>
 
         <el-form-item :label="$t('uiAutomation.ai.taskSource')" label-position="left">
@@ -163,6 +222,12 @@
             {{ $t('uiAutomation.ai.gifTip') }}
           </span>
         </el-form-item>
+
+        <el-form-item v-if="taskForm.projectId">
+          <span style="margin-right: 10px;">{{ $t('uiAutomation.ai.reuseLoginState') }}</span>
+          <el-switch v-model="taskForm.autoLogin" />
+          <span class="reuse-login-hint">{{ $t('uiAutomation.ai.reuseLoginStateTip') }}</span>
+        </el-form-item>
       </el-form>
 
       <template #footer>
@@ -201,7 +266,7 @@
           </el-tag>
           <span v-if="taskSourceDetail.task_name" class="task-source-name">{{ taskSourceDetail.task_name }}</span>
         </div>
-        <pre class="task-source-content">{{ taskSourceDetail.task_description || $t('uiAutomation.ai.executionRecords.noContent') }}</pre>
+        <pre class="task-source-content">{{ taskSourceDetailText }}</pre>
       </template>
       <template #footer>
         <el-button @click="taskSourceDetailVisible = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
@@ -233,13 +298,15 @@ import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Delete, Plus, VideoPlay, UploadFilled, Check, CircleClose, Loading, Download, CopyDocument } from '@element-plus/icons-vue'
+import { debounce } from 'lodash-es'
+import { Delete, Plus, VideoPlay, UploadFilled, Check, CircleClose, Loading, Download, CopyDocument, Search } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import {
   getAIExecutionRecords,
   batchDeleteAIExecutionRecords,
   runAdhocAITask,
-  uploadAIExplorationCaseFile
+  uploadAIExplorationCaseFile,
+  loadUiAutomationProjects
 } from '@/api/ui_automation'
 import AIExecutionReport from './AIExecutionReport.vue'
 
@@ -253,6 +320,25 @@ const pagination = reactive({
   pageSize: 20
 })
 
+// —— 搜索条件 ——
+const searchForm = reactive({
+  taskName: '',
+  taskSource: '',
+  status: ''
+})
+
+// 组装列表查询参数（分页 + 搜索条件）
+const buildQueryParams = () => {
+  const params = {
+    page: pagination.currentPage,
+    page_size: pagination.pageSize
+  }
+  if (searchForm.taskName) params.search = searchForm.taskName
+  if (searchForm.taskSource) params.task_source = searchForm.taskSource
+  if (searchForm.status) params.status = searchForm.status
+  return params
+}
+
 let pollTimer = null
 
 const selectedRecords = ref([])
@@ -265,8 +351,11 @@ const reportRecordId = ref(null)
 // —— 新建测试 ——
 const showTaskDialog = ref(false)
 const starting = ref(false)
+const projects = ref([])
 const taskForm = reactive({
   taskName: '',
+  projectId: null,
+  autoLogin: true,
   description: '',
   taskSource: 'text',
   enableGif: true
@@ -294,11 +383,33 @@ const canRun = computed(() => {
 
 function openTaskDialog() {
   taskForm.taskName = ''
+  taskForm.projectId = null
+  taskForm.autoLogin = true
   taskForm.description = ''
   taskForm.taskSource = 'text'
   taskForm.enableGif = true
   clearCaseFile()
+  if (!projects.value.length) loadProjects()
   showTaskDialog.value = true
+}
+
+// 选择项目后默认开启「复用登录态」；未选择项目时不展示该字段
+const handleProjectChange = (projectId) => {
+  if (projectId) taskForm.autoLogin = true
+}
+
+/** 与「项目与版本」一致：仅展示本模块已关联的主项目 */
+const loadProjects = async () => {
+  try {
+    const { projects: list, empty } = await loadUiAutomationProjects()
+    projects.value = list
+    if (empty) {
+      ElMessage.warning('暂无关联 UI自动化 的项目，请先在「项目与版本」中创建并勾选 UI自动化')
+    }
+  } catch (error) {
+    projects.value = []
+    console.error('获取项目列表失败:', error)
+  }
 }
 
 const ensureAIModelConfigured = async () => {
@@ -342,7 +453,11 @@ const handleRun = async () => {
       task_source: taskForm.taskSource,
       task_description: effectiveDescription,
       execution_mode: 'text',
-      enable_gif: taskForm.enableGif
+      enable_gif: taskForm.enableGif,
+      // 项目非必填；未选择时后端按无项目执行
+      project_id: taskForm.projectId || null,
+      // 仅选择项目时展示该开关，默认开启
+      auto_login: taskForm.projectId ? taskForm.autoLogin : false
     }
     if (taskForm.taskSource === 'file' && caseFile.value.cases?.length) {
       payload.parsed_cases = caseFile.value.cases
@@ -414,10 +529,7 @@ const clearCaseFile = () => {
 const loadRecords = async () => {
   loading.value = true
   try {
-    const response = await getAIExecutionRecords({
-      page: pagination.currentPage,
-      page_size: pagination.pageSize
-    })
+    const response = await getAIExecutionRecords(buildQueryParams())
     records.value = response.data.results || []
     total.value = response.data.count || 0
     if (tableRef.value) tableRef.value.clearSelection()
@@ -430,6 +542,24 @@ const loadRecords = async () => {
 }
 
 const handleSizeChange = () => {
+  pagination.currentPage = 1
+  loadRecords()
+}
+
+const handleSearch = () => {
+  pagination.currentPage = 1
+  loadRecords()
+}
+
+// 任务名称输入即时搜索（防抖 400ms，避免每敲一个字就请求一次）
+const handleTaskNameInput = debounce(() => {
+  handleSearch()
+}, 400)
+
+const handleReset = () => {
+  searchForm.taskName = ''
+  searchForm.taskSource = ''
+  searchForm.status = ''
   pagination.currentPage = 1
   loadRecords()
 }
@@ -487,6 +617,24 @@ const openTaskSourceDetail = (row) => {
   taskSourceDetailVisible.value = true
 }
 
+// 任务描述中的 <br> 转为真实换行，便于展示与复制
+const normalizeLineBreaks = (text) => {
+  if (!text) return ''
+  return String(text)
+    .replace(/<br\s*\/?>/gi, '\n')
+    .replace(/<\/p>/gi, '\n')
+    .replace(/<p[^>]*>/gi, '')
+    .replace(/&nbsp;/gi, ' ')
+    .replace(/\n{3,}/g, '\n\n')
+    .trim()
+}
+
+const taskSourceDetailText = computed(() => {
+  const raw = taskSourceDetail.value?.task_description
+  if (!raw) return t('uiAutomation.ai.executionRecords.noContent')
+  return normalizeLineBreaks(raw)
+})
+
 const downloadTaskSource = () => {
   const detail = taskSourceDetail.value
   if (!detail) return
@@ -508,7 +656,7 @@ const downloadTaskSource = () => {
 
   // 文本模式：复制任务描述文本到剪贴板
   if (!detail.task_description) return
-  const content = detail.task_description
+  const content = normalizeLineBreaks(detail.task_description)
   const copyToClipboard = (text) => {
     if (navigator.clipboard && window.isSecureContext) {
       return navigator.clipboard.writeText(text)
@@ -543,10 +691,6 @@ const downloadTaskSource = () => {
 const formatDate = (row, column, cellValue) => {
   if (!cellValue) return ''
   return new Date(cellValue).toLocaleString()
-}
-
-const getSerialNumber = (index) => {
-  return (pagination.currentPage - 1) * pagination.pageSize + index + 1
 }
 
 const handleSelectionChange = (selection) => {
@@ -592,10 +736,7 @@ const startPolling = () => {
     const hasActiveTasks = records.value.some(r => r.status === 'running' || r.status === 'pending')
     if (!hasActiveTasks) return
 
-    getAIExecutionRecords({
-      page: 1,
-      page_size: pagination.pageSize
-    }).then(response => {
+    getAIExecutionRecords(buildQueryParams()).then(response => {
       if (selectedRecords.value.length === 0) {
         records.value = response.data.results || []
         total.value = response.data.count || 0
@@ -611,6 +752,7 @@ onMounted(() => {
 
 onUnmounted(() => {
   if (pollTimer) clearInterval(pollTimer)
+  handleTaskNameInput.cancel()
 })
 </script>
 
@@ -638,6 +780,23 @@ onUnmounted(() => {
   }
 }
 
+.filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+// 搜索控件宽度收窄（约比原先占满整列时小 60%），并彼此紧挨
+.filter-bar :deep(.filter-item--name) {
+  width: 254px;
+}
+
+.filter-bar :deep(.filter-item--select) {
+  width: 130px;
+}
+
 .card-container {
   background-color: #fff;
   border-radius: 4px;
@@ -649,6 +808,12 @@ onUnmounted(() => {
   margin-top: 20px;
   display: flex;
   justify-content: flex-end;
+}
+
+.reuse-login-hint {
+  margin-left: 10px;
+  color: #909399;
+  font-size: 12px;
 }
 
 .case-upload-wrap {

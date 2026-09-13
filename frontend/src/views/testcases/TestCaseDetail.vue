@@ -196,7 +196,6 @@ const confirmReuseAuth = async () => {
         cancelButtonText: t('testcase.aiGenerateStepsReuseAuthNo'),
         distinguishCancelAndClose: true,
         dangerouslyUseHTMLString: true,
-        type: 'info',
       }
     )
     return true

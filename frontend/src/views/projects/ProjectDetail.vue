@@ -169,7 +169,7 @@
               </el-table-column>
               <el-table-column :label="$t('project.actions')" width="150" fixed="right">
                 <template #default="{ row }">
-                  <el-button size="small" type="primary" link @click="openEditEnvDialog(row)">{{ $t('common.edit') }}</el-button>
+                  <el-button class="env-edit-btn" size="small" type="primary" link @click="openEditEnvDialog(row)">{{ $t('common.edit') }}</el-button>
                   <el-button size="small" type="danger" link @click="deleteEnvironment(row)">{{ $t('common.delete') }}</el-button>
                 </template>
               </el-table-column>
@@ -703,6 +703,11 @@ onMounted(() => {
 
 .environments-section {
   padding: 20px 0;
+
+  /* 去掉操作列【编辑】按钮的阴影 */
+  :deep(.el-button--primary.is-link) {
+    box-shadow: none;
+  }
 }
 
 .env-header {

@@ -2,10 +2,6 @@
   <div class="page-container">
     <div class="page-header">
       <h1 class="page-title">{{ $t('uiAutomation.suite.title') }}</h1>
-      <el-select v-model="projectId" :placeholder="$t('uiAutomation.common.selectProject')" style="width: 200px; margin-right: 15px" @change="onProjectChange">
-        <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
-        <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
-      </el-select>
       <el-button type="primary" @click="handleNewSuite">
         <el-icon><Plus /></el-icon>
         {{ $t('uiAutomation.suite.newSuite') }}
@@ -14,20 +10,41 @@
 
     <div class="card-container">
       <div class="filter-bar">
-        <el-row :gutter="20">
-          <el-col :span="6">
-            <el-input
-              v-model="searchText"
-              :placeholder="$t('uiAutomation.suite.searchPlaceholder')"
-              clearable
-              @input="handleSearch"
-            >
-              <template #prefix>
-                <el-icon><Search /></el-icon>
-              </template>
-            </el-input>
-          </el-col>
-        </el-row>
+        <el-select
+          v-model="projectId"
+          class="filter-item filter-item--project"
+          :placeholder="$t('uiAutomation.common.selectProject')"
+          @change="onProjectChange"
+        >
+          <el-option :label="$t('uiAutomation.common.allProjects')" value="all" />
+          <el-option v-for="project in projects" :key="project.id" :label="project.name" :value="project.id" />
+        </el-select>
+        <el-input
+          v-model="searchText"
+          class="filter-item filter-item--search"
+          :placeholder="$t('uiAutomation.suite.searchPlaceholder')"
+          clearable
+          @input="handleSearch"
+        >
+          <template #prefix>
+            <el-icon><Search /></el-icon>
+          </template>
+        </el-input>
+        <el-select
+          v-model="statusFilter"
+          class="filter-item filter-item--status"
+          :placeholder="$t('uiAutomation.suite.executionStatus')"
+          clearable
+          @change="handleSearch"
+        >
+          <el-option :label="$t('uiAutomation.status.notRun')" value="not_run" />
+          <el-option :label="$t('uiAutomation.status.running')" value="running" />
+          <el-option :label="$t('uiAutomation.status.passed')" value="passed" />
+          <el-option :label="$t('uiAutomation.status.failed')" value="failed" />
+        </el-select>
+        <el-button @click="handleReset">
+          {{ $t('uiAutomation.common.reset') }}
+        </el-button>
       </div>
 
       <el-table :data="suites" v-loading="loading" style="width: 100%">
@@ -293,6 +310,7 @@ const getProjectQueryParams = () => (isAllProjectsSelected() ? {} : { project: p
 const suites = ref([])
 const loading = ref(false)
 const searchText = ref('')
+const statusFilter = ref('')
 const total = ref(0)
 const pagination = reactive({
   currentPage: 1,
@@ -374,7 +392,8 @@ const loadSuites = async () => {
       ...getProjectQueryParams(),
       page: pagination.currentPage,
       page_size: pagination.pageSize,
-      search: searchText.value
+      search: searchText.value,
+      ...(statusFilter.value ? { execution_status: statusFilter.value } : {})
     })
 
     if (response.data.results) {
@@ -419,6 +438,15 @@ const onProjectChange = async () => {
 
 // 搜索处理
 const handleSearch = async () => {
+  pagination.currentPage = 1
+  await loadSuites()
+}
+
+// 重置搜索栏（项目、关键字、执行状态）
+const handleReset = async () => {
+  projectId.value = ALL_PROJECTS
+  searchText.value = ''
+  statusFilter.value = ''
   pagination.currentPage = 1
   await loadSuites()
 }
@@ -808,33 +836,46 @@ const handleNewSuite = async () => {
 <style scoped lang="scss">
 .page-container {
   padding: 20px;
-  background: #f5f5f5;
-  min-height: 100vh;
 }
 
 .page-header {
   display: flex;
   justify-content: space-between;
   align-items: center;
-  margin-bottom: 20px;
-  background: white;
-  padding: 20px;
-  border-radius: 4px;
-}
+  margin-bottom: 16px;
 
-.page-title {
-  margin: 0;
-  font-size: 24px;
+  .page-title {
+    margin: 0;
+    font-size: 20px;
+    font-weight: 600;
+  }
 }
 
 .card-container {
   background: white;
   padding: 20px;
   border-radius: 4px;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
 .filter-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 20px;
+  flex-wrap: wrap;
+}
+
+.filter-bar :deep(.filter-item--project) {
+  width: 160px;
+}
+
+.filter-bar :deep(.filter-item--search) {
+  width: 254px;
+}
+
+.filter-bar :deep(.filter-item--status) {
+  width: 130px;
 }
 
 .pagination-container {

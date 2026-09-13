@@ -74,6 +74,7 @@ class CodegenSession:
             'target': self.target,
             'command': ' '.join(self.command),
             'output_path': self.output_path,
+            'captures_path': f'{self.output_path}.captures.json' if self.output_path else '',
             'script_name': self.script_name,
             'project_id': self.project_id,
             'error': self.error,

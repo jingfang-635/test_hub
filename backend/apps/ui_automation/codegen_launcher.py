@@ -11,6 +11,7 @@ from __future__ import annotations
 import argparse
 import asyncio
 import os
+import re
 import sys
 import time
 from pathlib import Path
@@ -226,6 +227,7 @@ _CAPTURE_INIT_JS = r"""
     if (window.__testhubCaptureHandler) {
       document.removeEventListener('click', window.__testhubCaptureHandler, true);
       document.removeEventListener('pointerdown', window.__testhubCaptureHandler, true);
+      document.removeEventListener('mousedown', window.__testhubCaptureHandler, true);
       document.removeEventListener('focusin', window.__testhubFocusHandler, true);
     }
   } catch (e) {}
@@ -375,15 +377,38 @@ _CAPTURE_INIT_JS = r"""
     return out;
   }
 
+  function isPwChrome(el) {
+    if (!el || el.nodeType !== 1) return true;
+    const tag = (el.tagName || '').toLowerCase();
+    if (tag === 'x-pw-glass' || tag.startsWith('x-pw-')) return true;
+    try {
+      if (el.closest && el.closest('x-pw-glass, #playwright-inspector, .playwright-inspector')) return true;
+    } catch (e) {}
+    return false;
+  }
+
+  // Recorder 的 x-pw-glass 会挡住真实点击目标；用坐标穿透取页面元素
+  function resolveTarget(el, clientX, clientY) {
+    if (el && el.nodeType === 3) el = el.parentElement;
+    if (el && !isPwChrome(el)) return el;
+    try {
+      const x = Number(clientX);
+      const y = Number(clientY);
+      if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
+      const stack = document.elementsFromPoint(x, y) || [];
+      for (let i = 0; i < stack.length; i++) {
+        const node = stack[i];
+        if (!isPwChrome(node)) return node;
+      }
+    } catch (e) {}
+    return null;
+  }
+
   function capture(el) {
     if (!window.__testhubCaptureEnabled) return;
     if (!el || el.nodeType !== 1) return;
-    // 点到文本节点时上溯到元素
     if (el.nodeType === 3) el = el.parentElement;
-    if (!el || el.nodeType !== 1) return;
-    const tag = (el.tagName || '').toLowerCase();
-    if (tag === 'x-pw-glass' || tag.startsWith('x-pw-')) return;
-    if (el.closest && el.closest('#playwright-inspector, .playwright-inspector, [class*="pw-"], x-pw-glass')) return;
+    if (!el || el.nodeType !== 1 || isPwChrome(el)) return;
     const locators = buildLocators(el);
     if (!locators.length) return;
     const key = locators.map(l => l.strategy + '=' + l.value).join('|');
@@ -403,9 +428,8 @@ _CAPTURE_INIT_JS = r"""
   }
 
   window.__testhubCaptureHandler = (e) => {
-    let t = e.target;
-    if (t && t.nodeType === 3) t = t.parentElement;
-    capture(t);
+    const t = resolveTarget(e.target, e.clientX, e.clientY);
+    if (t) capture(t);
   };
   window.__testhubFocusHandler = (e) => {
     const t = e.target;
@@ -414,6 +438,7 @@ _CAPTURE_INIT_JS = r"""
 
   document.addEventListener('click', window.__testhubCaptureHandler, true);
   document.addEventListener('pointerdown', window.__testhubCaptureHandler, true);
+  document.addEventListener('mousedown', window.__testhubCaptureHandler, true);
   document.addEventListener('focusin', window.__testhubFocusHandler, true);
   window.__testhubCaptureInstalled = true;
 })();
@@ -422,6 +447,153 @@ _CAPTURE_INIT_JS = r"""
 
 def _captures_path_for(output_path: str) -> Path:
     return Path(str(output_path) + '.captures.json')
+
+
+# 从已定位的 DOM 元素提取多策略（供录制结束回补）
+_EXTRACT_LOCATORS_JS = r'''(el) => {
+  if (!el || el.nodeType !== 1) return [];
+  const out = [];
+  const push = (strategy, value) => {
+    if (!value || !String(value).trim()) return;
+    const v = String(value).trim().slice(0, 500);
+    if (out.some(x => x.strategy === strategy && x.value === v)) return;
+    out.push({ strategy, value: v });
+  };
+  const q = (s) => String(s).replace(/"/g, '\\"');
+  const cssEscape = (s) => (window.CSS && CSS.escape) ? CSS.escape(s) : String(s).replace(/[^a-zA-Z0-9_-]/g, '\\$&');
+  const tag = (el.tagName || '').toLowerCase();
+  if (el.id) {
+    push('id', el.id);
+    push('css', '#' + cssEscape(el.id));
+    push('css', tag + '#' + cssEscape(el.id));
+  }
+  const classRaw = (typeof el.className === 'string' ? el.className : '') || '';
+  const classes = classRaw.trim().split(/\s+/).filter((c) => {
+    if (!c || c.length > 48 || c.includes(':')) return false;
+    if (/^[a-f0-9]{8,}$/i.test(c)) return false;
+    if (/[_-][a-f0-9]{5,}$/i.test(c)) return false;
+    return true;
+  });
+  if (classes.length) {
+    push('class', classes.join(' '));
+    push('css', '.' + classes.map(cssEscape).join('.'));
+    push('css', tag + '.' + classes.map(cssEscape).join('.'));
+  }
+  const nameAttr = el.getAttribute('name');
+  if (nameAttr) {
+    push('name', nameAttr);
+    push('css', tag + '[name="' + q(nameAttr) + '"]');
+  }
+  if (el.getAttribute('placeholder')) {
+    push('placeholder', el.getAttribute('placeholder'));
+  }
+  const role = el.getAttribute('role') || ({
+    button: 'button', a: 'link',
+    input: (el.type === 'checkbox' ? 'checkbox' : el.type === 'radio' ? 'radio' : 'textbox'),
+    select: 'combobox', textarea: 'textbox',
+  })[tag];
+  const accessibleName = (el.getAttribute('aria-label')
+    || el.getAttribute('placeholder')
+    || (el.innerText || '').trim().slice(0, 40)
+    || el.getAttribute('value') || '').trim();
+  if (role && accessibleName) {
+    push('role', role + '[name="' + q(accessibleName) + '"]');
+  }
+  const text = (el.innerText || el.textContent || '').trim().slice(0, 60);
+  if (text && text.length <= 40 && !/^(input|textarea|select)$/i.test(tag)) {
+    push('text', text);
+  }
+  return out;
+}'''
+
+
+def _iter_recorded_locator_exprs(script_path: str) -> list[str]:
+    """从录制脚本抽出 page.get_by_*/locator(...) 表达式（含 .nth 链）。"""
+    path = Path(script_path)
+    if not path.is_file():
+        return []
+    try:
+        text = path.read_text(encoding='utf-8')
+    except Exception:  # noqa: BLE001
+        return []
+    _arg = r'''(?:[^()"']|"[^"]*"|'[^']*'|\([^()]*\))*'''
+    _chain = rf'''(?:\.(?:first|last|nth\(\s*\d+\s*\)|filter\({_arg}\)))*'''
+    _loc = (
+        rf'''(?P<loc>(?:page\.)?(?:get_by_\w+|locator|getBy\w+)\({_arg}\)'''
+        + _chain
+        + r''')'''
+    )
+    action_re = re.compile(_loc + r'''\.(?:click|fill|select_option)\(''')
+    out: list[str] = []
+    for line in text.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith('#'):
+            continue
+        m = action_re.search(stripped)
+        if not m:
+            continue
+        loc = m.group('loc')
+        if loc.startswith('page.'):
+            loc = loc[5:]
+        out.append(loc)
+    return out
+
+
+def _playwright_locator_from_expr(page: Any, expr: str) -> Any | None:
+    """把录制表达式转成 Playwright Locator（支持 role/text/locator + nth）。"""
+    raw = (expr or '').strip()
+    if raw.startswith('page.'):
+        raw = raw[5:]
+    nth_idx: int | None = None
+    if re.search(r'\.first\b', raw, re.I):
+        nth_idx = 0
+    elif re.search(r'\.last\b', raw, re.I):
+        nth_idx = -1
+    else:
+        m_nth = re.search(r'\.nth\(\s*(\d+)\s*\)', raw, re.I)
+        if m_nth:
+            nth_idx = int(m_nth.group(1))
+    base = re.sub(r'\.(?:first|last|nth\(\s*\d+\s*\))\s*$', '', raw, flags=re.I).strip()
+
+    loc = None
+    role_m = re.search(
+        r'''(?:get_by_role|getByRole)\(\s*["']([^"']+)["']''',
+        base,
+        re.I,
+    )
+    if role_m:
+        role = role_m.group(1)
+        name_m = re.search(r'''name\s*=\s*["']([^"']*)["']''', base, re.I)
+        exact = bool(re.search(r'''exact\s*=\s*True''', base, re.I))
+        kwargs: dict[str, Any] = {}
+        if name_m:
+            kwargs['name'] = name_m.group(1)
+        if exact:
+            kwargs['exact'] = True
+        loc = page.get_by_role(role, **kwargs)
+    if loc is None:
+        for method, api in (
+            ('get_by_text|getByText', 'get_by_text'),
+            ('get_by_placeholder|getByPlaceholder', 'get_by_placeholder'),
+            ('get_by_label|getByLabel', 'get_by_label'),
+            ('get_by_title|getByTitle', 'get_by_title'),
+            ('get_by_test_id|getByTestId', 'get_by_test_id'),
+        ):
+            m = re.search(rf'''(?:{method})\(\s*["']([^"']+)["']''', base, re.I)
+            if m:
+                loc = getattr(page, api)(m.group(1))
+                break
+    if loc is None:
+        loc_m = re.search(r'''(?:locator)\(\s*["']([^"']+)["']''', base, re.I)
+        if loc_m:
+            loc = page.locator(loc_m.group(1))
+    if loc is None:
+        return None
+    if nth_idx is None:
+        return loc.first
+    if nth_idx < 0:
+        return loc.last
+    return loc.nth(nth_idx)
 
 
 async def _install_element_capture(context: Any, output_path: str) -> dict[str, Any]:
@@ -456,10 +628,14 @@ async def _install_element_capture(context: Any, output_path: str) -> dict[str, 
             print(f'[codegen_launcher] flush captures failed: {exc}', file=sys.stderr, flush=True)
 
     async def _screenshot_for(page: Any, locators: list[dict[str, Any]]) -> str:
+        """短超时截图；节点不存在时绝不等到默认 30s。"""
         for loc in locators:
             strategy = (loc.get('strategy') or '').lower()
             value = loc.get('value') or ''
             if not value:
+                continue
+            # 超长路径跳转后极易失效，跳过以免卡死停录
+            if len(value) > 120 and strategy in ('css', 'xpath'):
                 continue
             try:
                 if strategy == 'id':
@@ -472,9 +648,16 @@ async def _install_element_capture(context: Any, output_path: str) -> dict[str, 
                     handle = page.locator(f'[name="{value}"]').first
                 elif strategy == 'placeholder':
                     handle = page.get_by_placeholder(value).first
+                elif strategy == 'class':
+                    classes = '.'.join(c for c in value.split() if c)
+                    if not classes:
+                        continue
+                    handle = page.locator(f'.{classes}').first
                 else:
                     continue
-                raw = await handle.screenshot(timeout=1500)
+                if await handle.count() < 1:
+                    continue
+                raw = await handle.screenshot(timeout=800)
                 return base64.b64encode(raw).decode('ascii')
             except Exception:  # noqa: BLE001
                 continue
@@ -527,9 +710,75 @@ async def _install_element_capture(context: Any, output_path: str) -> dict[str, 
         except Exception:  # noqa: BLE001
             pass
 
+    async def _enrich_one_expr(expr: str, enriched_exprs: set[str]) -> bool:
+        """解析脚本定位式并写入 capture。全程短超时，失败立刻跳过；不做截图以免卡关窗。"""
+        if not expr or expr in enriched_exprs:
+            return False
+        pages = [p for p in list(context.pages) if not p.is_closed()]
+        if not pages:
+            return False
+
+        async def _try_page(page: Any) -> dict[str, Any] | None:
+            loc = _playwright_locator_from_expr(page, expr)
+            if loc is None:
+                return None
+            try:
+                n = await asyncio.wait_for(loc.count(), timeout=0.6)
+            except Exception:  # noqa: BLE001
+                return None
+            if n < 1:
+                return None
+            handle = await loc.element_handle(timeout=400)
+            if not handle:
+                return None
+            try:
+                locators = await asyncio.wait_for(handle.evaluate(_EXTRACT_LOCATORS_JS), timeout=0.8)
+            finally:
+                try:
+                    await handle.dispose()
+                except Exception:  # noqa: BLE001
+                    pass
+            if not locators:
+                return None
+            tag = ''
+            try:
+                tag = await asyncio.wait_for(
+                    loc.evaluate('el => (el.tagName || "").toLowerCase()'),
+                    timeout=0.4,
+                )
+            except Exception:  # noqa: BLE001
+                tag = ''
+            return {
+                'ts': int(time.time() * 1000),
+                'tag': tag or '',
+                'locators': locators,
+                'screenshot_b64': '',
+                'from_script': expr[:200],
+            }
+
+        for page in pages:
+            try:
+                cap = await asyncio.wait_for(_try_page(page), timeout=1.2)
+            except Exception:  # noqa: BLE001
+                continue
+            if not cap:
+                continue
+            async with lock:
+                captures.append(cap)
+                await _flush()
+            enriched_exprs.add(expr)
+            print(
+                f'[codegen_launcher] enrich #{len(captures)} locators={len(cap["locators"])} expr={expr[:80]}',
+                flush=True,
+            )
+            return True
+        return False
+
     async def _poll_loop() -> None:
         print('[codegen_launcher] capture poll started', flush=True)
         ticks = 0
+        enriched_exprs: set[str] = set()
+        tried_exprs: set[str] = set()
         while not poll_stop.is_set():
             if enabled['on']:
                 for page in list(context.pages):
@@ -538,23 +787,47 @@ async def _install_element_capture(context: Any, output_path: str) -> dict[str, 
                             continue
                     except Exception:  # noqa: BLE001
                         continue
-                    # 每 ~2s 重装一次监听，防止 Recorder/SPA 冲掉
                     if ticks % 7 == 0:
                         await _ensure_script(page)
                     await _drain_page(page)
+                try:
+                    exprs = _iter_recorded_locator_exprs(output_path)
+                    for expr in exprs:
+                        if expr in enriched_exprs or expr in tried_exprs:
+                            continue
+                        ok = await _enrich_one_expr(expr, enriched_exprs)
+                        tried_exprs.add(expr)
+                        # 失败的过一会儿再试一次（弹层可能刚出来）
+                        if not ok and ticks > 0 and ticks % 20 == 0:
+                            tried_exprs.discard(expr)
+                except Exception as exc:  # noqa: BLE001
+                    if ticks % 20 == 0:
+                        print(f'[codegen_launcher] script enrich tick failed: {exc}', file=sys.stderr, flush=True)
             ticks += 1
             try:
-                await asyncio.wait_for(poll_stop.wait(), timeout=0.35)
+                await asyncio.wait_for(poll_stop.wait(), timeout=0.2)
             except asyncio.TimeoutError:
                 pass
-        # 收尾再扫一次
         for page in list(context.pages):
             try:
                 if not page.is_closed():
                     await _drain_page(page)
             except Exception:  # noqa: BLE001
                 pass
-        print(f'[codegen_launcher] capture poll stopped total={len(captures)}', flush=True)
+        try:
+            for expr in _iter_recorded_locator_exprs(output_path):
+                if expr in enriched_exprs:
+                    continue
+                try:
+                    await asyncio.wait_for(_enrich_one_expr(expr, enriched_exprs), timeout=1.2)
+                except Exception:  # noqa: BLE001
+                    pass
+        except Exception:  # noqa: BLE001
+            pass
+        print(
+            f'[codegen_launcher] capture poll stopped total={len(captures)} enriched={len(enriched_exprs)}',
+            flush=True,
+        )
 
     try:
         await context.add_init_script(_CAPTURE_INIT_JS)
@@ -589,17 +862,46 @@ async def _install_element_capture(context: Any, output_path: str) -> dict[str, 
     async def stop_poll() -> None:
         poll_stop.set()
         task = poll_task.get('task')
-        if task is not None:
+        if task is not None and not task.done():
             try:
-                await asyncio.wait_for(task, timeout=3)
-            except Exception:  # noqa: BLE001
+                await asyncio.wait_for(task, timeout=5)
+            except (asyncio.TimeoutError, asyncio.CancelledError):
                 task.cancel()
+                try:
+                    await task
+                except Exception:  # noqa: BLE001
+                    pass
+        poll_task['task'] = None
+
+    async def enrich_from_script() -> int:
+        """关浏览器前最后一轮脚本回补（单条短超时，总时长由调用方限制）。"""
+        exprs = _iter_recorded_locator_exprs(output_path)
+        if not exprs:
+            print('[codegen_launcher] enrich: no exprs in script yet', flush=True)
+            return 0
+        pages = [p for p in list(context.pages) if not p.is_closed()]
+        if not pages:
+            print('[codegen_launcher] enrich: no open pages', flush=True)
+            return 0
+        enriched_exprs: set[str] = {
+            str(c.get('from_script') or '')
+            for c in captures
+            if c.get('from_script')
+        }
+        before = len(captures)
+        for expr in exprs:
+            try:
+                await asyncio.wait_for(_enrich_one_expr(expr, enriched_exprs), timeout=1.0)
+            except Exception:  # noqa: BLE001
+                continue
+        return max(0, len(captures) - before)
 
     return {
         'enable': enable,
         'disable': disable,
         'start_poll': start_poll,
         'stop_poll': stop_poll,
+        'enrich_from_script': enrich_from_script,
         'path': captures_path,
     }
 
@@ -750,11 +1052,22 @@ async def run_codegen(
                 print(f'[codegen_launcher] seed goto skipped: {exc}', file=sys.stderr, flush=True)
 
         # 立刻开始监听停止（与最大化并行），避免用户在最大化期间点停止导致永远无法收尾
-        async def _flush_auth_before_close() -> None:
+        async def _before_close() -> None:
+            # 停轮询；补采有硬超时，绝不能挡住关浏览器
+            try:
+                await asyncio.wait_for(capture_ctl['stop_poll'](), timeout=6)
+            except Exception as exc:  # noqa: BLE001
+                print(f'[codegen_launcher] stop_poll before close: {exc}', file=sys.stderr, flush=True)
+            try:
+                await asyncio.sleep(0.3)
+                n = await asyncio.wait_for(capture_ctl['enrich_from_script'](), timeout=3)
+                print(f'[codegen_launcher] enrich_from_script added={n}', flush=True)
+            except Exception as exc:  # noqa: BLE001
+                print(f'[codegen_launcher] enrich_from_script skipped: {exc}', file=sys.stderr, flush=True)
             if not auth_path:
                 return
             try:
-                saved = await save_storage_state(context, auth_path)
+                saved = await asyncio.wait_for(save_storage_state(context, auth_path), timeout=3)
                 print(f'[codegen_launcher] auth state flushed={saved} path={auth_path!r}', flush=True)
             except Exception as exc:  # noqa: BLE001
                 print(f'[codegen_launcher] auth state flush failed: {exc}', file=sys.stderr, flush=True)
@@ -763,7 +1076,7 @@ async def run_codegen(
             _wait_until_recording_done(
                 browser, context, stop_path,
                 initially_recording=True,
-                before_close=_flush_auth_before_close,
+                before_close=_before_close,
             )
         )
 
@@ -785,7 +1098,11 @@ async def run_codegen(
             print(f'[codegen_launcher] maximize skipped: {exc}', file=sys.stderr, flush=True)
 
         await wait_task
-        await capture_ctl['stop_poll']()
+        # before_close 里已 stop_poll；此处再调一次保证幂等
+        try:
+            await capture_ctl['stop_poll']()
+        except Exception:  # noqa: BLE001
+            pass
 
         # 给 Recorder 一点时间把 ThrottledFile 刷盘
         await asyncio.sleep(0.3)

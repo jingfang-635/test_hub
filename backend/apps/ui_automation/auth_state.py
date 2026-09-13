@@ -373,6 +373,7 @@ async def _ensure_auth_async(
     from playwright.async_api import async_playwright
 
     storage = load_path_if_exists(auth_path)
+    storage_fresh = bool(storage) and is_fresh(auth_path)
     target = _normalize_url(base_url)
     # 探测/登录用原始地址；复用成功后业务入口用去登录页后的地址
     probe_url = post_login_start_url(target) if target else ''
@@ -407,9 +408,14 @@ async def _ensure_auth_async(
                     need_login = await looks_logged_out(page)
                 except Exception:  # noqa: BLE001
                     need_login = True
+                if need_login and not storage_fresh:
+                    logger.info('ensure auth: stale+logged_out, silent re-login path=%s', auth_path)
             elif storage and not target:
-                # 无 URL 无法探测，信任已有文件
-                return storage
+                if storage_fresh:
+                    return storage
+                # 过期且无 URL：无法探测/静默登录，不注入失效态
+                logger.warning('ensure auth: stale state without base_url path=%s', auth_path)
+                return None
 
             if not need_login:
                 await save_storage_state(context, auth_path)
@@ -480,7 +486,8 @@ def ensure_project_auth_state(
     existing = load_path_if_exists(path)
 
     if existing and not base_url:
-        return existing
+        # 无 URL 无法探测/静默登录：仅信任 TTL 内文件
+        return load_path_if_fresh(path)
     if not existing and not (username and password and base_url):
         return existing
 
@@ -488,7 +495,8 @@ def ensure_project_auth_state(
         return asyncio.run(_ensure_auth_async(path, base_url, username, password))
     except Exception as exc:  # noqa: BLE001
         logger.warning('ensure_project_auth_state failed: %s', exc)
-        return load_path_if_exists(path)
+        # 失败时仅回退仍在 TTL 内的文件，避免把过期态当免登录注入
+        return load_path_if_fresh(path)
 
 
 def auth_status_for_hub_project(hub_project_id: int | str | None) -> dict[str, Any]:
@@ -565,4 +573,6 @@ if __name__ == '__main__':
         'https://cladmin.test.xinjikang.cn:8443/'
     )
     assert post_login_start_url('https://example.com/app/home') == 'https://example.com/app/home'
+    assert load_path_if_fresh(None) is None
+    assert load_path_if_exists(None) is None
     print('auth_state selfcheck ok')

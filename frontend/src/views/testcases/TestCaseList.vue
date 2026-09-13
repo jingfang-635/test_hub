@@ -262,6 +262,19 @@
           </template>
 
           <el-empty v-else :description="$t('testcase.selectCaseTip')" />
+
+          <!-- 仅在 UI自动化 Tab 显示，与 AI 智能测试状态一致 -->
+          <div
+            v-if="showAiGenStatus"
+            class="ai-gen-status"
+            :class="`is-${aiGenStatus}`"
+          >
+            <el-icon v-if="aiGenStatus === 'running'" class="is-loading"><Loading /></el-icon>
+            <el-icon v-else-if="aiGenStatus === 'passed'"><CircleCheck /></el-icon>
+            <el-icon v-else-if="aiGenStatus === 'stopped'"><Remove /></el-icon>
+            <el-icon v-else><CircleClose /></el-icon>
+            <span>{{ aiGenStatusText }}</span>
+          </div>
         </div>
       </div>
     </div>
@@ -269,11 +282,11 @@
 </template>
 
 <script setup>
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, onBeforeUnmount, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Plus, Search, Download, Upload, ArrowLeft } from '@element-plus/icons-vue'
+import { Plus, Search, Download, Upload, ArrowLeft, Loading, CircleCheck, CircleClose, Remove } from '@element-plus/icons-vue'
 import api from '@/utils/api'
 import dayjs from 'dayjs'
 import * as XLSX from 'xlsx'
@@ -284,6 +297,52 @@ const router = useRouter()
 const route = useRoute()
 const loading = ref(false)
 const aiGenerating = ref(false)
+// AI生成步骤状态：'' | generating | success | failed（跨页面保留最后一次）
+const AI_GEN_STORAGE_KEY = 'testhub_ai_gen_steps_status'
+const loadAiGenState = () => {
+  try {
+    return JSON.parse(sessionStorage.getItem(AI_GEN_STORAGE_KEY) || 'null')
+  } catch {
+    return null
+  }
+}
+const saveAiGenState = (patch) => {
+  const next = { ...(loadAiGenState() || {}), ...patch, updatedAt: Date.now() }
+  sessionStorage.setItem(AI_GEN_STORAGE_KEY, JSON.stringify(next))
+}
+// 与 AI 智能测试状态对齐，并兼容旧缓存值
+const normalizeAiGenStatus = (status) => {
+  if (status === 'generating') return 'running'
+  if (status === 'success' || status === 'completed') return 'passed'
+  if (status === 'error') return 'failed'
+  return status
+}
+const setAiGenStatus = (status, extra = {}) => {
+  const normalized = status ? normalizeAiGenStatus(status) : ''
+  aiGenStatus.value = normalized
+  if (extra.caseId !== undefined) aiGenCaseId.value = extra.caseId
+  if (!normalized) {
+    sessionStorage.removeItem(AI_GEN_STORAGE_KEY)
+    aiGenCaseId.value = null
+    return
+  }
+  saveAiGenState({ status: normalized, caseId: aiGenCaseId.value, ...extra })
+}
+const aiGenStatus = ref('')
+const aiGenCaseId = ref(null)
+// 与 AI 智能测试一致：running | passed | failed | stopped
+const aiGenStatusText = computed(() => {
+  const map = {
+    running: t('uiAutomation.status.running'),
+    passed: t('uiAutomation.status.success'),
+    failed: t('uiAutomation.status.failed'),
+    stopped: t('uiAutomation.status.stopped'),
+    // 兼容旧缓存
+    generating: t('uiAutomation.status.running'),
+    success: t('uiAutomation.status.success'),
+  }
+  return map[aiGenStatus.value] || ''
+})
 const allTestcases = ref([])
 const projects = ref([])
 const searchText = ref('')
@@ -307,6 +366,12 @@ const selectedRows = ref([])
 // 分页
 const currentPage = ref(1)
 const pageSize = ref(20)
+// 仅在详情的 UI自动化 Tab 展示状态条
+const showAiGenStatus = computed(() => (
+  viewMode.value === 'detail'
+  && detailActiveTab.value === 'ui'
+  && !!aiGenStatusText.value
+))
 
 // 解析用例类型（手工 manual / UI ui / 接口 api）
 const parseCaseTypes = (raw) => {
@@ -568,7 +633,6 @@ const confirmReuseAuth = async () => {
         cancelButtonText: t('testcase.aiGenerateStepsReuseAuthNo'),
         distinguishCancelAndClose: true,
         dangerouslyUseHTMLString: true,
-        type: 'info',
       }
     )
     return true
@@ -590,12 +654,15 @@ const handleAiGenerateSteps = async (target = 'ui') => {
   if (autoLogin === null) return
 
   aiGenerating.value = true
+  const caseId = selectedCase.value.id
+  setAiGenStatus('running', { caseId, executionId: null })
   try {
     // 校验是否已配置 AI 智能模式模型
     const modelRes = await api.get('/ui-automation/ai-models/')
     const configs = Array.isArray(modelRes.data) ? modelRes.data : []
     const hasActive = configs.some((c) => c.is_active)
     if (!hasActive) {
+      setAiGenStatus('')
       let goConfig = false
       await ElMessageBox.confirm(
         t('uiAutomation.ai.messages.noModelConfigured'),
@@ -620,18 +687,23 @@ const handleAiGenerateSteps = async (target = 'ui') => {
       task_description: taskDescription,
       execution_mode: 'text',
       enable_gif: false,
-      hub_testcase_id: selectedCase.value.id,
+      hub_testcase_id: caseId,
       auto_login: autoLogin,
     })
     const executionId = response?.data?.execution_id
     // 面板模式：不跳转，留在本面板。后台执行完成后轮询刷新选中用例，回显步骤
     ElMessage.success(t('testcase.aiGenerateStepsStarted'))
+    // 提交成功：保持“执行中”，最终结果由轮询给出
     if (executionId) {
-      pollEcho(executionId)
+      const deadline = Date.now() + 300 * 1000
+      setAiGenStatus('running', { caseId, executionId, deadline })
+      pollEcho(executionId, 300, caseId)
     } else {
-      refreshSelectedCase()
+      await refreshSelectedCase()
+      setAiGenStatus('passed', { caseId, executionId: null })
     }
   } catch (error) {
+    setAiGenStatus('failed', { caseId })
     ElMessage.error(error?.response?.data?.error || t('testcase.aiGenerateStepsFailed'))
   } finally {
     aiGenerating.value = false
@@ -639,30 +711,46 @@ const handleAiGenerateSteps = async (target = 'ui') => {
 }
 
 let echoPollTimer = null
-// 轮询等待 AI 执行完成，期间定期刷新选中用例以回显步骤；超时自动停止
-const pollEcho = (executionId, maxSeconds = 300) => {
+// 停止轮询并清理定时器
+const stopEchoPoll = () => {
   if (echoPollTimer) clearInterval(echoPollTimer)
+  echoPollTimer = null
+}
+
+// 轮询等待 AI 执行完成；仅当当前选中用例仍是目标用例时刷新步骤回显
+const pollEcho = (executionId, maxSeconds = 300, caseId = null) => {
+  stopEchoPoll()
+  const targetCaseId = caseId || aiGenCaseId.value
   const deadline = Date.now() + maxSeconds * 1000
+  saveAiGenState({ status: 'running', executionId, caseId: targetCaseId, deadline })
   echoPollTimer = setInterval(async () => {
     try {
       const res = await api.get(`/ui-automation/ai-execution-records/${executionId}/`)
       const status = res?.data?.status
-      // 执行结束（passed/failed/stopped），刷新一次后停止轮询
+      // 与 AI 智能测试一致：running / passed / failed / stopped
       if (status && ['passed', 'failed', 'stopped', 'completed', 'error'].includes(status)) {
-        clearInterval(echoPollTimer)
-        echoPollTimer = null
-        await refreshSelectedCase()
+        stopEchoPoll()
+        if (selectedCase.value?.id === targetCaseId) {
+          await refreshSelectedCase()
+        }
+        setAiGenStatus(status, { caseId: targetCaseId, executionId })
         return
       }
       // 仍在执行中，轻量刷新选中用例
-      await refreshSelectedCase()
+      if (selectedCase.value?.id === targetCaseId) {
+        await refreshSelectedCase()
+      }
     } catch (e) {
       // 单次查询失败忽略
     }
     if (Date.now() > deadline) {
-      clearInterval(echoPollTimer)
-      echoPollTimer = null
-      await refreshSelectedCase()
+      stopEchoPoll()
+      if (selectedCase.value?.id === targetCaseId) {
+        await refreshSelectedCase()
+      }
+      // 超时：当前选中目标用例且有步骤则成功，否则失败
+      const ok = selectedCase.value?.id === targetCaseId && uiDetailSteps.value.length > 0
+      setAiGenStatus(ok ? 'passed' : 'failed', { caseId: targetCaseId, executionId })
     }
   }, 3000)
 }
@@ -940,6 +1028,22 @@ const fetchProjects = async () => {
 onMounted(() => {
   fetchProjects()
   fetchTestCases()
+  // 恢复上次生成状态；若仍在执行中则继续轮询
+  const saved = loadAiGenState()
+  if (saved?.status) {
+    const status = normalizeAiGenStatus(saved.status)
+    aiGenStatus.value = status
+    aiGenCaseId.value = saved.caseId || null
+    if (status === 'running' && saved.executionId) {
+      const remainMs = saved.deadline ? saved.deadline - Date.now() : 300 * 1000
+      const remainSec = Math.max(15, Math.ceil(remainMs / 1000))
+      pollEcho(saved.executionId, remainSec, saved.caseId)
+    }
+  }
+})
+
+onBeforeUnmount(() => {
+  stopEchoPoll()
 })
 </script>
 
@@ -1220,6 +1324,33 @@ onMounted(() => {
 
 .ui-steps {
   margin-top: 0;
+}
+
+.ai-gen-status {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  margin-top: 8px;
+  font-size: 13px;
+
+  &.is-running,
+  &.is-generating {
+    color: #409eff;
+  }
+
+  &.is-passed,
+  &.is-success {
+    color: #67c23a;
+  }
+
+  &.is-failed {
+    color: #f56c6c;
+  }
+
+  &.is-stopped {
+    color: #e6a23c;
+  }
 }
 
 .html-content {

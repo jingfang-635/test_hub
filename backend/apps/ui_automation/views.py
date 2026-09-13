@@ -238,11 +238,14 @@ def _resolve_hub_testcase_env(hub_testcase_id):
 def _ensure_ai_login_state(ui_project_id, base_url):
     """「AI生成步骤」：准备可注入 AI 浏览器会话的项目登录态（storage_state 文件路径）。
 
-    与 Playwright 录制/执行共用同一份项目级登录态文件：已保存则直接复用
-    （失效时静默重登刷新）；缺失且配置了环境登录凭证时先 headless 静默登录生成。
+    与 Playwright 录制/执行共用同一份项目级登录态文件：已保存且有效则直接复用；
+    缺失、TTL 过期或会话失效时 headless 静默登录并覆盖更新。
     返回 (storage_path|None, log_message)。
     """
-    from .auth_state import ensure_project_auth_state, post_login_start_url
+    from .auth_state import (
+        ensure_project_auth_state,
+        post_login_start_url,
+    )
     from .codegen_service import codegen_recorder
 
     if not ui_project_id:
@@ -257,7 +260,10 @@ def _ensure_ai_login_state(ui_project_id, base_url):
         )
         if storage:
             start = post_login_start_url(base_url) if base_url else ''
-            msg = '\n[System] 已复用项目登录态（storage_state），本次执行免登录。'
+            msg = (
+                '\n[System] 已准备项目登录态（有效则复用，过期/失效则静默登录并更新），'
+                '本次执行免登录。'
+            )
             if start and start.rstrip('/') != (base_url or '').strip().rstrip('/'):
                 msg += f'\n[System] 复用登录态起始地址已改写为业务入口: {start}'
             return storage, msg
@@ -900,7 +906,7 @@ class TestSuiteViewSet(viewsets.ModelViewSet):
     queryset = TestSuite.objects.all()
     permission_classes = [IsAuthenticated]
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
-    filterset_fields = ['project']
+    filterset_fields = ['project', 'execution_status']
     search_fields = ['name', 'description']
     ordering = ['-created_at']
 
@@ -1106,7 +1112,7 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
 
     filter_backends = [DjangoFilterBackend, filters.SearchFilter]
     filterset_fields = ['project', 'test_suite', 'test_script', 'status', 'environment', 'executed_by']
-    search_fields = ['error_message']
+    search_fields = ['error_message', 'test_suite__name']
     ordering = ['-created_at']
     pagination_class = StandardPagination
 
@@ -1137,6 +1143,43 @@ class TestExecutionViewSet(viewsets.ModelViewSet):
             )
             if os.path.isdir(target):
                 shutil.rmtree(target, ignore_errors=True)
+
+    @action(detail=False, methods=['post'], url_path='batch-delete')
+    def batch_delete(self, request):
+        """批量删除测试报告"""
+        try:
+            ids = request.data.get('ids', [])
+            if not ids:
+                return Response({'error': '未提供要删除的记录ID'}, status=status.HTTP_400_BAD_REQUEST)
+            if not isinstance(ids, list):
+                return Response({'error': 'ids参数格式错误，应为数组'}, status=status.HTTP_400_BAD_REQUEST)
+
+            # 只允许删除当前用户有权限的记录
+            records_to_delete = self.get_queryset().filter(id__in=ids)
+            if not records_to_delete.exists():
+                return Response({'error': '未找到可删除的记录或没有权限删除'}, status=status.HTTP_404_NOT_FOUND)
+
+            deletable_ids = list(records_to_delete.values_list('id', flat=True))
+
+            for execution in TestExecution.objects.filter(id__in=deletable_ids).select_related('test_suite'):
+                suite_name = execution.test_suite.name if execution.test_suite else f"执行记录#{execution.id}"
+                log_operation('delete', 'report', execution.id, suite_name, request.user)
+
+            deleted_count = TestExecution.objects.filter(id__in=deletable_ids).delete()[0]
+
+            # 清理 Allure 报告产物
+            for execution_id in deletable_ids:
+                for subdir in ('allure-reports', 'allure-results', 'allure-offline', 'reports'):
+                    target = os.path.join(
+                        settings.MEDIA_ROOT, 'ui-automation', subdir, f'execution_{execution_id}'
+                    )
+                    if os.path.isdir(target):
+                        shutil.rmtree(target, ignore_errors=True)
+
+            return Response({'message': f'成功删除 {deleted_count} 条记录', 'deleted_count': deleted_count})
+        except Exception as e:
+            logger.error(f"批量删除测试报告失败: {str(e)}", exc_info=True)
+            return Response({'error': f'批量删除失败: {str(e)}'}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
     def _find_allure_command(self):
         """定位项目内置 / 系统 Allure 可执行文件。"""
@@ -1536,14 +1579,58 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         accessible_projects = UiProject.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
+        return (
+            TestCase.objects.filter(project__in=accessible_projects)
+            .select_related('project', 'created_by')
+            .order_by('-created_at', '-id')
+        )
 
-    def get_queryset(self):
-        # 只显示用户有权限访问的项目的测试用例
-        user = self.request.user
-        accessible_projects = UiProject.objects.filter(
-            models.Q(owner=user) | models.Q(members=user)
-        ).distinct()
-        return TestCase.objects.filter(project__in=accessible_projects).select_related('project', 'created_by')
+    def _replace_steps(self, instance, steps_data):
+        """全量替换用例步骤：先删旧步骤，再按请求顺序重建。
+
+        steps_data 为空列表时表示「删除全部步骤」，属于合法操作，必须照常清空。
+        """
+        existing_steps_count = instance.steps.count()
+        instance.steps.all().delete()
+        logger.info(f"删除了 {existing_steps_count} 个现有步骤")
+
+        created_count = 0
+        for i, step_data in enumerate(steps_data):
+            # 确保步骤数据结构正确
+            step_data = dict(step_data)  # 创建副本避免修改原数据
+            step_data['step_number'] = i + 1  # 确保步骤序号正确
+
+            # 处理元素ID
+            if 'element_id' in step_data:
+                step_data['element'] = step_data.pop('element_id')
+
+            # 移除只读字段
+            step_data.pop('id', None)
+            step_data.pop('element_name', None)
+            step_data.pop('element_locator', None)
+            step_data.pop('created_at', None)
+            step_data.pop('expanded', None)  # 前端UI状态字段
+
+            # 使用模型直接创建，避免序列化器的复杂性
+            try:
+                TestCaseStep.objects.create(
+                    test_case=instance,
+                    step_number=step_data.get('step_number', i + 1),
+                    action_type=step_data.get('action_type', 'click'),
+                    page_filter=step_data.get('page_filter', ''),
+                    element_id=step_data.get('element') if step_data.get('element') else None,
+                    input_value=step_data.get('input_value', ''),
+                    wait_time=step_data.get('wait_time', 1000),
+                    assert_type=step_data.get('assert_type', ''),
+                    assert_value=step_data.get('assert_value', ''),
+                    description=step_data.get('description', '')
+                )
+                created_count += 1
+            except Exception as e:
+                logger.error(f"创建步骤 {i + 1} 失败: {str(e)}")
+                logger.error(f"步骤数据: {step_data}")
+
+        logger.info(f"成功创建了 {created_count} 个新步骤")
 
     def perform_create(self, serializer):
         # 创建测试用例
@@ -1557,45 +1644,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         logger.info(f"创建测试用例 {instance.id} 的步骤数据: {len(steps_data)} 个步骤")
 
         if steps_data:
-            # 创建新步骤
-            created_count = 0
-            for i, step_data in enumerate(steps_data):
-                # 确保步骤数据结构正确
-                step_data = dict(step_data)  # 创建副本避免修改原数据
-                step_data['test_case'] = instance.id  # 使用测试用例ID
-                step_data['step_number'] = i + 1  # 确保步骤序号正确
-
-                # 处理元素ID
-                if 'element_id' in step_data:
-                    step_data['element'] = step_data.pop('element_id')
-
-                # 移除只读字段
-                step_data.pop('id', None)
-                step_data.pop('element_name', None)
-                step_data.pop('element_locator', None)
-                step_data.pop('created_at', None)
-                step_data.pop('expanded', None)  # 前端UI状态字段
-
-                # 使用模型直接创建，避免序列化器的复杂性
-                try:
-                    TestCaseStep.objects.create(
-                        test_case=instance,
-                        step_number=step_data.get('step_number', i + 1),
-                        action_type=step_data.get('action_type', 'click'),
-                        page_filter=step_data.get('page_filter', ''),
-                        element_id=step_data.get('element') if step_data.get('element') else None,
-                        input_value=step_data.get('input_value', ''),
-                        wait_time=step_data.get('wait_time', 1000),
-                        assert_type=step_data.get('assert_type', ''),
-                        assert_value=step_data.get('assert_value', ''),
-                        description=step_data.get('description', '')
-                    )
-                    created_count += 1
-                except Exception as e:
-                    logger.error(f"创建步骤 {i + 1} 失败: {str(e)}")
-                    logger.error(f"步骤数据: {step_data}")
-
-            logger.info(f"成功创建了 {created_count} 个新步骤")
+            self._replace_steps(instance, steps_data)
 
     @action(detail=True, methods=['post'])
     def copy_case(self, request, pk=None):
@@ -1650,55 +1699,15 @@ class TestCaseViewSet(viewsets.ModelViewSet):
         # 记录操作
         log_operation('edit', 'test_case', instance.id, instance.name, self.request.user)
 
-        # 处理步骤数据
-        steps_data = self.request.data.get('steps', [])
+        # 处理步骤数据：仅在请求显式携带 steps 时才做全量替换，
+        # 否则仅改状态的 PATCH 会误删步骤。steps 为空列表表示「删除全部步骤」，
+        # 必须照常清空，不能被当作「未提交步骤」跳过。
+        if 'steps' not in self.request.data:
+            return
+
+        steps_data = self.request.data.get('steps') or []
         logger.info(f"更新测试用例 {instance.id} 的步骤数据: {len(steps_data)} 个步骤")
-
-        if steps_data:
-            # 删除现有步骤
-            existing_steps_count = instance.steps.count()
-            instance.steps.all().delete()
-            logger.info(f"删除了 {existing_steps_count} 个现有步骤")
-
-            # 创建新步骤
-            created_count = 0
-            for i, step_data in enumerate(steps_data):
-                # 确保步骤数据结构正确
-                step_data = dict(step_data)  # 创建副本避免修改原数据
-                step_data['test_case'] = instance.id  # 使用测试用例ID
-                step_data['step_number'] = i + 1  # 确保步骤序号正确
-
-                # 处理元素ID
-                if 'element_id' in step_data:
-                    step_data['element'] = step_data.pop('element_id')
-
-                # 移除只读字段
-                step_data.pop('id', None)
-                step_data.pop('element_name', None)
-                step_data.pop('element_locator', None)
-                step_data.pop('created_at', None)
-                step_data.pop('expanded', None)  # 前端UI状态字段
-
-                # 使用模型直接创建，避免序列化器的复杂性
-                try:
-                    TestCaseStep.objects.create(
-                        test_case=instance,
-                        step_number=step_data.get('step_number', i + 1),
-                        action_type=step_data.get('action_type', 'click'),
-                        page_filter=step_data.get('page_filter', ''),
-                        element_id=step_data.get('element') if step_data.get('element') else None,
-                        input_value=step_data.get('input_value', ''),
-                        wait_time=step_data.get('wait_time', 1000),
-                        assert_type=step_data.get('assert_type', ''),
-                        assert_value=step_data.get('assert_value', ''),
-                        description=step_data.get('description', '')
-                    )
-                    created_count += 1
-                except Exception as e:
-                    logger.error(f"创建步骤 {i + 1} 失败: {str(e)}")
-                    logger.error(f"步骤数据: {step_data}")
-
-            logger.info(f"成功创建了 {created_count} 个新步骤")
+        self._replace_steps(instance, steps_data)
 
     def _generate_step_log(self, step, step_result='success'):
         """根据测试步骤生成执行日志"""
@@ -2201,12 +2210,21 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                     execution_logs.append("")
 
                                     # 记录步骤执行结果（用于JSON格式）
+                                    used_locator = None
+                                    if success and element_data and element_data.get('locator_value'):
+                                        used_locator = {
+                                            'strategy': element_data.get('locator_strategy') or 'css',
+                                            'value': element_data.get('locator_value'),
+                                            'source': 'primary',
+                                            'index': 0,
+                                        }
                                     step_results.append({
                                         'step_number': i,
                                         'action_type': action_type,
                                         'description': description or action_type_text or action_type,
                                         'success': success,
-                                        'error': None if success else step_log
+                                        'error': None if success else step_log,
+                                        'used_locator': used_locator,
                                     })
 
                                     if not success:
@@ -2438,6 +2456,16 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                         healed_locator = (
                                             (element_data or {}).get('_healed_locator') if element_data else None
                                         )
+                                        used_locator = (
+                                            (element_data or {}).get('_used_locator') if element_data else None
+                                        )
+                                        if not used_locator and healed_locator and healed and success:
+                                            used_locator = {
+                                                'strategy': healed_locator.get('strategy'),
+                                                'value': healed_locator.get('value'),
+                                                'source': 'ai',
+                                                'index': -1,
+                                            }
                                         if healed and success:
                                             from .playwright_engine import PlaywrightTestEngine as _PTE
                                             step_log = _PTE.append_heal_note(step_log, element_data)
@@ -2458,6 +2486,7 @@ class TestCaseViewSet(viewsets.ModelViewSet):
                                             'healed': healed and success,
                                             'healing_reason': healing_reason if (healed and success) else None,
                                             'healed_locator': healed_locator if (healed and success) else None,
+                                            'used_locator': used_locator if success else None,
                                         })
 
                                         # 如果步骤失败,保存截图
@@ -2819,11 +2848,18 @@ class TestCaseExecutionViewSet(viewsets.ModelViewSet):
         accessible_projects = UiProject.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
-        return TestCaseExecution.objects.filter(
+        queryset = TestCaseExecution.objects.filter(
             project__in=accessible_projects
         ).select_related(
             'test_case', 'project', 'test_suite', 'created_by'
         )
+        # 关联对象筛选：case=用例（无套件），suite=套件
+        related_object = self.request.query_params.get('related_object')
+        if related_object == 'case':
+            queryset = queryset.filter(test_suite__isnull=True)
+        elif related_object == 'suite':
+            queryset = queryset.filter(test_suite__isnull=False)
+        return queryset
 
     def perform_destroy(self, instance):
         # 记录操作
@@ -3165,12 +3201,21 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                             success, step_log, screenshot_base64 = engine.execute_step(step,
                                                                                                        element_data or {})
 
+                                            used_locator = None
+                                            if success and element_data and element_data.get('locator_value'):
+                                                used_locator = {
+                                                    'strategy': element_data.get('locator_strategy') or 'css',
+                                                    'value': element_data.get('locator_value'),
+                                                    'source': 'primary',
+                                                    'index': 0,
+                                                }
                                             step_results.append({
                                                 'step_number': i,
                                                 'action_type': action_type,
                                                 'description': step_info['description'] or '',
                                                 'success': success,
-                                                'error': None if success else step_log
+                                                'error': None if success else step_log,
+                                                'used_locator': used_locator,
                                             })
 
                                             if not success:
@@ -3262,6 +3307,16 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                                 healed_locator = (
                                                     (element_data or {}).get('_healed_locator') if element_data else None
                                                 )
+                                                used_locator = (
+                                                    (element_data or {}).get('_used_locator') if element_data else None
+                                                )
+                                                if not used_locator and healed_locator and healed and success:
+                                                    used_locator = {
+                                                        'strategy': healed_locator.get('strategy'),
+                                                        'value': healed_locator.get('value'),
+                                                        'source': 'ai',
+                                                        'index': -1,
+                                                    }
                                                 if healed and success:
                                                     from .playwright_engine import PlaywrightTestEngine as _PTE
                                                     step_log = _PTE.append_heal_note(step_log, element_data)
@@ -3275,6 +3330,7 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                                     'healed': healed and success,
                                                     'healing_reason': healing_reason if (healed and success) else None,
                                                     'healed_locator': healed_locator if (healed and success) else None,
+                                                    'used_locator': used_locator if success else None,
                                                 })
 
                                                 if not success:
@@ -4337,10 +4393,44 @@ def _dom_element_to_locator(el):
     return ''
 
 
-def _extract_ai_history_actions(history):
+def _marker_task_ids(action):
+    """从单个模型输出的动作字典里找出「子任务完成」标记的 task_id（可能有多个）。
+
+    形如 {'mark_task_complete': {'task_id': 2}} 或 {'click': {...}, 'mark_task_complete': {...}}。
+    """
+    if not isinstance(action, dict):
+        return []
+    ids = []
+    for name, params in action.items():
+        if name not in ('mark_task_complete', 'mark_task_failed', 'mark_task_skipped',
+                        'update_task_status'):
+            continue
+        if isinstance(params, dict) and params.get('task_id') is not None:
+            ids.append(params['task_id'])
+        elif isinstance(params, int):
+            ids.append(params)
+    return ids
+
+
+def _planned_task_text_map(planned_tasks):
+    """planned_tasks → {task_id(str): 描述}，用于把操作关联到 AI 的自然语言步骤。"""
+    result = {}
+    for task in planned_tasks or []:
+        if not isinstance(task, dict):
+            continue
+        tid = task.get('id')
+        desc = str(task.get('description') or '').strip()
+        if tid is not None and desc:
+            result[str(tid)] = desc
+    return result
+
+
+def _extract_ai_history_actions(history, planned_tasks=None):
     """从 AI 执行历史提取 (action, interacted_element) 列表，供录制用例。
 
     过滤掉纯状态标记动作（mark_task_* / done 等），仅保留真实浏览器操作。
+    planned_tasks: AI 规划的子任务；用标记动作把操作关联到对应的自然语言步骤
+    （'task_description'），供元素无可读名称时兜底描述文案。
     """
     actions = []
     if not history:
@@ -4355,6 +4445,33 @@ def _extract_ai_history_actions(history):
         logger.warning('_extract_ai_history_actions: 调用 model_actions() 失败: %s', e)
         return actions
 
+    # 仅保留真实操作；标记类动作（mark_task_* / update_task_status / done）单独出现时跳过
+    MARKER_ACTIONS = ('mark_task_complete', 'mark_task_failed', 'mark_task_skipped',
+                      'update_task_status', 'done', 'structured_output')
+    task_text_map = _planned_task_text_map(planned_tasks)
+    # 已提取但还没能关联到子任务文案的动作下标
+    # （browser-use 在「任务完成后」才补标记，标记可能与该操作同步或滞后一步）
+    unlabeled_idx: list[int] = []
+
+    def _resolve_marker_text(marker_ids):
+        text = ''
+        for tid in marker_ids:
+            found = task_text_map.get(str(tid))
+            if found:
+                text = found
+        return text
+
+    def _assign_task_text(marker_ids, same_step_idx=None):
+        """把标记所指子任务的文案回填给同一步及其之前未关联的动作。"""
+        text = _resolve_marker_text(marker_ids)
+        if not text:
+            return
+        targets = unlabeled_idx + ([same_step_idx] if same_step_idx is not None else [])
+        for i in targets:
+            if not actions[i]['task_description']:
+                actions[i]['task_description'] = text
+        unlabeled_idx.clear()
+
     for item in items or []:
         if not isinstance(item, dict):
             continue
@@ -4362,26 +4479,240 @@ def _extract_ai_history_actions(history):
         acted = {k: v for k, v in item.items() if k != 'interacted_element'}
         if not acted:
             continue
-        # 仅保留真实操作；标记类动作（mark_task_* / update_task_status / done）单独出现时跳过
-        MARKER_ACTIONS = ('mark_task_complete', 'mark_task_failed', 'mark_task_skipped',
-                          'update_task_status', 'done', 'structured_output')
+
+        marker_ids = _marker_task_ids(acted)
+        # 纯标记步：该子任务已完成，回填此前累积的操作
         if all(k in MARKER_ACTIONS for k in acted):
+            _assign_task_text(marker_ids)
             continue
+
         # 混合动作（真实操作+标记动作）时，剔除标记部分，仅保留真实操作
         real = {k: v for k, v in acted.items() if k not in MARKER_ACTIONS}
         actions.append({
             'action': real or acted,
             'interacted_element': el,
+            'task_description': '',
         })
+        if marker_ids:
+            # 同一步内既有真实操作又有完成标记：该操作属于刚完成的子任务
+            _assign_task_text(marker_ids, same_step_idx=len(actions) - 1)
+        else:
+            unlabeled_idx.append(len(actions) - 1)
     return actions
 
 
-def _ai_actions_to_case_steps(project, user, actions, default_page='main', captures=None):
+def _upgrade_cart_nav_locator(locator: str, capture=None, ai_description: str = '') -> str:
+    """把过宽的 .item-a 升为「含购物车文案」的定位，对齐手动录制的 text/xpath 思路。
+
+    手动录制主选择器是 text=购物车(1)；数量会变，AI 侧用 contains「购物车」+ item-a 更稳。
+    """
+    loc = (locator or '').strip()
+    if not loc or not re.search(r'item-a', loc, re.I):
+        return loc
+    if '购物车' in loc and ('contains' in loc or 'get_by_text' in loc or 'normalize-space' in loc):
+        return loc
+
+    text_hint = ''
+    for item in (capture or {}).get('locators') or []:
+        if (item.get('strategy') or '') == 'text':
+            val = (item.get('value') or '').strip()
+            if '购物车' in val and '加入' not in val:
+                text_hint = re.sub(r'\(\d+\)$', '', val).strip() or val
+                break
+    if not text_hint and '购物车' in (ai_description or '') and '加入购物车' not in (ai_description or ''):
+        text_hint = '购物车'
+    if not text_hint:
+        text_hint = '购物车'
+
+    # 精确到顶部购物车角标，避免误点「加入购物车」；xpath 内用单引号以便 _parse_playwright_locator
+    safe = re.sub(r"[\"']", '', text_hint)
+    return (
+        f'page.locator("xpath=//span[contains(@class,\'item-a\') '
+        f'and contains(normalize-space(),\'{safe}\')]")'
+    )
+
+
+def _action_dict_key(action_dict):
+    if not isinstance(action_dict, dict):
+        return None
+    for k, v in action_dict.items():
+        if isinstance(v, dict) and v:
+            return k
+    for k, v in action_dict.items():
+        if v not in ('', None):
+            return k
+    return next((k for k in action_dict if k), None)
+
+
+def _history_item_ui_action(item) -> str:
+    key = (_action_dict_key((item or {}).get('action') or {}) or '').lower()
+    if key in ('go_to_url', 'navigate'):
+        return 'navigateUrl'
+    if key in ('input_text', 'input', 'fill', 'select_option', 'select', 'select_dropdown', 'select_dropdown_option'):
+        return 'fill'
+    if key in ('click_element', 'click'):
+        return 'click'
+    if key in ('hover_element', 'hover'):
+        return 'hover'
+    if key in ('scroll_down', 'scroll_up', 'scroll_to_text', 'scroll'):
+        return 'scroll'
+    if key in ('extract_content', 'get_text', 'get_text_list', 'assert', 'extract', 'read_content'):
+        return 'assert'
+    if key in ('switch_tab', 'open_new_tab', 'close_tab', 'new_tab'):
+        return 'switchTab'
+    return ''
+
+
+def _history_item_input_text(item) -> str:
+    action = (item or {}).get('action') or {}
+    key = _action_dict_key(action)
+    params = action.get(key) if key else None
+    if isinstance(params, dict):
+        return str(params.get('text') or params.get('value') or '')
+    return str(params or '') if params not in (None, '') else ''
+
+
+def _dedupe_ai_history_actions(actions):
+    """去掉 AI 重试产生的连续重复操作（同动作+同节点/同输入）。"""
+    from .ai_capture import _el_xpath
+
+    out = []
+    prev_sig = None
+    for item in actions or []:
+        ua = _history_item_ui_action(item)
+        if not ua:
+            continue
+        el = item.get('interacted_element')
+        action = item.get('action') or {}
+        key = _action_dict_key(action)
+        params = action.get(key) if key else None
+        idx = ''
+        if isinstance(params, dict) and params.get('index') is not None:
+            idx = str(params.get('index'))
+        sig = (
+            ua,
+            (_el_xpath(el) or idx or '')[:200],
+            _history_item_input_text(item) if ua == 'fill' else '',
+        )
+        if sig == prev_sig:
+            continue
+        out.append(item)
+        prev_sig = sig
+    return out
+
+
+def _preferred_ui_action_for_capture(capture) -> str:
+    from .ai_capture import _is_button_like_capture
+
+    tag = ((capture or {}).get('tag') or '').lower()
+    if tag in ('input', 'textarea', 'select') and not _is_button_like_capture(capture):
+        return 'fill'
+    return 'click'
+
+
+def _align_actions_to_captures(actions, captures):
+    """以采集顺序为权威时间线，从历史动作里借输入值/文案，消化 AI 重试乱序。
+
+    有 sidecar 时步骤数≈采集数；历史里多点的重试/误点不再各自成步。
+    """
+    from .codegen_pipeline_service import _is_junk_capture
+
+    actions = _dedupe_ai_history_actions(actions)
+    if not captures:
+        return actions
+
+    aligned = []
+    # 保留开头导航
+    action_idx = 0
+    while action_idx < len(actions):
+        ua = _history_item_ui_action(actions[action_idx])
+        if ua == 'navigateUrl':
+            aligned.append(actions[action_idx])
+            action_idx += 1
+            continue
+        break
+
+    fill_q = [i for i, a in enumerate(actions) if _history_item_ui_action(a) == 'fill']
+    click_q = [
+        i for i, a in enumerate(actions)
+        if _history_item_ui_action(a) in ('click', 'hover', 'scroll', 'assert')
+    ]
+    fill_p = click_p = 0
+
+    for cap in captures:
+        if _is_junk_capture(cap):
+            continue
+        ui_action = _preferred_ui_action_for_capture(cap)
+        donor = None
+        if ui_action == 'fill':
+            while fill_p < len(fill_q):
+                donor = actions[fill_q[fill_p]]
+                fill_p += 1
+                break
+        else:
+            while click_p < len(click_q):
+                donor = actions[click_q[click_p]]
+                click_p += 1
+                break
+
+        if donor is None:
+            donor = {
+                'action': (
+                    {'input': {'text': ''}} if ui_action == 'fill' else {'click': {'index': 0}}
+                ),
+                'interacted_element': None,
+                'task_description': '',
+            }
+        # 强制使用当前采集；不沿用可能错位的 task_description（避免「先加购后点商品」文案）
+        aligned.append({
+            'action': donor.get('action') or (
+                {'input': {'text': ''}} if ui_action == 'fill' else {'click': {'index': 0}}
+            ),
+            'interacted_element': None,
+            'task_description': '',
+            '_forced_capture': cap,
+            '_forced_ui_action': ui_action,
+        })
+
+    logger.info(
+        'align_actions_to_captures: history=%s captures=%s aligned=%s',
+        len(actions), len(captures), len(aligned),
+    )
+    return aligned
+
+
+def _dedupe_mapped_steps(steps):
+    """映射后再去重：同元素同操作只保留有限次（删除确认允许 2 次）。"""
+    out = []
+    counts = {}
+    for s in steps or []:
+        fp = (
+            s.get('action_type'),
+            s.get('element_id'),
+            (s.get('input_value') or '').strip() if s.get('action_type') == 'fill' else '',
+        )
+        desc = str(s.get('description') or '')
+        limit = 2 if ('删除' in desc or '确认' in desc) else 1
+        n = counts.get(fp, 0)
+        if n >= limit:
+            continue
+        counts[fp] = n + 1
+        out.append(s)
+    return out
+
+
+def _ai_actions_to_case_steps(project, user, actions, default_page='main', captures=None,
+                              skip_initial_navigation=False):
     """把 AI 执行历史上的操作+定位器转换为用例步骤(DTO 结构)，并同步创建元素。
 
     与 codegen_pipeline_service.map_parse_to_case_steps 产出结构保持一致。
     captures: ai_capture sidecar（截图+备用选择器）。
     主定位器优先；若历史缺 interacted_element（常见于 click），则用采集结果兜底建元素。
+    绝对 XPath 这类「位置型」主定位器优先替换为采集到的语义定位器（placeholder/role/text/css），
+    避免元素名与步骤描述退化成「xpath html body div div...」。
+    skip_initial_navigation: 复用项目登录态时，首屏导航由引擎自动注入
+    （browser-use initial_actions），用例文本也常重复写一次「打开网站X」，
+    这些开头的 navigate 不属于用例业务步骤，回显时跳过。
     返回 (steps, created_element_ids)。
     """
     from .codegen_pipeline_service import (
@@ -4390,8 +4721,16 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
         _build_step_description,
         _page_name_from_url,
         _parse_playwright_locator,
+        _capture_locator_priority,
+        _looks_like_positional_locator,
     )
     from .ai_capture import _take_ai_capture, locator_expr_from_capture
+
+    # 有采集时以采集顺序为准，消化 AI 重试导致的乱序/重复
+    if captures:
+        actions = _align_actions_to_captures(actions, captures)
+    else:
+        actions = _dedupe_ai_history_actions(actions)
 
     mapped = []
     element_cache = {}
@@ -4403,35 +4742,37 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
     ELEMENT_ACTIONS = ('click', 'fill', 'hover', 'scroll', 'assert')
 
     def _action_key(action_dict):
-        # browser-use 动作序列化形如 {click_element: {...}} 或 {go_to_url: {...}}
-        for k, v in action_dict.items():
-            if isinstance(v, dict) and v:
-                return k
-        for k, v in action_dict.items():
-            if v not in ('', None):
-                return k
-        return next((k for k in action_dict if k), None)
+        return _action_dict_key(action_dict)
 
     for item in actions:
         action_dict = item.get('action') or {}
         el = item.get('interacted_element')
+        ai_description = str(item.get('task_description') or '').strip()
+        forced_cap = item.get('_forced_capture')
+        forced_ui = item.get('_forced_ui_action')
         key = _action_key(action_dict)
-        if not key:
+        if not key and not forced_cap:
             continue
-        params = action_dict.get(key) or {}
-        action_l = key.lower()
+        params = action_dict.get(key) or {} if key else {}
+        action_l = (key or '').lower()
 
         # 导航：定位器无目标，直接记录 URL
-        if action_l in ('go_to_url', 'navigate'):
+        if action_l in ('go_to_url', 'navigate') and not forced_cap:
             url = params.get('url', '') if isinstance(params, dict) else str(params)
             if url:
                 current_page = _page_name_from_url(url) or current_page
+            # 复用登录态时，首屏导航由引擎注入（browser-use initial_actions），
+            # 且用例文本常再写一次「打开网站X」，会连续出现多个开头的 navigate。
+            # 这些都不属于用例业务步骤：跳过开头连续的导航，仅保留页面归属更新。
+            # 限定「任何业务步骤之前」，以免误删后续真实的跳转步骤。
+            if skip_initial_navigation and not mapped:
+                continue
             mapped.append({
                 'action_type': 'navigateUrl',
                 'page_filter': current_page,
                 'element_id': None,
                 'input_value': url,
-                'wait_time': 1000,
+                'wait_time': 2000,
                 'assert_type': '',
                 'assert_value': '',
                 'description': _build_step_description(action='navigate', url=url)[:500],
@@ -4444,7 +4785,9 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
         # 兼容 browser-use 新旧版本动作名：
         #   新版: navigate/input/click/scroll/select_dropdown_option/extract/switch_tab/close_tab
         #   旧版: go_to_url/input_text/click_element/scroll_down|scroll_up/select_option/extract_content
-        if action_l in ('input_text', 'input', 'fill'):
+        if forced_ui:
+            ui_action = forced_ui
+        elif action_l in ('input_text', 'input', 'fill'):
             ui_action = 'fill'
         elif action_l in ('click_element', 'click'):
             ui_action = 'click'
@@ -4462,17 +4805,20 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
             # 无法映射的动作跳过
             continue
 
-        locator = _dom_element_to_locator(el)
+        locator = _dom_element_to_locator(el) if el is not None else ''
         input_value = ''
         if ui_action == 'fill':
             # 新版 select_dropdown_option 用 text 字段；input 用 text 字段
-            input_value = params.get('text', '') if isinstance(params, dict) else str(params)
+            input_value = params.get('text', '') if isinstance(params, dict) else str(params or '')
 
         # 创建/复用元素：主定位器优先；为空时用执行期采集 sidecar 兜底（解决 click 历史缺元素）
         element = None
+        capture = None
         if ui_action in ELEMENT_ACTIONS:
-            capture = None
-            if captures:
+            if forced_cap is not None:
+                capture = forced_cap
+                locator = locator_expr_from_capture(capture) or locator
+            elif captures:
                 primary_strategy, primary_value = ('', '')
                 if locator:
                     primary_strategy, primary_value = _parse_playwright_locator(locator)
@@ -4494,15 +4840,29 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
                             'AI步骤兜底：动作用采集结果补主定位器 action=%s locator=%s',
                             ui_action, locator[:120],
                         )
-                # 主定位器是动态 el-id-* 时，优先换成采集里更稳的 placeholder/role/text
-                elif locator and capture and re.search(r'#el-id-\d+', locator, re.I):
-                    better = locator_expr_from_capture(capture) or ''
-                    if better and better != locator:
+                # 主定位器是动态 el-id-* 或位置型表达式（绝对 XPath 等）时，
+                # 优先换成采集里更稳的 placeholder/role/css/text。
+                # 位置型定位器既不可读（会被当成元素名写进步骤描述），
+                # 又极易随页面结构变化而失效，属于必须替换的情形。
+                elif locator and capture and (
+                    re.search(r'#el-id-\d+', locator, re.I)
+                    or _looks_like_positional_locator(locator)
+                ):
+                    better_expr = locator_expr_from_capture(capture) or ''
+                    if better_expr and better_expr != locator and (
+                        _capture_locator_priority(capture)[0] < 8
+                    ):
                         logger.info(
-                            'AI步骤优化：动态id主定位器替换为采集定位器 %s → %s',
-                            locator[:80], better[:80],
+                            'AI步骤优化：位置型/动态主定位器替换为采集定位器 %s → %s',
+                            locator[:80], better_expr[:80],
                         )
-                        locator = better
+                        locator = better_expr
+            # 列表进详情应点商品图；.goods-msg 是标题区，点击常不跳转
+            if ui_action == 'click' and locator and 'goods-msg' in locator:
+                locator = locator.replace('goods-msg', 'goods-img')
+            # 顶部购物车：禁止裸 .item-a 做主定位（页内可有多个）；升为含「购物车」文案的定位
+            if ui_action == 'click' and locator and re.search(r'item-a', locator, re.I):
+                locator = _upgrade_cart_nav_locator(locator, capture, ai_description)
             if locator:
                 element, created = _get_or_create_element_from_locator(
                     project=project,
@@ -4513,6 +4873,7 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
                     cache=element_cache,
                     idx=len(mapped),
                     capture=capture,
+                    ai_description=ai_description,
                 )
                 if created and element:
                     created_ids.append(element.id)
@@ -4523,6 +4884,8 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
             value=input_value,
             element_name=element.name if element else '',
             element_type=element.element_type if element else '',
+            ai_description=ai_description,
+            capture=capture,
         )[:500]
 
         mapped.append({
@@ -4530,7 +4893,8 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
             'page_filter': current_page,
             'element_id': element.id if element else None,
             'input_value': input_value,
-            'wait_time': 1000,
+            # AI 步间天然更慢；回放给列表/购物车等 SPA 留一点缓冲
+            'wait_time': 2000,
             'assert_type': '',
             'assert_value': '',
             'description': desc,
@@ -4538,16 +4902,18 @@ def _ai_actions_to_case_steps(project, user, actions, default_page='main', captu
             **_element_step_extras(element),
         })
 
+    mapped = _dedupe_mapped_steps(mapped)
     return mapped, created_ids
 
 
-def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
+def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history, skip_initial_navigation=False):
     """「AI生成步骤」执行完成后，将执行中用到的操作+定位器 录制成用例并同步到两个页面：
 
     1. UI自动化测试模块「用例管理」列表（ui_test_cases / ui_test_case_steps / ui_elements）；
     2. 主项目「用例库」的 UI自动化页面（testcases，case_type 含 'ui'，并回显 step_details）。
 
     同一主平台用例只关联一条 UI 用例（hub_testcase 一对一）；重复生成时更新该条步骤，不新建。
+    skip_initial_navigation: 复用项目登录态时，跳过引擎自动注入的首屏「跳转到 URL」步骤。
     返回 (ui_testcase_id, hub_testcase_id)；无可录制操作时返回 (None, None)。
     """
     if not hub_testcase_id:
@@ -4577,8 +4943,20 @@ def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
         return None, None
     ui_project, _created = result
 
+    # 用例转换记录若创建时未写入项目，此处补齐，列表可显示项目名
+    if getattr(execution_record, 'project_id', None) != ui_project.id:
+        try:
+            execution_record.project = ui_project
+            execution_record.save(update_fields=['project'])
+        except Exception as exc:  # noqa: BLE001
+            logger.warning(
+                'sync_ai_execution_to_cases: 回写执行 #%s 项目失败: %s',
+                getattr(execution_record, 'id', None), exc,
+            )
+
     # 1) 从执行历史提取操作 + 定位器转成用例步骤
-    actions = _extract_ai_history_actions(history)
+    # planned_tasks 提供子任务文案：元素无可读名称（绝对 XPath）时，用它兜底步骤描述
+    actions = _extract_ai_history_actions(history, getattr(execution_record, 'planned_tasks', None))
     if not actions:
         logger.info(
             'sync_ai_execution_to_cases: 执行 #%s 历史无可录制操作（history=%s），跳过',
@@ -4597,7 +4975,8 @@ def sync_ai_execution_to_cases(hub_testcase_id, execution_record, history):
         logger.info('sync_ai_execution_to_cases: 已读取 %s 条元素采集（执行 #%s）', len(captures), execution_record.id)
 
     steps, _created_ids = _ai_actions_to_case_steps(
-        ui_project, user, actions, default_page='main', captures=captures
+        ui_project, user, actions, default_page='main', captures=captures,
+        skip_initial_navigation=skip_initial_navigation,
     )
     if not steps:
         logger.info(
@@ -4869,8 +5248,9 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
     queryset = AIExecutionRecord.objects.all()
     serializer_class = AIExecutionRecordSerializer
     permission_classes = [IsAuthenticated]
-    filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
-    filterset_fields = ['project', 'ai_case', 'status']
+    filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
+    filterset_fields = ['project', 'ai_case', 'status', 'task_source']
+    search_fields = ['task_name']
     ordering = ['-start_time']
     pagination_class = StandardPagination
 
@@ -4882,7 +5262,7 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         # 返回用户有权限的项目下的执行记录，以及没有关联项目的执行记录
         return AIExecutionRecord.objects.filter(
             models.Q(project__in=accessible_projects) | models.Q(project__isnull=True)
-        ).distinct()
+        ).select_related('project', 'ai_case', 'executed_by').distinct()
 
     def perform_destroy(self, instance):
         instance.delete()
@@ -4938,8 +5318,8 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
         else:
             auto_login = bool(auto_login_raw)
         logger.info(
-            'run_adhoc auto_login=%s (raw=%r) hub_testcase_id=%s',
-            auto_login, auto_login_raw, hub_testcase_id,
+            'run_adhoc project_id=%r auto_login=%s (raw=%r) hub_testcase_id=%s',
+            project_id, auto_login, auto_login_raw, hub_testcase_id,
         )
         # 「用例转换」：由「用例详情 - AI生成步骤」发起的临时执行，任务来源固定标记为用例转换
         env_ui_project_id = None
@@ -4954,6 +5334,55 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 initial_url = env_info['base_url']
                 auth_base_url = initial_url
                 env_ui_project_id = env_info.get('ui_project_id')
+
+        if not task_description:
+            return Response({'error': '缺少任务描述参数'}, status=status.HTTP_400_BAD_REQUEST)
+
+        # 获取项目对象（如果提供了project_id）
+        project = None
+        if project_id not in (None, '', 'null', 'undefined'):
+            try:
+                project = UiProject.objects.get(id=int(project_id))
+            except (TypeError, ValueError):
+                return Response({'error': 'project_id 无效'}, status=status.HTTP_400_BAD_REQUEST)
+            except UiProject.DoesNotExist:
+                return Response({'error': '项目不存在'}, status=status.HTTP_404_NOT_FOUND)
+
+        # 「用例转换」：前端通常不传 project_id，从主平台用例所属项目解析/确保 UiProject，写入执行记录
+        if hub_testcase_id and not project:
+            from apps.testcases.models import TestCase as HubTestCase
+            hub_case = HubTestCase.objects.filter(pk=hub_testcase_id).only('project_id').first()
+            if hub_case and hub_case.project_id:
+                result, err = ensure_ui_project_for_hub(request.user, hub_case.project_id)
+                if err:
+                    # 无 UI 自动化权限时仍尽量取已有关联，保证列表能显示项目名
+                    project = UiProject.objects.filter(hub_project_id=hub_case.project_id).first()
+                    if not project:
+                        logger.warning(
+                            'run_adhoc case_conversion hub_testcase=%s 无法绑定项目: %s',
+                            hub_testcase_id, getattr(err, 'data', err),
+                        )
+                elif result:
+                    project, _ = result
+                if project and not env_ui_project_id:
+                    env_ui_project_id = project.id
+
+        # 普通「AI智能测试」选了项目：始终带上项目环境 URL；复用登录态见后台线程 auto_login
+        if project and not hub_testcase_id:
+            from .codegen_service import codegen_recorder
+            env_ui_project_id = project.id
+            auth_base_url = codegen_recorder._resolve_project_base_url(project.id) or ''
+            initial_url = auth_base_url
+            logger.info(
+                'run_adhoc resolved project=%s base_url=%r auto_login=%s',
+                project.id, auth_base_url, auto_login,
+            )
+            if auto_login and not auth_base_url:
+                logger.warning(
+                    'run_adhoc project=%s 未配置环境 base_url，无法静默登录/注入起始地址',
+                    project.id,
+                )
+
         ai_storage_state = None
         # 文件模式：前端上传解析出的用例结构，用于构建与右侧明细 1:1 的 planned_tasks
         parsed_cases = request.data.get('parsed_cases')
@@ -4965,17 +5394,6 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                 parsed_cases = None
         # 文件模式：原始上传的 Excel 文档，用于后续下载
         source_file = request.FILES.get('source_file')
-
-        if not task_description:
-            return Response({'error': '缺少任务描述参数'}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 获取项目对象（如果提供了project_id）
-        project = None
-        if project_id:
-            try:
-                project = UiProject.objects.get(id=project_id)
-            except UiProject.DoesNotExist:
-                return Response({'error': '项目不存在'}, status=status.HTTP_404_NOT_FOUND)
 
         # 文件模式：用解析步骤直接生成 planned_tasks，跳过 LLM 重新拆分
         preset_planned_tasks = build_planned_tasks_from_cases(parsed_cases) if parsed_cases else None
@@ -5105,16 +5523,25 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                         execution_record.save(update_fields=['logs'])
                     except Exception:
                         pass
-                elif env_ui_project_id and (auth_base_url or initial_url):
-                    ai_storage_state, auth_log = _ensure_ai_login_state(
-                        env_ui_project_id, auth_base_url or initial_url
-                    )
-                    if auth_log:
-                        execution_record.logs = (execution_record.logs or '') + auth_log
-                        try:
-                            execution_record.save(update_fields=['logs'])
-                        except Exception:
-                            pass
+                elif env_ui_project_id:
+                    # 普通「AI智能测试」：弹窗选择项目后由 auto_login 决定是否复用登录态
+                    if auto_login:
+                        ai_storage_state, auth_log = _ensure_ai_login_state(
+                            env_ui_project_id, auth_base_url or initial_url
+                        )
+                        if not auth_log:
+                            auth_log = (
+                                '\n[System] 已选择复用登录态，但未找到可用登录态'
+                                '（请配置项目环境 base_url 与登录账号），'
+                                '将按任务描述自行登录。\n'
+                            )
+                    else:
+                        auth_log = '\n[System] 未复用项目登录态，按任务描述完整执行。\n'
+                    execution_record.logs = (execution_record.logs or '') + auth_log
+                    try:
+                        execution_record.save(update_fields=['logs'])
+                    except Exception:
+                        pass
 
                 # 复用登录态成功：改写起始 URL（避免 /login）并强化任务说明，防止 AI 再走登录表单
                 run_task_description = task_description
@@ -5352,8 +5779,13 @@ class AIExecutionRecordViewSet(viewsets.ModelViewSet):
                     # UI自动化「用例管理」列表与「用例库」UI自动化页面
                     try:
                         _history = locals().get('history') or None
+                        # 「AI生成步骤」：只要用户选择了复用登录态，引擎就会注入首屏导航
+                        # （ai_base 的 initial_actions），它不是用例业务步骤，回显时跳过。
+                        # 以用户选择为准，而非以登录态是否注入成功为准。
+                        _skip_init_nav = bool(auto_login)
                         ui_case_id, hub_id = sync_ai_execution_to_cases(
-                            hub_testcase_id, execution_record, _history
+                            hub_testcase_id, execution_record, _history,
+                            skip_initial_navigation=_skip_init_nav,
                         )
                         if ui_case_id:
                             logger.info(f"已录制AI生成步骤到UI用例 #{ui_case_id}（用例库 #{hub_id}）")

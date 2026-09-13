@@ -512,6 +512,22 @@
                   {{ t('uiAutomation.testCase.aiHealedStep') }}
                 </el-tag>
                 <span class="result-log-desc">{{ step.description || step.message || step.action_type || step.error || '' }}</span>
+                <div
+                  v-if="step.success !== false && step._usedLocatorDisplay"
+                  class="result-log-locator"
+                >
+                  {{ t('uiAutomation.testCase.usedSelector') }}：
+                  <el-tag
+                    v-if="step._usedLocatorDisplay.sourceLabel"
+                    size="small"
+                    :type="step._usedLocatorDisplay.tagType"
+                    effect="plain"
+                    class="result-log-locator-source"
+                  >
+                    {{ step._usedLocatorDisplay.sourceLabel }}
+                  </el-tag>
+                  <code>{{ step._usedLocatorDisplay.text }}</code>
+                </div>
                 <div v-if="step.healed && step.healing_reason" class="result-log-heal">
                   <div class="result-log-heal-label">{{ t('uiAutomation.testCase.aiFailureReason') }}</div>
                   <pre>{{ step.healing_reason }}</pre>
@@ -614,6 +630,16 @@
             @wheel.prevent="onPickerWheel"
             @keydown="onPickerKeydown"
           >
+            <!-- IME 陷阱：截图本身不可编辑，中文组字需落到真实 input 再转发 -->
+            <input
+              ref="pickerImeRef"
+              class="picker-ime-trap"
+              type="text"
+              autocomplete="off"
+              tabindex="-1"
+              @keydown="onPickerKeydown"
+              @compositionend="onPickerCompositionEnd"
+            />
             <div v-if="pickerStarting || (!pickerScreenshot && pickerSession)" class="picker-screen-loading">
               {{ t('uiAutomation.testCase.pickLoading') }}
             </div>
@@ -1040,6 +1066,7 @@ const pickTargetStep = ref(null)
 const pickerInspect = ref(null)
 const pickerHighlight = ref(null)
 const pickerImgRef = ref(null)
+const pickerImeRef = ref(null)
 const pickerInspecting = ref(false)
 let pickerWs = null
 const PICK_STRATEGY_PRIORITY = [
@@ -1297,9 +1324,9 @@ const onPickerScreenClick = async (e) => {
     }
     return
   }
-  // 操作态：转发真实点击
+  // 操作态：转发真实点击，并聚焦 IME 陷阱以支持中文输入法
   try {
-    e.currentTarget?.closest?.('.picker-screen-wrap')?.focus?.()
+    focusPickerIme()
     const res = await clickElementPicker({ ...point, button: 'left', click_count: 1 })
     applyPickerImage(res.data || res)
   } catch { /* ignore */ }
@@ -1321,15 +1348,27 @@ const onPickerScreenContextMenu = async (e) => {
   } catch { /* ignore */ }
 }
 
+const focusPickerIme = () => {
+  pickerImeRef.value?.focus?.({ preventScroll: true })
+}
+
+const clearPickerIme = () => {
+  if (pickerImeRef.value) pickerImeRef.value.value = ''
+}
+
 const onPickerKeydown = async (e) => {
   if (inspectModeActive.value || !pickerSession.value) return
-  // 避免输入框抢焦点时误传
+  // 地址栏等真实输入框：不转发
   const tag = (e.target?.tagName || '').toLowerCase()
-  if (tag === 'input' || tag === 'textarea') return
+  const isImeTrap = e.target?.classList?.contains?.('picker-ime-trap')
+  if ((tag === 'input' || tag === 'textarea') && !isImeTrap) return
+  // 中文等 IME 组字中：禁止 preventDefault，等 compositionend 再发整段文字
+  if (e.isComposing || e.key === 'Process' || e.keyCode === 229) return
   e.preventDefault()
   try {
     let res
     if (e.key.length === 1 && !e.ctrlKey && !e.metaKey && !e.altKey) {
+      clearPickerIme()
       res = await typeElementPicker({ text: e.key })
     } else {
       const map = {
@@ -1344,9 +1383,22 @@ const onPickerKeydown = async (e) => {
         ArrowDown: 'ArrowDown'
       }
       if (map[e.key]) {
+        clearPickerIme()
         res = await typeElementPicker({ key: map[e.key] })
       }
     }
+    if (res) applyPickerImage(res.data || res)
+  } catch { /* ignore */ }
+}
+
+/** IME 确认上屏（中文等）：一次转发整段已组好的文字 */
+const onPickerCompositionEnd = async (e) => {
+  if (inspectModeActive.value || !pickerSession.value) return
+  const text = e.data || ''
+  clearPickerIme()
+  if (!text) return
+  try {
+    const res = await typeElementPicker({ text })
     if (res) applyPickerImage(res.data || res)
   } catch { /* ignore */ }
 }
@@ -1612,13 +1664,35 @@ const onPageFilterChange = (step) => {
 }
 
 // 解析执行日志
+const formatUsedLocator = (step) => {
+  if (!step) return null
+  const loc = step.used_locator || (step.healed && step.healed_locator) || null
+  if (!loc || !(loc.strategy || loc.value)) return null
+  const source = loc.source || (step.healed ? 'ai' : 'primary')
+  const sourceMap = {
+    primary: { sourceLabel: t('uiAutomation.testCase.primarySelector'), tagType: 'success' },
+    backup: { sourceLabel: t('uiAutomation.testCase.backupSelectorUsed'), tagType: 'warning' },
+    ai: { sourceLabel: t('uiAutomation.testCase.aiHealedStep'), tagType: 'warning' }
+  }
+  const meta = sourceMap[source] || sourceMap.primary
+  return {
+    text: `${loc.strategy || ''}=${loc.value || ''}`,
+    sourceLabel: meta.sourceLabel,
+    tagType: meta.tagType
+  }
+}
+
 const parsedExecutionLogs = computed(() => {
   if (!executionResult.value || !executionResult.value.logs) return []
   try {
     const logs = typeof executionResult.value.logs === 'string'
       ? JSON.parse(executionResult.value.logs)
       : executionResult.value.logs
-    return Array.isArray(logs) ? logs : [{ description: String(logs), success: executionResult.value.success, step_number: 1 }]
+    const list = Array.isArray(logs) ? logs : [{ description: String(logs), success: executionResult.value.success, step_number: 1 }]
+    return list.map((s) => ({
+      ...s,
+      _usedLocatorDisplay: formatUsedLocator(s)
+    }))
   } catch (e) {
     // 非 JSON 字符串日志直接展示
     return [{
@@ -1674,8 +1748,12 @@ const loadTestCases = async () => {
   }
 
   try {
-    const response = await getTestCases(getProjectQueryParams())
-    testCases.value = response.data.results || response.data
+    const response = await getTestCases({
+      ...getProjectQueryParams(),
+      ordering: '-created_at'
+    })
+    const list = response.data.results || response.data || []
+    testCases.value = Array.isArray(list) ? list : []
   } catch (error) {
     console.error('获取测试用例失败:', error)
   }
@@ -1761,8 +1839,8 @@ const hydrateStepElementFields = (step, elem) => {
   step.element_name = elem.name || step.element_name || ''
   step.element_locator = elem.locator_value || step.element_locator || ''
   step.element_locator_strategy = strategyNameOf(elem) || step.element_locator_strategy || ''
-  // 元素库为准：录制写入的备用/截图在元素上，步骤需回填
-  if (Array.isArray(elem.backup_locators)) {
+  // 元素库为准：有备用才覆盖；避免空数组把录制刚带上的备用清掉
+  if (Array.isArray(elem.backup_locators) && elem.backup_locators.length) {
     step.element_backup_locators = elem.backup_locators.map(b => ({
       strategy: b.strategy || 'css',
       value: b.value || ''
@@ -1798,17 +1876,17 @@ const onStepLocatorChange = async (step) => {
   const strategy = locatorStrategies.value.find(
     s => s.name === strategyName || String(s.id) === String(strategyName)
   )
-  // 策略可重复；同一策略下同一表达式不可重复
+  // 策略可与主选择器相同；仅「策略+表达式」完全重复时去重。
+  // 空行只在提交时过滤，不回写列表，否则改策略会把未填完的备用行清掉。
   const seen = new Set()
   const backups = []
   for (const b of (step.element_backup_locators || [])) {
-    if (!b.strategy || !b.value) continue
+    if (!b.strategy || !String(b.value || '').trim()) continue
     const key = `${String(b.strategy).toLowerCase()}|${b.value}`
     if (seen.has(key)) continue
     seen.add(key)
     backups.push({ strategy: b.strategy, value: b.value })
   }
-  step.element_backup_locators = backups
   const payload = {
     locator_value: step.element_locator || '',
     backup_locators: backups
@@ -2199,13 +2277,16 @@ const parseRecordedSteps = async () => {
   try {
     const scriptName = recordSession.value?.script_name
       || `case_${selectedTestCase.value?.id || 'tmp'}_record.py`
+    const capturesPath = recordSession.value?.captures_path
+      || (recordSession.value?.output_path ? `${recordSession.value.output_path}.captures.json` : '')
     const res = await parseCodegenToCaseSteps({
       content: recordScriptContent.value,
       project_id: resolveRecordProjectId(),
       language: recordForm.language,
       create_elements: true,
       recorded_name: scriptName,
-      script_name: scriptName
+      script_name: scriptName,
+      captures_path: capturesPath
     })
     const data = res.data || res
     parsedRecordSteps.value = (data.steps || []).map(step => ({
@@ -2309,8 +2390,24 @@ const stripRecordedPrefix = (name) => {
   return String(name).replace(/^(?:recorded?_)+/i, '').replace(/_/g, ' ').trim()
 }
 
+const isLocatorJunkLabel = (name) => {
+  const t = stripRecordedPrefix(name).toLowerCase().trim()
+  if (!t) return true
+  if (/^(xpath\s|xpath=|css\s|css=)/.test(t)) return true
+  if (/^(?:page\.)?(?:get_by_|getBy|locator\()/i.test(t)) return true
+  if (t.includes('=') || t.includes('::')) return true
+  if (t.includes('/') && !/[\u4e00-\u9fff]/.test(t)) return true
+  const junk = new Set([
+    'xpath', 'css', 'html', 'body', 'head', 'div', 'span', 'section', 'article',
+    'main', 'header', 'footer', 'nav', 'ul', 'ol', 'li', 'table', 'thead', 'tbody',
+    'tr', 'td', 'th', 'form', 'p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'
+  ])
+  const tokens = t.split(/\s+/).filter(Boolean)
+  return tokens.length > 0 && tokens.every(tok => junk.has(tok) || /^\d+$/.test(tok))
+}
+
 const buildFriendlyStepDescription = (actionType, element) => {
-  const label = stripRecordedPrefix(element?.name) || '元素'
+  let label = stripRecordedPrefix(element?.name) || ''
   const typeMap = {
     INPUT: '输入框',
     BUTTON: '按钮',
@@ -2321,6 +2418,9 @@ const buildFriendlyStepDescription = (actionType, element) => {
     TEXT: '文本'
   }
   const kind = typeMap[element?.element_type] || '元素'
+  if (isLocatorJunkLabel(label)) {
+    label = kind
+  }
   // 名称已含类型后缀时不再重复拼接
   const display = label.endsWith(kind) ? label.slice(0, -kind.length) || label : label
   if (actionType === 'click') return `点击「${display}」${kind}`
@@ -2547,16 +2647,8 @@ const copyTestCase = async (testCase) => {
 
     const response = await copyTestCaseApi(testCase.id)
     ElMessage.success(t('uiAutomation.testCase.copy.success'))
-
-    // 找到原用例的位置
-    const index = testCases.value.findIndex(tc => tc.id === testCase.id)
-    if (index !== -1) {
-      // 在原用例下方插入新用例
-      testCases.value.splice(index + 1, 0, response.data)
-    } else {
-      // 如果找不到，就添加到末尾
-      testCases.value.push(response.data)
-    }
+    // 新建副本按创建时间倒序置顶
+    testCases.value.unshift(response.data)
   } catch (error) {
     if (error !== 'cancel') {
       console.error('复制测试用例失败:', error)
@@ -2755,14 +2847,15 @@ const saveTestCaseForm = async () => {
   }
 
   try {
+    // 本弹窗只维护用例基本信息，不携带 steps：
+    // 后端把「显式传 steps」视为全量替换，传空数组会清空已有步骤。
     const data = {
       name: testCaseForm.name,
       description: testCaseForm.description,
       priority: testCaseForm.priority,
       project: editingTestCase.value
         ? (resolveCaseProjectId(editingTestCase.value) || projectId.value)
-        : projectId.value,
-      steps: []
+        : projectId.value
     }
     if (!data.project || data.project === ALL_PROJECTS) {
       ElMessage.warning(t('uiAutomation.common.selectSpecificProject'))
@@ -2780,10 +2873,10 @@ const saveTestCaseForm = async () => {
         testCases.value[index] = { ...testCases.value[index], ...data }
       }
     } else {
-      // 创建新用例
+      // 创建新用例：按创建时间倒序置顶
       const response = await createTestCase(data)
       ElMessage.success(t('uiAutomation.testCase.create.success'))
-      testCases.value.push(response.data)
+      testCases.value.unshift(response.data)
     }
 
     showCreateDialog.value = false
@@ -3173,6 +3266,21 @@ const openCreateDialog = () => {
   outline: none;
 }
 
+/* 承接系统输入法，不挡点击；组字结果经 compositionend 转发到远端页 */
+.picker-ime-trap {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  border: 0;
+  padding: 0;
+  margin: 0;
+  z-index: -1;
+  pointer-events: none;
+}
+
 .picker-screen-wrap.is-inspect {
   cursor: crosshair;
 }
@@ -3457,6 +3565,32 @@ const openCreateDialog = () => {
   color: #303133;
   line-height: 1.5;
   word-break: break-word;
+}
+
+.result-log-locator {
+  width: 100%;
+  margin-top: 4px;
+  font-size: 12px;
+  color: #606266;
+  line-height: 1.5;
+  word-break: break-all;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 6px;
+}
+
+.result-log-locator-source {
+  flex-shrink: 0;
+}
+
+.result-log-locator code {
+  font-family: Consolas, Monaco, monospace;
+  font-size: 12px;
+  color: #409eff;
+  background: #ecf5ff;
+  padding: 1px 6px;
+  border-radius: 3px;
 }
 
 .result-log-heal {

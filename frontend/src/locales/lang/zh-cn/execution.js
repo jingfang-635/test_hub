@@ -21,6 +21,7 @@ export default {
 
   // Table columns
   serialNumber: '序号',
+  id: 'ID',
   planName: '计划名称',
   project: '项目',
   projects: '项目',
