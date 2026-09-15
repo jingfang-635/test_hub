@@ -7,9 +7,11 @@
 from __future__ import annotations
 
 import asyncio
+import json
 import logging
 import os
 import time
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -49,6 +51,83 @@ def ttl_hours() -> float:
         return float(os.environ.get('AUTH_STATE_TTL_HOURS', DEFAULT_TTL_HOURS))
     except (TypeError, ValueError):
         return DEFAULT_TTL_HOURS
+
+
+# 令牌字段：过期时间不存在时不做推算（见 token_expires_at 说明）
+_TOKEN_EXPIRY_KEYS = ('tokenExpire', 'tokenExpireTime', 'expireTime', 'expiresAt', 'exp')
+
+
+def _parse_expiry_value(raw: Any) -> float | None:
+    """把各种形态的过期时间归一成 Unix 秒。"""
+    if raw is None or raw == '':
+        return None
+    try:
+        if isinstance(raw, str):
+            text = raw.strip()
+            if not text:
+                return None
+            # 纯数字（秒/毫秒）
+            if text.isdigit():
+                value = float(text)
+                return value / 1000.0 if value > 1e11 else value
+            # ISO8601
+            iso = text.replace('Z', '+00:00')
+            dt = datetime.fromisoformat(iso)
+            # 无时区信息时按「本地时间」解释：若被当成 UTC 会把过期时间整体后移
+            # （Asia/Shanghai 下 +8h），导致已过期令牌被误判为有效（偏危险方向）。
+            # 本地时间解释最多偏保守，不会把过期态放行。
+            return dt.timestamp()
+        value = float(raw)
+        return value / 1000.0 if value > 1e11 else value
+    except (TypeError, ValueError):
+        return None
+
+
+def token_expires_at(path: Path | str | None) -> float | None:
+    """从 storage_state 的 localStorage 中解析访问令牌过期时间（Unix 秒）。
+
+    只在站点**自己显式落库**了过期字段时才返回，否则返回 None。
+
+    刻意不从文件 mtime 推算：ensure_project_auth_state 每次探测通过都会重新
+    save_storage_state（为刷新服务端续期的 cookie），mtime 因此会被不断刷新，
+    据此推算会把早已过期的令牌当成有效（正是执行 #19/#21 「声称免登录却落在
+    登录页」的成因）。站点不暴露过期时间时，交由落地 URL 探测做权威判断。
+    """
+    if not path:
+        return None
+    p = Path(path)
+    try:
+        if not p.is_file():
+            return None
+        data = json.loads(p.read_text(encoding='utf-8'))
+    except (OSError, ValueError):
+        return None
+
+    for origin in data.get('origins', []) or []:
+        for item in origin.get('localStorage', []) or []:
+            value = item.get('value')
+            if not isinstance(value, str) or not value.strip():
+                continue
+            try:
+                payload = json.loads(value)
+            except (TypeError, ValueError):
+                continue
+            if not isinstance(payload, dict):
+                continue
+            for key in _TOKEN_EXPIRY_KEYS:
+                if key in payload:
+                    parsed = _parse_expiry_value(payload.get(key))
+                    if parsed:
+                        return parsed
+    return None
+
+
+def token_is_valid(path: Path | str | None) -> bool:
+    """令牌是否仍在有效期内（留 60s 余量）。"""
+    expires_at = token_expires_at(path)
+    if expires_at is None:
+        return False
+    return time.time() < (expires_at - 60.0)
 
 
 def auth_dir() -> Path:
@@ -328,15 +407,14 @@ async def try_auto_login(page: Any, username: str, password: str, timeout_ms: in
         if not submitted:
             return False
 
-        try:
-            await page.get_by_role('textbox', name='请输入密码').first.wait_for(
-                state='hidden', timeout=8000,
+        # 必须轮询到登录表单真正消失才算成功：只等一次 hidden 会因为定位器不存在
+        # 立即返回（元素不存在即满足 hidden），把「登录失败仍停在登录页」误判为成功。
+        if not await _wait_until_logged_in(page, timeout_ms):
+            logger.warning(
+                'try_auto_login: still on login form after submit (credentials rejected?) url=%s',
+                getattr(page, 'url', ''),
             )
-        except Exception:  # noqa: BLE001
-            try:
-                await page.wait_for_load_state('networkidle', timeout=timeout_ms)
-            except Exception:  # noqa: BLE001
-                await page.wait_for_timeout(1000)
+            return False
 
         return True
     except Exception as exc:  # noqa: BLE001
@@ -364,6 +442,24 @@ async def looks_logged_out(page: Any) -> bool:
     return False
 
 
+async def _wait_until_logged_in(page: Any, timeout_ms: int = 15000) -> bool:
+    """提交登录后轮询等待真正离开登录表单（轮询间隔 300ms）。
+
+    不能用单次 wait_for(state='hidden')：定位器不存在时它立即返回，
+    会把「登录失败仍停在登录页」误判为成功（执行 #18 即此问题）。
+    """
+    deadline = time.monotonic() + max(timeout_ms, 1000) / 1000.0
+    while True:
+        try:
+            if not await looks_logged_out(page):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        if time.monotonic() >= deadline:
+            return False
+        await page.wait_for_timeout(300)
+
+
 async def _ensure_auth_async(
     auth_path: Path,
     base_url: str,
@@ -377,6 +473,14 @@ async def _ensure_auth_async(
     target = _normalize_url(base_url)
     # 探测/登录用原始地址；复用成功后业务入口用去登录页后的地址
     probe_url = post_login_start_url(target) if target else ''
+    # 令牌自带过期时间且已过期：mtime 在 TTL 内也不能复用（站点令牌通常仅 1h）
+    token_expires = token_expires_at(auth_path) if storage else None
+    token_expired = bool(storage) and token_expires is not None and not token_is_valid(auth_path)
+    if token_expired:
+        logger.info(
+            'ensure auth: token expired at %s (mtime TTL still valid) path=%s',
+            datetime.fromtimestamp(token_expires).strftime('%Y-%m-%d %H:%M:%S'), auth_path,
+        )
 
     async with async_playwright() as p:
         browser = await p.chromium.launch(headless=True)
@@ -402,19 +506,35 @@ async def _ensure_auth_async(
                 await _goto(target)
 
             need_login = not storage
-            if storage and (probe_url or target):
+            if storage and token_expired:
+                # 令牌已过期：跳过探测直接走静默登录，避免被 SPA 登录页误判为「仍有效」
+                need_login = True
+            elif storage and (probe_url or target):
                 try:
                     # 只在业务入口探测；勿用 /login 判断（登录页必然有密码框）
                     need_login = await looks_logged_out(page)
                 except Exception:  # noqa: BLE001
                     need_login = True
+                # 补充判断：被服务端/前端重定向回登录页同样是失效的铁证。
+                # SPA 登录页首屏可能还没渲染出密码框，仅靠 looks_logged_out 会误判为已登录
+                # （执行 #19/#21 即因此把失效态当成「有效」复用）。
+                if not need_login:
+                    try:
+                        landing = page.url or ''
+                        if is_login_url(landing):
+                            logger.info(
+                                'ensure auth: redirected to login page -> state invalid (url=%s)', landing,
+                            )
+                            need_login = True
+                    except Exception:  # noqa: BLE001
+                        pass
                 if need_login and not storage_fresh:
                     logger.info('ensure auth: stale+logged_out, silent re-login path=%s', auth_path)
             elif storage and not target:
-                if storage_fresh:
+                if storage_fresh and not token_expired:
                     return storage
                 # 过期且无 URL：无法探测/静默登录，不注入失效态
-                logger.warning('ensure auth: stale state without base_url path=%s', auth_path)
+                logger.warning('ensure auth: stale/token-expired state without base_url path=%s', auth_path)
                 return None
 
             if not need_login:
@@ -445,18 +565,21 @@ async def _ensure_auth_async(
 
             ok = await try_auto_login(page, username, password)
             if ok:
-                # 登录成功后再探一下业务首页，确认会话可用
+                # 登录成功后再探一下业务首页，确认会话真的可用；
+                # SPA 可能异步跳转/回写会话，需轮询等待落定再判定，避免竞态误判
                 if probe_url and probe_url != login_page_url:
                     await _goto(probe_url)
-                    try:
-                        if await looks_logged_out(page):
-                            logger.warning('ensure auth: login ok but still logged out on %s', probe_url)
-                            return None
-                    except Exception:  # noqa: BLE001
-                        pass
+                    if not await _wait_until_logged_in(page, timeout_ms=8000):
+                        logger.warning('ensure auth: login ok but still logged out on %s', probe_url)
+                        invalidate(auth_path)
+                        return None
                 saved = await save_storage_state(context, auth_path)
                 logger.info('ensure auth: silent login saved=%s path=%s', saved, auth_path)
-                return str(auth_path) if saved else None
+                if not saved:
+                    # 未落盘则不能声称可复用，与下方失败分支保持一致
+                    invalidate(auth_path)
+                    return None
+                return str(auth_path)
 
             logger.warning('ensure auth: silent login failed path=%s', auth_path)
             # 失效态勿继续注入：否则 AI 仍报免登录却落在登录表单
@@ -486,7 +609,11 @@ def ensure_project_auth_state(
     existing = load_path_if_exists(path)
 
     if existing and not base_url:
-        # 无 URL 无法探测/静默登录：仅信任 TTL 内文件
+        # 无 URL 无法探测：仅当站点显式给出过期时间且已过期才拒绝，
+        # 否则保留现状返回（无法验证不等于已失效，不能盲目作废）。
+        if token_expires_at(path) is not None and not token_is_valid(path):
+            logger.warning('ensure auth: token expired, no base_url to re-login path=%s', path)
+            return None
         return load_path_if_fresh(path)
     if not existing and not (username and password and base_url):
         return existing
@@ -495,7 +622,9 @@ def ensure_project_auth_state(
         return asyncio.run(_ensure_auth_async(path, base_url, username, password))
     except Exception as exc:  # noqa: BLE001
         logger.warning('ensure_project_auth_state failed: %s', exc)
-        # 失败时仅回退仍在 TTL 内的文件，避免把过期态当免登录注入
+        # 失败时仅回退仍在 TTL 内、且未被判定过期的文件
+        if token_expires_at(path) is not None and not token_is_valid(path):
+            return None
         return load_path_if_fresh(path)
 
 
@@ -519,7 +648,6 @@ def auth_status_for_hub_project(hub_project_id: int | str | None) -> dict[str, A
         if not existing:
             return empty
         mtime = Path(existing).stat().st_mtime
-        from datetime import datetime
 
         return {
             'auth_state_saved': True,
