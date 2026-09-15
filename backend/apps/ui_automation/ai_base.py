@@ -242,6 +242,57 @@ try:
     from browser_use.agent.message_manager.service import AgentOutput
     import json as json_module
 
+    # --- LLM 空响应/非法响应的原地重试策略 ---
+    # 模型服务偶发抽风会连续返回空内容。原实现一次空响应就直接抛 ValueError，
+    # 而 browser-use 会把每个异常记成「连续失败」，3 次即终止整个任务
+    # （实测 10 秒内连撞 3 次空响应就毙掉任务，见 logs/app.log）。
+    # 这里在原地退避重试，只有真正重试耗尽才向上抛，从而不占用 max_failures 预算。
+    LLM_EMPTY_MAX_ATTEMPTS = int(os.environ.get('AI_LLM_EMPTY_MAX_ATTEMPTS', '4'))
+    LLM_RETRY_BACKOFF_SECONDS = float(os.environ.get('AI_LLM_RETRY_BACKOFF_SECONDS', '1.5'))
+
+    _LLM_RETRY_PROMPT = (
+        'Your previous reply was EMPTY or NOT valid JSON. '
+        'Respond with ONLY a single valid JSON object matching the required schema '
+        '(fields: thinking, evaluation_previous_goal, memory, next_goal, action). '
+        'Keep it short and emit exactly one action. Do not output prose, Markdown fences, or an empty response.'
+    )
+
+
+    async def _call_llm_with_empty_retry(llm, messages, kwargs, logger_):
+        """调用 LLM 并针对空响应做退避重试；重试时追加一条提示消息。"""
+        attempt_messages = list(messages)
+        last_error = None
+        for attempt in range(max(LLM_EMPTY_MAX_ATTEMPTS, 1)):
+            try:
+                response = await asyncio.wait_for(
+                    llm.ainvoke(attempt_messages, **kwargs), timeout=60.0,
+                )
+                content = getattr(response, 'content', None)
+                if (content or '').strip() if isinstance(content, str) else False:
+                    return response
+                last_error = ValueError('LLM returned empty content - possible API error or timeout')
+                logger_.warning('⚠️ LLM returned empty content (attempt %d/%d)',
+                                attempt + 1, LLM_EMPTY_MAX_ATTEMPTS)
+            except (asyncio.TimeoutError, TimeoutError) as te:
+                last_error = te
+                logger_.warning('⚠️ LLM invocation timed out (attempt %d/%d): %s',
+                                attempt + 1, LLM_EMPTY_MAX_ATTEMPTS, te)
+            except Exception as e:  # noqa: BLE001
+                last_error = e
+                logger_.warning('⚠️ LLM invocation failed (attempt %d/%d): %s',
+                                attempt + 1, LLM_EMPTY_MAX_ATTEMPTS, e)
+
+            if attempt < LLM_EMPTY_MAX_ATTEMPTS - 1:
+                # 退避 + 递增，避免瞬时故障下把重试全部打空
+                await asyncio.sleep(LLM_RETRY_BACKOFF_SECONDS * (attempt + 1))
+                try:
+                    attempt_messages = list(messages) + [type(messages[-1])(content=_LLM_RETRY_PROMPT)]
+                except Exception:  # noqa: BLE001
+                    attempt_messages = list(messages)
+
+        logger_.error('❌ LLM still unusable after %d attempts: %s', LLM_EMPTY_MAX_ATTEMPTS, last_error)
+        raise last_error
+
     _original_get_model_output = Agent.get_model_output
 
 
@@ -255,31 +306,8 @@ try:
 
         kwargs = {'output_format': self.AgentOutput}
 
-        # Add retry logic for LLM invocation with timeout
-        max_retries = 2  # 重试次数为2次
-        last_exception = None
-        response = None
-        for attempt in range(max_retries):
-            try:
-                # 添加超时控制，设置为60秒（支持硅基流动等大模型API的响应时间）
-                response = await asyncio.wait_for(
-                    self.llm.ainvoke(input_messages, **kwargs),
-                    timeout=60.0  # 超时时间60秒
-                )
-                break
-            except asyncio.TimeoutError as te:
-                last_exception = te
-                logger.warning(f"⚠️ LLM invocation timed out (attempt {attempt + 1}/{max_retries}): {te}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5)  # 重试间隔0.5秒
-            except Exception as e:
-                last_exception = e
-                logger.warning(f"⚠️ LLM invocation failed (attempt {attempt + 1}/{max_retries}): {e}")
-                if attempt < max_retries - 1:
-                    await asyncio.sleep(0.5)  # 重试间隔0.5秒
-        else:
-            logger.error(f"❌ LLM invocation failed after {max_retries} attempts.")
-            raise last_exception
+        # 调用 LLM：空响应会原地退避重试，避免一次抽风就消耗 max_failures 预算
+        response = await _call_llm_with_empty_retry(self.llm, input_messages, kwargs, logger)
 
         # 检查响应是否为空或无效
         if not response or not hasattr(response, 'content'):
