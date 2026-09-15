@@ -4,13 +4,16 @@ export default {
     title: '智能测试用例生成',
     subtitle: '基于需求描述或文档，AI将直接为您生成高质量的测试用例',
 
-    // Output Mode
-    outputModeTitle: '输出模式设置',
-    outputModeDesc: '选择测试用例生成的输出方式（适用于所有需求输入方式）',
+    // Generation Flow
+    generationFlowTitle: '用例生成流程',
+    generationFlowDesc: '配置测试用例生成的输出方式与是否自动评审（适用于所有需求输入方式）',
+    outputModeLabel: '默认输出模式',
     realtimeStream: '实时流式输出',
     realtimeStreamDesc: '内容逐字显示，体验流畅，适合大需求文档',
     completeOutput: '完整输出',
     completeOutputDesc: '完成后一次性展示，适合简单需求',
+    enableAutoReview: '启用AI评审和改进',
+    enableAutoReviewHint: '生成完成后自动进行AI评审，并根据评审意见改进测试用例；超时时间可在「行为配置」中单独设置',
 
     // Source selection
     sourceManual: '手动输入需求描述',
@@ -222,7 +225,19 @@ export default {
     pending: '待处理',
     processing: '处理中',
     completed: '已完成',
-    failed: '失败'
+    failed: '失败',
+
+    // 行为配置（超时设置）
+    behaviorConfig: '行为配置',
+    behaviorConfigIcon: '⚙️',
+    behaviorConfigTitle: '行为配置',
+    behaviorTimeoutSettings: '超时设置',
+    behaviorReviewTimeout: '评审和改进超时时间',
+    behaviorTimeoutHint: 'AI评审和改进的总超时时间（建议：小文档120秒，大文档600-1800秒，超大文档可设置到3600秒）',
+    behaviorSeconds: '秒',
+    behaviorLoadFailed: '加载生成设置失败',
+    behaviorConfigSaveSuccess: '行为配置已保存',
+    behaviorConfigSaveFailed: '行为配置保存失败'
   },
   generatedTestCases: {
     // Page
@@ -492,86 +507,6 @@ export default {
     loadFailed: '加载失败',
     pleaseLogin: '请先登录'
   },
-  generationConfig: {
-    // Page
-    title: '⚙️ 生成行为配置',
-    subtitle: '配置测试用例生成的默认行为和自动化流程',
-    description: '配置测试用例生成的默认行为和自动化流程',
-
-    // Config List
-    configList: '配置列表',
-    addConfig: '➕ 添加配置',
-    addFirstConfig: '➕ 添加第一个配置',
-    emptyTitle: '暂无生成配置',
-    emptyDescription: '请添加生成行为配置以控制测试用例生成的默认行为',
-
-    // Config Card
-    enabled: '✅ 启用中',
-    disabled: '❌ 未启用',
-    streamMode: '⚡ 流式输出',
-    completeMode: '📄 完整输出',
-    enable: '✅ 启用',
-    edit: '✏️ 编辑',
-    delete: '🗑️ 删除',
-
-    // Sections
-    outputMode: '📤 输出模式',
-    automationProcess: '🤖 自动化流程',
-    timeoutSettings: '⏱️ 超时设置',
-
-    // Fields
-    defaultMode: '默认模式:',
-    aiReview: 'AI评审和改进:',
-    reviewTimeout: '评审和改进超时:',
-    seconds: '秒',
-    createdAt: '创建时间:',
-    updatedAt: '更新时间:',
-
-    // Form
-    editTitle: '编辑',
-    addTitle: '添加',
-    formTitle: '生成行为配置',
-    basicInfo: '📋 基本信息',
-    configName: '配置名称',
-    configNamePlaceholder: '例如：默认生成配置',
-    defaultConfigName: '默认生成配置',
-    enableThisConfig: '启用此配置',
-    enableHint: '注意：只能有一个启用的配置，启用此配置将自动禁用其他配置',
-
-    // Output Mode
-    outputModeSettings: '📤 输出模式设置',
-    defaultOutputMode: '默认输出模式',
-    realtimeStream: '⚡ 实时流式输出',
-    completeOutput: '📄 完整输出',
-    outputModeHint: '实时流式输出：内容逐字显示，体验流畅；完整输出：完成后一次性展示',
-
-    // Automation
-    automationSettings: '🤖 自动化流程配置',
-    enableAutoReview: '启用AI评审和改进',
-    autoReviewHint: '生成完成后自动进行AI评审，并根据评审意见改进测试用例',
-
-    // Timeout
-    timeoutSettingsLabel: '⏱️ 超时设置',
-    reviewTimeoutLabel: '评审和改进超时时间（秒）',
-    timeoutHint: 'AI评审和改进的总超时时间（建议：小文档120秒，大文档600-1800秒，超大文档可设置到3600秒）',
-
-    // Buttons
-    cancel: '取消',
-    saving: '🔄 保存中...',
-    saveConfig: '💾 保存配置',
-
-    // Messages
-    loadFailed: '加载配置失败',
-    pleaseLogin: '请先登录',
-    saveSuccess: '配置添加成功',
-    updateSuccess: '配置更新成功',
-    saveFailed: '保存失败',
-    enableSuccess: '配置已启用',
-    enableFailed: '启用失败',
-    deleteSuccess: '配置删除成功',
-    deleteFailed: '删除失败',
-    deleteConfirm: '确定要删除此配置吗？'
-  },
 
   // 任务详情页面
   taskDetail: {
@@ -809,11 +744,9 @@ export default {
     // 配置分组
     modelConfig: '模型配置',
     promptConfig: '提示词配置',
-    generationConfig: '生成行为配置',
     // 配置项标签
     caseWriter: '用例编写',
     caseReviewer: '用例评审',
-    generationSettings: '生成配置',
     // 状态文本
     unconfigured: '未配置',
     disabled: '已禁用',

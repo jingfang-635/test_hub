@@ -54,10 +54,8 @@ export default {
     aiExecutionRecords: 'AI Test Reports',
 
     // Configuration Center
-    aiCaseGenerationConfig: 'AI Test Case Config',
     aiModelConfig: 'Model Config',
     promptConfig: 'Prompt Configuration',
-    generationConfig: 'Generation Behavior Config',
     knowledgeBaseManage: 'Knowledge Base',
     knowledgeBaseConfig: 'Knowledge Base Config',
     uiEnvConfig: 'UI Environment Configuration',

@@ -56,18 +56,6 @@
             </div>
           </div>
         </div>
-
-        <div class="config-group">
-          <div class="group-label">{{ $t('configGuide.generationConfig') }}</div>
-          <div class="config-items-row">
-            <div class="config-item-inline" :class="getConfigItemClass('generation_config')">
-              <span class="status-symbol" v-html="getStatusSymbol('generation_config')"></span>
-              <span class="config-label">{{ $t('configGuide.generationSettings') }}</span>
-              <span class="config-name" v-if="configStatus.generation_config && configStatus.generation_config.name">{{ configStatus.generation_config.name }}</span>
-              <span class="status-text" v-if="!configStatus.generation_config || !configStatus.generation_config.configured">{{ $t('configGuide.unconfigured') }}</span>
-            </div>
-          </div>
-        </div>
       </div>
 
         <div class="guide-actions">
@@ -81,35 +69,89 @@
       </div>
     </div>
 
+    <!-- 行为配置弹窗 -->
+    <el-dialog
+      v-model="showBehaviorConfig"
+      :title="$t('requirementAnalysis.behaviorConfigTitle')"
+      width="480px"
+      :close-on-click-modal="false">
+      <div v-loading="behaviorConfigLoading" class="behavior-config-body">
+        <div class="behavior-config-form">
+          <div class="behavior-config-group-title">{{ $t('requirementAnalysis.behaviorTimeoutSettings') }}</div>
+          <div class="behavior-config-item">
+            <label>{{ $t('requirementAnalysis.behaviorReviewTimeout') }}</label>
+            <el-input-number
+              v-model="behaviorConfigForm.review_timeout"
+              :min="10"
+              :max="3600"
+              controls-position="right"
+              style="width: 160px" />
+            <span class="behavior-config-unit">{{ $t('requirementAnalysis.behaviorSeconds') }}</span>
+          </div>
+          <p class="behavior-config-hint">{{ $t('requirementAnalysis.behaviorTimeoutHint') }}</p>
+        </div>
+      </div>
+
+      <template #footer>
+        <el-button @click="showBehaviorConfig = false">{{ $t('common.cancel') }}</el-button>
+        <el-button
+          type="primary"
+          :loading="behaviorConfigSaving"
+          @click="saveBehaviorConfig">
+          {{ $t('common.save') }}
+        </el-button>
+      </template>
+    </el-dialog>
+
+    <!-- 行为配置入口（右上角） -->
+    <div class="page-actions">
+      <button type="button" class="behavior-config-btn" @click="openBehaviorConfig">
+        <span class="behavior-config-btn-icon">{{ $t('requirementAnalysis.behaviorConfigIcon') }}</span>
+        {{ $t('requirementAnalysis.behaviorConfig') }}
+      </button>
+    </div>
+
     <div class="page-body" v-if="!isGenerating && !showResults">
-      <!-- 输出模式设置 -->
+      <!-- 用例生成流程 -->
       <section class="section-card">
         <h3 class="section-title">
           <span class="section-title-icon output-icon" aria-hidden="true"></span>
-          {{ $t('requirementAnalysis.outputModeTitle') }}
+          {{ $t('requirementAnalysis.generationFlowTitle') }}
         </h3>
-        <p class="section-desc">{{ $t('requirementAnalysis.outputModeDesc') }}</p>
-        <div class="output-mode-selector">
-          <label class="mode-option" :class="{ active: globalOutputMode === 'stream' }">
-            <input type="radio" v-model="globalOutputMode" value="stream">
-            <div class="mode-content">
-              <div class="mode-icon stream">⚡</div>
-              <div class="mode-text">
-                <div class="mode-title">{{ $t('requirementAnalysis.realtimeStream') }}</div>
-                <div class="mode-desc">{{ $t('requirementAnalysis.realtimeStreamDesc') }}</div>
+        <p class="section-desc">{{ $t('requirementAnalysis.generationFlowDesc') }}</p>
+
+        <div class="flow-item">
+          <label class="flow-item-label">{{ $t('requirementAnalysis.outputModeLabel') }}</label>
+          <div class="output-mode-selector">
+            <label class="mode-option" :class="{ active: globalOutputMode === 'stream' }">
+              <input type="radio" v-model="globalOutputMode" value="stream">
+              <div class="mode-content">
+                <div class="mode-icon stream">⚡</div>
+                <div class="mode-text">
+                  <div class="mode-title">{{ $t('requirementAnalysis.realtimeStream') }}</div>
+                  <div class="mode-desc">{{ $t('requirementAnalysis.realtimeStreamDesc') }}</div>
+                </div>
               </div>
-            </div>
-          </label>
-          <label class="mode-option" :class="{ active: globalOutputMode === 'complete' }">
-            <input type="radio" v-model="globalOutputMode" value="complete">
-            <div class="mode-content">
-              <div class="mode-icon complete">📄</div>
-              <div class="mode-text">
-                <div class="mode-title">{{ $t('requirementAnalysis.completeOutput') }}</div>
-                <div class="mode-desc">{{ $t('requirementAnalysis.completeOutputDesc') }}</div>
+            </label>
+            <label class="mode-option" :class="{ active: globalOutputMode === 'complete' }">
+              <input type="radio" v-model="globalOutputMode" value="complete">
+              <div class="mode-content">
+                <div class="mode-icon complete">📄</div>
+                <div class="mode-text">
+                  <div class="mode-title">{{ $t('requirementAnalysis.completeOutput') }}</div>
+                  <div class="mode-desc">{{ $t('requirementAnalysis.completeOutputDesc') }}</div>
+                </div>
               </div>
-            </div>
+            </label>
+          </div>
+        </div>
+
+        <div class="flow-item">
+          <label class="flow-switch">
+            <input type="checkbox" v-model="enableAutoReview">
+            <span class="flow-switch-text">{{ $t('requirementAnalysis.enableAutoReview') }}</span>
           </label>
+          <p class="flow-item-hint">{{ $t('requirementAnalysis.enableAutoReviewHint') }}</p>
         </div>
       </section>
 
@@ -615,12 +657,12 @@
             <span class="step-number">2</span>
             <span class="step-text">{{ $t('requirementAnalysis.stepWriting') }}</span>
           </div>
-          <div v-if="showReviewStep" class="step" :class="{ active: currentStep >= 3 }">
+          <div v-if="enableAutoReview" class="step" :class="{ active: currentStep >= 3 }">
             <span class="step-number">3</span>
             <span class="step-text">{{ $t('requirementAnalysis.stepReview') }}</span>
           </div>
-          <div class="step" :class="{ active: currentStep >= (showReviewStep ? 4 : 3) }">
-            <span class="step-number">{{ showReviewStep ? 4 : 3 }}</span>
+          <div class="step" :class="{ active: currentStep >= (enableAutoReview ? 4 : 3) }">
+            <span class="step-number">{{ enableAutoReview ? 4 : 3 }}</span>
             <span class="step-text">{{ $t('requirementAnalysis.stepComplete') }}</span>
           </div>
         </div>
@@ -646,7 +688,7 @@
 
 <script>
 import api from '@/utils/api'
-import { getKnowledgeBases } from '@/api/requirement-analysis'
+import { getKnowledgeBases, getGenerationSettings, updateGenerationSettings } from '@/api/requirement-analysis'
 import { ElMessage } from 'element-plus'
 import * as XLSX from 'xlsx'
 import { useUserStore } from '@/stores/user'
@@ -657,6 +699,7 @@ export default {
     return {
       // 全局输出模式设置
       globalOutputMode: 'stream',  // 默认使用流式输出
+      enableAutoReview: true,  // 生成流程：是否启用AI评审和改进（默认启用）
 
       // 需求来源：manual | upload | knowledge | figma | feishu
       activeSource: 'manual',
@@ -728,7 +771,6 @@ export default {
       streamedReviewContent: '',  // 流式接收的评审内容
       finalTestCases: '',  // 最终版用例
       hasShownCompletionMessage: false,  // 是否已经显示过完成消息
-      showReviewStep: true,  // 是否显示评审步骤（根据生成配置决定）
 
       // 生成结果
       showResults: false,
@@ -766,19 +808,19 @@ export default {
           name: null,
           id: null,
           required: true
-        },
-        generation_config: {
-          configured: false,
-          enabled: false,
-          name: null,
-          id: null,
-          required: true,
-          default_output_mode: null
         }
       },
       showConfigGuide: false,
       checkingConfig: true,
-      modalKey: 0  // 用于强制重新渲染弹窗
+      modalKey: 0,  // 用于强制重新渲染弹窗
+
+      // 行为配置弹窗（超时设置）
+      showBehaviorConfig: false,
+      behaviorConfigLoading: false,
+      behaviorConfigSaving: false,
+      behaviorConfigForm: {
+        review_timeout: 120
+      }
     }
   },
 
@@ -1166,25 +1208,9 @@ export default {
                                    response.data.reviewer_prompt.configured &&
                                    response.data.reviewer_prompt.enabled
 
-        // 检查生成行为配置
-        const generationConfigReady = response.data.generation_config &&
-                                      response.data.generation_config.configured
-
-        // 只有五项都准备好时才不显示引导弹框
-        if (writerModelReady && reviewerModelReady && writerPromptReady && reviewerPromptReady && generationConfigReady) {
+        // 只有四项配置都准备好时才不显示引导弹框
+        if (writerModelReady && reviewerModelReady && writerPromptReady && reviewerPromptReady) {
           this.showConfigGuide = false
-
-          // 如果生成配置允许用户修改，则使用配置的默认输出模式
-          if (response.data.generation_config && response.data.generation_config.default_output_mode) {
-            this.globalOutputMode = response.data.generation_config.default_output_mode
-          }
-
-          // 根据生成配置的enable_auto_review决定是否显示评审步骤
-          if (response.data.generation_config && response.data.generation_config.enable_auto_review !== null) {
-            this.showReviewStep = response.data.generation_config.enable_auto_review
-          } else {
-            this.showReviewStep = true  // 默认显示
-          }
         } else {
           this.showConfigGuide = true
         }
@@ -1201,12 +1227,6 @@ export default {
     goToConfig() {
       // 智能判断跳转目标：优先跳转到未配置/未启用的页面
       // 优先级：必需配置 > 可选配置，提示词 > 模型
-
-      // 0. 首先检查生成行为配置（generation_config）
-      if (!this.configStatus.generation_config || !this.configStatus.generation_config.configured) {
-        this.$router.push('/configuration/generation-config')
-        return
-      }
 
       // 1. 优先检查必需的提示词配置（writer_prompt）
       if (!this.configStatus.writer_prompt.configured || !this.configStatus.writer_prompt.enabled) {
@@ -1232,12 +1252,47 @@ export default {
         return
       }
 
-      // 默认跳转到生成行为配置
-      this.$router.push('/configuration/generation-config')
+      // 默认跳转到提示词配置
+      this.$router.push('/configuration/prompt-config')
     },
 
     goToPromptConfig() {
       this.$router.push('/configuration/prompt-config')
+    },
+
+    // ==================== 行为配置（超时设置） ====================
+    openBehaviorConfig() {
+      this.showBehaviorConfig = true
+      this.loadBehaviorConfig()
+    },
+
+    async loadBehaviorConfig() {
+      this.behaviorConfigLoading = true
+      try {
+        const { data } = await getGenerationSettings()
+        this.behaviorConfigForm.review_timeout = data.review_timeout ?? 120
+      } catch (error) {
+        console.error('Failed to load generation settings:', error)
+        ElMessage.error(this.$t('requirementAnalysis.behaviorLoadFailed'))
+      } finally {
+        this.behaviorConfigLoading = false
+      }
+    },
+
+    async saveBehaviorConfig() {
+      this.behaviorConfigSaving = true
+      try {
+        await updateGenerationSettings({
+          review_timeout: this.behaviorConfigForm.review_timeout
+        })
+        ElMessage.success(this.$t('requirementAnalysis.behaviorConfigSaveSuccess'))
+        this.showBehaviorConfig = false
+      } catch (error) {
+        console.error('Failed to save generation settings:', error)
+        ElMessage.error(this.$t('requirementAnalysis.behaviorConfigSaveFailed'))
+      } finally {
+        this.behaviorConfigSaving = false
+      }
     },
 
     getConfigItemClass(configKey) {
@@ -1419,7 +1474,8 @@ export default {
           requirement_text: requirementText,
           use_writer_model: true,
           use_reviewer_model: true,
-          output_mode: outputMode,  // 添加输出模式参数
+          output_mode: outputMode,  // 输出模式（按次选择）
+          enable_auto_review: this.enableAutoReview,  // 生成流程：是否启用AI评审和改进
           source_type: (['manual', 'upload', 'feishu', 'figma'].includes(sourceMeta.sourceType || this.activeSource)
             ? (sourceMeta.sourceType || this.activeSource)
             : 'manual')
@@ -2160,6 +2216,74 @@ export default {
   gap: 20px;
 }
 
+/* 行为配置入口：右上角 */
+.page-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-bottom: 16px;
+}
+
+.behavior-config-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--th-radius-sm);
+  border: 1px solid var(--th-border);
+  background: var(--th-bg-elevated);
+  color: var(--th-text-regular);
+  font-size: 0.875rem;
+  font-weight: 500;
+  cursor: pointer;
+  transition: all var(--th-transition);
+}
+
+.behavior-config-btn:hover {
+  border-color: var(--th-color-primary);
+  color: var(--th-color-primary);
+  background: var(--th-color-primary-softer);
+}
+
+.behavior-config-btn-icon {
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.behavior-config-body {
+  min-height: 96px;
+}
+
+.behavior-config-group-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
+  margin-bottom: 16px;
+}
+
+.behavior-config-item {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.behavior-config-item label {
+  font-size: 0.9rem;
+  color: var(--th-text-regular);
+}
+
+.behavior-config-unit {
+  font-size: 0.875rem;
+  color: var(--th-text-secondary);
+}
+
+.behavior-config-hint {
+  margin: 12px 0 0;
+  font-size: 0.8rem;
+  color: var(--th-text-secondary);
+  line-height: 1.6;
+}
+
 .section-card {
   background: var(--th-bg-elevated);
   border-radius: var(--th-radius-lg);
@@ -2455,11 +2579,92 @@ export default {
 }
 
 /* 输出模式选择器 */
+.flow-item {
+  margin-bottom: 20px;
+}
+
+.flow-item:last-child {
+  margin-bottom: 0;
+}
+
+.flow-item-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
+}
+
+.flow-item-hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--th-text-secondary);
+  line-height: 1.6;
+}
+
+.flow-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  user-select: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
+}
+
+.flow-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--th-color-primary);
+}
+
 .output-mode-selector {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 16px;
   align-items: stretch;
+}
+
+.flow-item + .flow-item {
+  margin-top: 20px;
+}
+
+.flow-item-label {
+  display: block;
+  margin-bottom: 10px;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
+}
+
+.flow-item-hint {
+  margin: 8px 0 0;
+  font-size: 0.8rem;
+  color: var(--th-text-secondary);
+  line-height: 1.6;
+}
+
+.flow-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  cursor: pointer;
+  user-select: none;
+}
+
+.flow-switch input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  accent-color: var(--th-color-primary);
+  cursor: pointer;
+}
+
+.flow-switch-text {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--th-text-primary);
 }
 
 .mode-option {

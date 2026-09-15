@@ -3,56 +3,22 @@
  */
 import request from '@/utils/api'
 
-// ==================== 生成行为配置 ====================
+// ==================== 生成设置（单例：评审和改进超时时间） ====================
 
-// 获取所有生成行为配置
-export function getGenerationConfigs(params) {
+// 读取生成设置
+export function getGenerationSettings() {
   return request({
     url: '/requirement-analysis/generation-config/',
-    method: 'get',
-    params
-  })
-}
-
-// 获取生成行为配置详情
-export function getGenerationConfigDetail(id) {
-  return request({
-    url: `/requirement-analysis/generation-config/${id}/`,
     method: 'get'
   })
 }
 
-// 创建生成行为配置
-export function createGenerationConfig(data) {
+// 更新生成设置
+export function updateGenerationSettings(data) {
   return request({
-    url: '/requirement-analysis/generation-config/',
-    method: 'post',
+    url: '/requirement-analysis/generation-config/settings/',
+    method: 'patch',
     data
-  })
-}
-
-// 更新生成行为配置
-export function updateGenerationConfig(id, data) {
-  return request({
-    url: `/requirement-analysis/generation-config/${id}/`,
-    method: 'put',
-    data
-  })
-}
-
-// 删除生成行为配置
-export function deleteGenerationConfig(id) {
-  return request({
-    url: `/requirement-analysis/generation-config/${id}/`,
-    method: 'delete'
-  })
-}
-
-// 获取活跃的生成行为配置
-export function getActiveGenerationConfig() {
-  return request({
-    url: '/requirement-analysis/generation-config/active/',
-    method: 'get'
   })
 }
 

@@ -1,15 +1,13 @@
 ﻿<template>
   <div class="ai-model-config">
-    <div class="page-header">
-      <h1>{{ $t('configuration.aiModel.title') }}</h1>
-      <p>{{ $t('configuration.aiModel.description') }}</p>
-    </div>
-
-    <div class="main-content">
-      <!-- 配置列表 -->
-      <div class="configs-section">
-        <div class="section-header">
+    <!-- 配置列表 -->
+    <div class="configs-section">
+      <div class="section-header">
+        <div class="section-title">
           <h2>{{ $t('configuration.aiModel.configList') }}</h2>
+          <span class="count-badge">{{ configs.length }}</span>
+        </div>
+        <div class="section-actions">
           <button
             class="add-config-btn"
             @click.stop="openAddModal"
@@ -17,275 +15,202 @@
             {{ $t('configuration.aiModel.addConfig') }}
           </button>
         </div>
+      </div>
 
-        <div class="configs-grid">
-          <template v-for="config in configs" :key="config?.id || 'unknown'">
-            <div v-if="config && config.id" class="config-card">
-              <div class="config-header">
-                <div class="config-title">
-                  <h3>{{ config.name || $t('configuration.common.unnamed') }}</h3>
-                  <div class="config-badges">
-                    <span class="model-badge" :class="config.model_type">
-                      {{ $t('configuration.aiModel.modelTypes.' + config.model_type) }}
-                    </span>
-                    <span v-for="rl in (config.role || [])" :key="rl" class="role-badge" :class="rl">
-                      {{ $t('configuration.aiModel.roles.' + rl) }}
-                    </span>
-                    <span v-for="sc in (config.scenario || [])" :key="sc" class="scenario-badge" :class="sc">
-                      {{ $t('configuration.aiModel.scenarios.' + sc) }}
-                    </span>
-                    <span class="status-badge" :class="{ active: config.is_active }">
-                      {{ config.is_active ? $t('configuration.common.enabled') : $t('configuration.common.disabled') }}
-                    </span>
-                  </div>
-                </div>
-                <div class="config-actions">
-                  <button
-                    class="test-btn"
-                    @click="testConnection(config)"
-                    :disabled="isTestingConnection">
-                    {{ $t('configuration.aiModel.testConnection') }}
-                  </button>
-                  <button class="edit-btn" @click="editConfig(config)">{{ $t('configuration.common.edit') }}</button>
-                  <button class="delete-btn" @click="deleteConfig(config.id)">{{ $t('configuration.common.delete') }}</button>
-                </div>
-              </div>
-
-              <div class="config-details">
-              <div class="detail-item">
-                <label>{{ $t('configuration.aiModel.baseUrl') }}:</label>
-                <span>{{ config.base_url }}</span>
-              </div>
-              <div class="detail-item">
-                <label>{{ $t('configuration.aiModel.modelName') }}:</label>
-                <span>{{ config.model_name }}</span>
-              </div>
-              <div class="detail-item">
-                <label>{{ $t('configuration.aiModel.maxTokens') }}:</label>
-                <span>{{ config.max_tokens }}</span>
-              </div>
-              <div class="detail-item">
-                <label>{{ $t('configuration.aiModel.temperature') }}:</label>
-                <span>{{ config.temperature }}</span>
-              </div>
-              <div class="detail-item">
-                <label>{{ $t('configuration.aiModel.topP') }}:</label>
-                <span>{{ config.top_p }}</span>
-              </div>
-              <div class="detail-item">
-                <label>{{ $t('configuration.common.createdAt') }}:</label>
-                <span>{{ formatDateTime(config.created_at) }}</span>
-              </div>
+      <div v-if="configs.length" class="configs-grid">
+        <template v-for="config in configs" :key="config?.id || 'unknown'">
+          <article v-if="config && config.id" class="config-card">
+            <div class="card-header">
+              <h3 class="config-name" :title="configTitle(config)">
+                {{ config.name || $t('configuration.common.unnamed') }}
+                <template v-if="config.model_name">
+                  <span class="name-sep">:</span>
+                  <span class="name-model">{{ config.model_name }}</span>
+                </template>
+              </h3>
+              <div class="badges">
+                <span class="badge model-badge" :class="config.model_type">
+                  {{ $t('configuration.aiModel.modelTypes.' + config.model_type) }}
+                </span>
+                <el-switch
+                  class="status-switch"
+                  :model-value="!!config.is_active"
+                  :loading="togglingConfigId === config.id"
+                  @change="toggleActive(config, $event)" />
               </div>
             </div>
-          </template>
-        </div>
 
-        <div v-if="configs.length === 0" class="empty-state">
-          <div class="empty-icon"></div>
-          <h3>{{ $t('configuration.aiModel.emptyTitle') }}</h3>
-          <p>{{ $t('configuration.aiModel.emptyDescription') }}</p>
-          <button
-            class="add-first-config-btn"
-            @click.stop="openAddModal"
-            type="button">
-            {{ $t('configuration.aiModel.addFirstConfig') }}
-          </button>
-        </div>
+            <div class="config-details">
+              <div class="detail-item detail-span detail-inline">
+                <label>{{ $t('configuration.aiModel.baseUrl') }}</label>
+                <span class="detail-sep">：</span>
+                <span class="detail-value" :title="config.base_url">{{ config.base_url }}</span>
+              </div>
+
+              <div v-if="multiList(config.role).length" class="detail-group detail-span">
+                <label>{{ $t('configuration.aiModel.role') }}</label>
+                <div class="tag-list">
+                  <span v-for="rl in multiList(config.role)" :key="'role-' + rl" class="tag-pill tag-role">
+                    {{ $t('configuration.aiModel.roles.' + rl) }}
+                  </span>
+                </div>
+              </div>
+
+              <div v-if="multiList(config.scenario).length" class="detail-group detail-span">
+                <label>{{ $t('configuration.aiModel.scenario') }}</label>
+                <div class="tag-list">
+                  <span v-for="sc in multiList(config.scenario)" :key="'scenario-' + sc" class="tag-pill">
+                    {{ $t('configuration.aiModel.scenarios.' + sc) }}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div class="card-footer">
+              <div class="footer-actions">
+                <button
+                  class="action-btn test-btn"
+                  @click="testConnection(config)"
+                  :disabled="isTestingConnection">
+                  {{ $t('configuration.aiModel.testConnection') }}
+                </button>
+                <button class="action-btn" @click="editConfig(config)">{{ $t('configuration.common.edit') }}</button>
+                <button class="action-btn danger" @click="deleteConfig(config.id)">{{ $t('configuration.common.delete') }}</button>
+              </div>
+            </div>
+          </article>
+        </template>
+      </div>
+
+      <div v-else class="empty-state">
+        <h3>{{ $t('configuration.aiModel.emptyTitle') }}</h3>
+        <button
+          class="add-config-btn"
+          @click.stop="openAddModal"
+          type="button">
+          {{ $t('configuration.aiModel.addFirstConfig') }}
+        </button>
       </div>
     </div>
 
     <!-- 添加/编辑配置弹窗 -->
-    <div
-      v-show="shouldShowModal"
-      :class="['config-modal', { hidden: !shouldShowModal }]"
-      @keydown.esc="closeModals">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ isEditing ? $t('configuration.aiModel.editConfig') : $t('configuration.aiModel.addConfigTitle') }}</h3>
-          <button class="close-btn" @click.stop="closeModals" type="button">x</button>
-        </div>
-        <div class="modal-body">
-          <form @submit.prevent="saveConfig">
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.configName') }} <span class="required">*</span></label>
-              <input
-                v-model="configForm.name"
-                type="text"
-                class="form-input"
-                :placeholder="$t('configuration.aiModel.configNamePlaceholder')"
-                required>
-            </div>
+    <el-dialog
+      :model-value="shouldShowModal"
+      :title="isEditing ? $t('configuration.aiModel.editConfig') : $t('configuration.aiModel.addConfigTitle')"
+      width="600px"
+      :close-on-click-modal="false"
+      @update:model-value="onModalVisibleChange">
+      <el-form :model="configForm" label-width="110px" @submit.prevent="saveConfig">
+        <el-form-item :label="$t('configuration.aiModel.configName')" required>
+          <el-input
+            v-model="configForm.name"
+            :placeholder="$t('configuration.aiModel.configNamePlaceholder')" />
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.modelType') }} <span class="required">*</span></label>
-              <select
-                v-model="configForm.model_type"
-                class="form-select"
-                required
-                @change="onModelTypeChange(configForm.model_type)">
-                <option value="">{{ $t('configuration.aiModel.selectModelType') }}</option>
-                <option value="deepseek">{{ $t('configuration.aiModel.modelTypes.deepseek') }}</option>
-                <option value="qwen">{{ $t('configuration.aiModel.modelTypes.qwen') }}</option>
-                <option value="siliconflow">{{ $t('configuration.aiModel.modelTypes.siliconflow') }}</option>
-                <option value="zhipu">{{ $t('configuration.aiModel.modelTypes.zhipu') }}</option>
-                <option value="other">{{ $t('configuration.aiModel.modelTypes.other') }}</option>
-              </select>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.modelType')" required>
+          <el-select
+            v-model="configForm.model_type"
+            style="width: 100%"
+            :placeholder="$t('configuration.aiModel.selectModelType')"
+            @change="onModelTypeChange(configForm.model_type)">
+            <el-option :label="$t('configuration.aiModel.modelTypes.deepseek')" value="deepseek" />
+            <el-option :label="$t('configuration.aiModel.modelTypes.qwen')" value="qwen" />
+            <el-option :label="$t('configuration.aiModel.modelTypes.siliconflow')" value="siliconflow" />
+            <el-option :label="$t('configuration.aiModel.modelTypes.zhipu')" value="zhipu" />
+            <el-option :label="$t('configuration.aiModel.modelTypes.other')" value="other" />
+          </el-select>
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.role') }} <span class="required">*</span></label>
-              <div class="checkbox-group">
-                <label class="checkbox-item" v-for="roleOption in roleOptions" :key="roleOption">
-                  <input
-                    type="checkbox"
-                    :value="roleOption"
-                    v-model="configForm.roles">
-                  <span>{{ $t('configuration.aiModel.roles.' + roleOption) }}</span>
-                </label>
-              </div>
-              <small class="form-hint">{{ $t('configuration.aiModel.roleMultiHint') }}</small>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.modelName')" required>
+          <el-input
+            v-model="configForm.model_name"
+            :placeholder="$t('configuration.aiModel.modelNamePlaceholder')" />
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.scenario') }} <span class="required">*</span></label>
-              <div class="checkbox-group">
-                <label class="checkbox-item" v-for="scenarioOption in scenarioOptions" :key="scenarioOption">
-                  <input
-                    type="checkbox"
-                    :value="scenarioOption"
-                    v-model="configForm.scenarios">
-                  <span>{{ $t('configuration.aiModel.scenarios.' + scenarioOption) }}</span>
-                </label>
-              </div>
-              <small class="form-hint">{{ $t('configuration.aiModel.scenarioMultiHint') }}</small>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.baseUrl')" required>
+          <el-input
+            v-model="configForm.base_url"
+            :placeholder="$t('configuration.aiModel.baseUrlPlaceholder')" />
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.apiKey') }} <span class="required">*</span></label>
-              <input
-                v-model="configForm.api_key"
-                type="password"
-                class="form-input"
-                :placeholder="isEditing ? $t('configuration.aiModel.apiKeyPlaceholderEdit') : $t('configuration.aiModel.apiKeyPlaceholder')"
-                :required="!isEditing">
-              <small v-if="isEditing && configForm.api_key && configForm.api_key.includes('*')" class="form-hint">
-                {{ $t('configuration.aiModel.apiKeyMaskHint') }}
-              </small>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.apiKey')" required>
+          <el-input
+            v-model="configForm.api_key"
+            type="password"
+            show-password
+            :placeholder="isEditing ? $t('configuration.aiModel.apiKeyPlaceholderEdit') : $t('configuration.aiModel.apiKeyPlaceholder')" />
+          <small
+            v-if="isEditing && configForm.api_key && configForm.api_key.includes('*')"
+            class="form-hint">
+            {{ $t('configuration.aiModel.apiKeyMaskHint') }}
+          </small>
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.baseUrl') }} <span class="required">*</span></label>
-              <input
-                v-model="configForm.base_url"
-                type="url"
-                class="form-input"
-                :placeholder="$t('configuration.aiModel.baseUrlPlaceholder')"
-                required>
-              <small class="form-hint">
-                {{ $t('configuration.aiModel.baseUrlHint') }}
-              </small>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.role')" required>
+          <el-checkbox-group v-model="configForm.roles">
+            <el-checkbox
+              v-for="roleOption in roleOptions"
+              :key="roleOption"
+              :label="roleOption">
+              {{ $t('configuration.aiModel.roles.' + roleOption) }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
 
-            <div class="form-group">
-              <label>{{ $t('configuration.aiModel.modelName') }} <span class="required">*</span></label>
-              <input
-                v-model="configForm.model_name"
-                type="text"
-                class="form-input"
-                :placeholder="$t('configuration.aiModel.modelNamePlaceholder')"
-                required>
-              <small class="form-hint">
-                {{ $t('configuration.aiModel.modelNameHint') }}
-              </small>
-            </div>
+        <el-form-item :label="$t('configuration.aiModel.scenario')" required>
+          <el-checkbox-group v-model="configForm.scenarios">
+            <el-checkbox
+              v-for="scenarioOption in scenarioOptions"
+              :key="scenarioOption"
+              :label="scenarioOption">
+              {{ $t('configuration.aiModel.scenarios.' + scenarioOption) }}
+            </el-checkbox>
+          </el-checkbox-group>
+        </el-form-item>
 
-            <div class="form-row">
-              <div class="form-group">
-                <label>{{ $t('configuration.aiModel.maxTokens') }}</label>
-                <input
-                  v-model.number="configForm.max_tokens"
-                  type="number"
-                  min="100"
-                  max="32000"
-                  class="form-input"
-                  placeholder="4096">
-              </div>
+        <el-form-item :label="$t('configuration.aiModel.enableConfig')">
+          <el-switch v-model="configForm.is_active" />
+        </el-form-item>
+      </el-form>
 
-              <div class="form-group">
-                <label>{{ $t('configuration.aiModel.temperature') }}</label>
-                <input
-                  v-model.number="configForm.temperature"
-                  type="number"
-                  min="0"
-                  max="2"
-                  step="0.1"
-                  class="form-input"
-                  placeholder="0.7">
-              </div>
-
-              <div class="form-group">
-                <label>{{ $t('configuration.aiModel.topP') }}</label>
-                <input
-                  v-model.number="configForm.top_p"
-                  type="number"
-                  min="0"
-                  max="1"
-                  step="0.1"
-                  class="form-input"
-                  placeholder="0.9">
-              </div>
-            </div>
-
-            <div class="form-group">
-              <label class="checkbox-label">
-                <input
-                  v-model="configForm.is_active"
-                  type="checkbox">
-                <span class="checkmark"></span>
-                {{ $t('configuration.aiModel.enableConfig') }}
-              </label>
-            </div>
-
-            <div class="modal-actions">
-              <button type="button" class="cancel-btn" @click="closeModals">{{ $t('configuration.common.cancel') }}</button>
-              <button
-                type="submit"
-                class="confirm-btn"
-                :disabled="isSaving">
-                <span v-if="isSaving">{{ $t('configuration.aiModel.saving') }}</span>
-                <span v-else>{{ $t('configuration.aiModel.saveConfig') }}</span>
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    </div>
+      <template #footer>
+        <el-button @click="closeModals">{{ $t('configuration.common.cancel') }}</el-button>
+        <el-button type="primary" :loading="isSaving" @click="saveConfig">
+          {{ $t('configuration.aiModel.saveConfig') }}
+        </el-button>
+      </template>
+    </el-dialog>
 
     <!-- 连接测试结果弹窗 -->
-    <div v-if="showTestResult" class="test-result-modal">
-      <div class="modal-content" @click.stop>
-        <div class="modal-header">
-          <h3>{{ $t('configuration.aiModel.testResult') }}</h3>
-          <button class="close-btn" @click="closeTestResult">x</button>
-        </div>
-        <div class="modal-body">
-          <div class="test-result" :class="{ success: testResult.success, error: !testResult.success }">
-            <div class="result-icon">
-              {{ testResult.success ? '✅' : '❌' }}
-            </div>
-            <div class="result-content">
-              <h4>{{ testResult.success ? $t('configuration.aiModel.connectionSuccess') : $t('configuration.aiModel.connectionFailed') }}</h4>
-              <p>{{ testResult.message }}</p>
-              <div v-if="testResult.response" class="api-response">
-                <label>{{ $t('configuration.aiModel.aiResponse') }}:</label>
-                <p>{{ testResult.response }}</p>
-              </div>
-            </div>
+    <el-dialog
+      v-model="showTestResult"
+      :title="$t('configuration.aiModel.testResult')"
+      width="520px"
+      class="test-result-dialog"
+      align-center>
+      <div class="test-result" :class="{ success: testResult.success, error: !testResult.success }">
+        <div class="result-banner">
+          <div class="result-icon" aria-hidden="true">
+            <svg v-if="testResult.success" viewBox="0 0 24 24" width="24" height="24">
+              <path d="M20 6.5 9.5 17 4 11.5" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <svg v-else viewBox="0 0 24 24" width="24" height="24">
+              <path d="M18 6 6 18M6 6l12 12" fill="none" stroke="currentColor"
+                stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+          </div>
+          <div class="result-heading">
+            <h4>{{ testResult.success ? $t('configuration.aiModel.connectionSuccess') : $t('configuration.aiModel.connectionFailed') }}</h4>
+            <p class="result-message">
+              {{ testResult.success
+                ? $t('configuration.aiModel.connectionReply', { reply: testResult.response || testResult.message })
+                : testResult.message }}
+            </p>
           </div>
         </div>
       </div>
-    </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -310,18 +235,16 @@ export default {
       isSaving: false,
       isTestingConnection: false,
       testingConfigId: null,
+      togglingConfigId: null,
       editingConfigId: null,
       configForm: {
         name: '',
         model_type: '',
         roles: [],
-        scenarios: ['testcase_generation'],
+        scenarios: [],
         api_key: '',
         base_url: '',
         model_name: '',
-        max_tokens: 4096,
-        temperature: 0.7,
-        top_p: 0.9,
         is_active: true
       },
       // 角色选项（文案取自 i18n: configuration.aiModel.roles.*）
@@ -359,48 +282,80 @@ export default {
 
   computed: {
     shouldShowModal() {
-      const show = this.showAddModal || this.showEditModal
-      console.log('Computed shouldShowModal:', show, {
-        showAddModal: this.showAddModal,
-        showEditModal: this.showEditModal
-      })
-      return show
-    }
-  },
-
-  watch: {
-    configForm: {
-      handler(newVal, oldVal) {
-        console.log('ConfigForm changed:', JSON.stringify(newVal))
-      },
-      deep: true
-    },
-    shouldShowModal(newVal, oldVal) {
-      console.log('Modal visibility changed:', newVal, 'was:', oldVal)
+      return this.showAddModal || this.showEditModal
     }
   },
 
   mounted() {
-    console.log('AIModelConfig component mounted')
-    console.log('Initial showAddModal state:', this.showAddModal)
-    console.log('Initial showEditModal state:', this.showEditModal)
-    console.log('Initial configForm:', JSON.stringify(this.configForm))
-    
     // 确保组件初始状态正确
     this.initializeComponent()
-    
+
     this.loadConfigs()
   },
 
   methods: {
+    // 模板中用于渲染 role / scenario 多值标签
+    multiList(value) {
+      return this.normalizeMultiValue(value)
+    },
+
+    // 卡片标题：配置名称 + 模型名称
+    configTitle(config) {
+      const name = config.name || this.$t('configuration.common.unnamed')
+      return config.model_name ? `${name}: ${config.model_name}` : name
+    },
+
+    /**
+     * 卡片开关：启用/禁用配置。
+     * 启用前校验「角色有交集 且 场景有交集」的活跃配置是否已存在（禁用时不校验）。
+     */
+    async toggleActive(config, value) {
+      if (value) {
+        const roles = this.normalizeMultiValue(config.role)
+        const scenarios = this.normalizeMultiValue(config.scenario)
+        const conflict = this.configs.find(other => {
+          if (other.id === config.id || other.is_active !== true) return false
+          const otherRoles = this.normalizeMultiValue(other.role)
+          const otherScenarios = this.normalizeMultiValue(other.scenario)
+          return otherRoles.some(r => roles.includes(r))
+            && otherScenarios.some(sc => scenarios.includes(sc))
+        })
+        if (conflict) {
+          ElMessage.error(this.t('configuration.aiModel.messages.duplicateConfig', { name: conflict.name }))
+          return
+        }
+      }
+
+      this.togglingConfigId = config.id
+      const action = value ? 'enable' : 'disable'
+      try {
+        await api.post(`/requirement-analysis/ai-models/${config.id}/${action}/`)
+        config.is_active = value
+        ElMessage.success(this.t(value
+          ? 'configuration.aiModel.messages.enableSuccess'
+          : 'configuration.aiModel.messages.disableSuccess'))
+      } catch (error) {
+        console.error('Failed to toggle config:', error)
+        ElMessage.error(this.t('configuration.aiModel.messages.toggleFailedDetail', {
+          error: error.response?.data?.error || error.message
+        }))
+      } finally {
+        this.togglingConfigId = null
+      }
+    },
+
     // 当模型类型改变时自动填充API Base URL
     onModelTypeChange(modelType) {
-      console.log('Model type changed to:', modelType)
-
       // 根据选择的模型类型自动填充base_url
       if (this.modelBaseUrlMap[modelType]) {
         this.configForm.base_url = this.modelBaseUrlMap[modelType]
-        console.log('Auto-filled base_url:', this.configForm.base_url)
+      }
+    },
+
+    // el-dialog 关闭（点击遮罩/关闭按钮）时同步内部状态
+    onModalVisibleChange(visible) {
+      if (!visible) {
+        this.closeModals()
       }
     },
 
@@ -414,12 +369,6 @@ export default {
       this.isTestingConnection = false
       this.testingConfigId = null
       this.editingConfigId = null
-      
-      console.log('Component initialized with states:', {
-        showAddModal: this.showAddModal,
-        showEditModal: this.showEditModal,
-        isEditing: this.isEditing
-      })
     },
     async loadConfigs() {
       try {
@@ -454,56 +403,23 @@ export default {
     },
 
     openAddModal() {
-      console.log('Opening add modal - button clicked')
-      try {
-        this.resetForm()
-        this.isEditing = false
-        this.showAddModal = true
-        console.log('Modal state set to true:', this.showAddModal)
-        console.log('Initial form after reset:', JSON.stringify(this.configForm))
-        
-        // 强制Vue重新渲染
-        this.$nextTick(() => {
-          console.log('Modal should be visible now:', this.showAddModal)
-          console.log('Form in nextTick:', JSON.stringify(this.configForm))
-        })
-      } catch (error) {
-        console.error('Error in openAddModal:', error)
-      }
+      this.resetForm()
+      this.isEditing = false
+      this.showAddModal = true
     },
 
     resetForm() {
-
       // 使用Object.assign确保响应式
-
       Object.assign(this.configForm, {
-
         name: '',
-
         model_type: '',
-
         roles: [],
-
-        scenarios: ['testcase_generation'],
-
+        scenarios: [],
         api_key: '',
-
         base_url: '',
-
         model_name: '',
-
-        max_tokens: 4096,
-
-        temperature: 0.7,
-
-        top_p: 0.9,
-
         is_active: true
-
       })
-
-      console.log('Form reset:', JSON.stringify(this.configForm))
-
     },
 
     /**
@@ -531,9 +447,10 @@ export default {
         api_key: config.api_key_masked || '',
         base_url: config.base_url,
         model_name: config.model_name,
-        max_tokens: config.max_tokens,
-        temperature: config.temperature,
-        top_p: config.top_p,
+        // 以下参数不在弹窗中展示，编辑时保留原值
+        max_tokens: config.max_tokens ?? 4096,
+        temperature: config.temperature ?? 0.7,
+        top_p: config.top_p ?? 0.9,
         is_active: config.is_active
       }
       this.showEditModal = true
@@ -595,9 +512,6 @@ export default {
           api_key: this.configForm.api_key,
           base_url: this.configForm.base_url,
           model_name: this.configForm.model_name,
-          max_tokens: this.configForm.max_tokens,
-          temperature: this.configForm.temperature,
-          top_p: this.configForm.top_p,
           is_active: this.configForm.is_active
         }
         
@@ -712,51 +626,11 @@ export default {
     },
 
     closeModals() {
-      console.log('Closing modals - current states:', {
-        showAddModal: this.showAddModal,
-        showEditModal: this.showEditModal,
-        isEditing: this.isEditing
-      })
-      
       this.showAddModal = false
       this.showEditModal = false
       this.isEditing = false
       this.editingConfigId = null
       this.resetForm()
-      
-      // 强制Vue重新渲染
-      this.$nextTick(() => {
-        console.log('After nextTick - states:', {
-          showAddModal: this.showAddModal,
-          showEditModal: this.showEditModal,
-          shouldShow: this.shouldShowModal
-        })
-        
-        // 强制更新组件
-        this.$forceUpdate()
-      })
-      
-      console.log('After closing - states:', {
-        showAddModal: this.showAddModal,
-        showEditModal: this.showEditModal,
-        isEditing: this.isEditing
-      })
-    },
-
-    closeTestResult() {
-      this.showTestResult = false
-    },
-
-    formatDateTime(dateString) {
-      if (!dateString) return ''
-      const date = new Date(dateString)
-      return date.toLocaleString('zh-CN', {
-        year: 'numeric',
-        month: '2-digit',
-        day: '2-digit',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
     }
   }
 }
@@ -764,552 +638,510 @@ export default {
 
 <style scoped>
 .ai-model-config {
-  padding: 20px;
-  max-width: 1400px;
+  padding: 20px 24px 32px;
+  max-width: 1480px;
   margin: 0 auto;
-}
-
-.page-header {
-  text-align: center;
-  margin-bottom: 40px;
-}
-
-.page-header h1 {
-  font-size: 2.5rem;
-  color: #2c3e50;
-  margin-bottom: 10px;
-}
-
-.page-header p {
-  color: #666;
-  font-size: 1.1rem;
 }
 
 .section-header {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  margin-bottom: 30px;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 20px;
 }
 
-.section-header h2 {
-  color: #2c3e50;
+.section-title {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.section-title h2 {
   margin: 0;
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--th-text-primary, #1f2937);
+}
+
+.count-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 28px;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  background: #eef2ff;
+  color: var(--th-color-primary, #6c5ce7);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
 }
 
 .add-config-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 12px 24px;
+  background: var(--th-color-primary, #6c5ce7);
+  border: 1px solid var(--th-color-primary, #6c5ce7);
+  color: #fff;
   border-radius: 8px;
+  padding: 8px 16px;
+  font-size: 14px;
   cursor: pointer;
-  font-size: 1rem;
-  transition: background 0.3s ease;
-  pointer-events: auto;
-  z-index: 1;
-  position: relative;
+  transition: all 0.2s ease;
 }
 
 .add-config-btn:hover {
-  background: #219a52;
+  filter: brightness(1.05);
 }
 
 .configs-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(500px, 1fr));
-  gap: 20px;
+  grid-template-columns: repeat(auto-fill, minmax(420px, 1fr));
+  gap: 16px;
 }
 
 .config-card {
-  background: white;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #e5e7eb;
   border-radius: 12px;
-  padding: 24px;
-  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
-  border: 1px solid #e1e8ed;
-  transition: transform 0.2s ease, box-shadow 0.2s ease;
+  padding: 18px;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.2s ease, transform 0.2s ease;
 }
 
 .config-card:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 8px 15px rgba(0, 0, 0, 0.15);
+  box-shadow: 0 8px 20px rgba(15, 23, 42, 0.08);
+  transform: translateY(-1px);
 }
 
-.config-header {
+.card-header {
   display: flex;
+  align-items: center;
   justify-content: space-between;
-  align-items: flex-start;
-  margin-bottom: 20px;
+  gap: 10px;
+  margin-bottom: 10px;
 }
 
-.config-title h3 {
-  color: #2c3e50;
-  margin: 0 0 10px 0;
-  font-size: 1.3rem;
+.config-name {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 700;
+  color: #111827;
+  line-height: 1.4;
+  word-break: break-word;
 }
 
-.config-badges {
-  display: flex;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.model-badge, .role-badge, .scenario-badge, .status-badge {
-  padding: 4px 12px;
-  border-radius: 20px;
-  font-size: 0.8rem;
+.name-sep {
+  color: #9ca3af;
   font-weight: 600;
 }
 
+.name-model {
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.badges {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 8px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 500;
+  white-space: nowrap;
+}
+
+.model-badge {
+  background: #f3f4f6;
+  color: #4b5563;
+}
+
 .model-badge.deepseek {
-  background: #e3f2fd;
-  color: #1976d2;
+  background: #eef2ff;
+  color: #4f46e5;
 }
 
 .model-badge.qwen {
-  background: #f3e5f5;
-  color: #7b1fa2;
+  background: #f5f3ff;
+  color: #7c3aed;
 }
 
 .model-badge.siliconflow {
-  background: #e0f7fa;
-  color: #006064;
+  background: #ecfeff;
+  color: #0e7490;
 }
 
-.model-badge.other {
-  background: #eceff1;
-  color: #455a64;
+.model-badge.zhipu {
+  background: #eff6ff;
+  color: #1d4ed8;
 }
 
-.role-badge.writer {
-  background: #e8f5e8;
-  color: #388e3c;
+.status-switch {
+  flex-shrink: 0;
 }
 
-.role-badge.reviewer {
-  background: #fff3e0;
-  color: #f57c00;
-}
-
-.role-badge.browser_use_text,
-.role-badge.browser_use_vision {
-  background: #e1f5fe;
-  color: #0277bd;
-}
-
-.role-badge.code_generator {
-  background: #ede7f6;
-  color: #5e35b1;
-}
-
-.role-badge.test_oracle {
-  background: #fce4ec;
-  color: #c2185b;
-}
-
-.scenario-badge {
-  background: #eceff1;
-  color: #455a64;
-}
-
-.scenario-badge.testcase_generation {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.scenario-badge.ui_automation {
-  background: #e1f5fe;
-  color: #0277bd;
-}
-
-.scenario-badge.api_testing {
-  background: #ede7f6;
-  color: #5e35b1;
-}
-
-.scenario-badge.code_generation {
-  background: #fff8e1;
-  color: #f9a825;
-}
-
-.status-badge {
-  background: #ffebee;
-  color: #d32f2f;
-}
-
-.status-badge.active {
-  background: #e8f5e8;
-  color: #388e3c;
-}
-
-.config-actions {
+.tag-list {
   display: flex;
-  gap: 8px;
   flex-wrap: wrap;
+  gap: 6px;
 }
 
-.test-btn, .edit-btn, .delete-btn {
-  padding: 6px 12px;
-  border: none;
-  border-radius: 6px;
-  cursor: pointer;
-  font-size: 0.85rem;
-  transition: background 0.3s ease;
+.tag-pill {
+  display: inline-flex;
+  align-items: center;
+  height: 22px;
+  padding: 0 10px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  color: #6b7280;
+  font-size: 12px;
 }
 
-.test-btn {
-  background: #3498db;
-  color: white;
-}
-
-.test-btn:hover:not(:disabled) {
-  background: #2980b9;
-}
-
-.test-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
-.edit-btn {
-  background: #f39c12;
-  color: white;
-}
-
-.edit-btn:hover {
-  background: #e67e22;
-}
-
-.delete-btn {
-  background: #e74c3c;
-  color: white;
-}
-
-.delete-btn:hover {
-  background: #c0392b;
+.tag-pill.tag-role {
+  background: #f4f2ff;
+  color: var(--th-color-primary, #6c5ce7);
 }
 
 .config-details {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 12px;
+  gap: 12px 16px;
+  padding-top: 12px;
+  border-top: 1px solid #f1f2f6;
 }
 
 .detail-item {
   display: flex;
   flex-direction: column;
   gap: 4px;
+  min-width: 0;
 }
 
-.detail-item label {
-  font-size: 0.85rem;
-  color: #666;
-  font-weight: 600;
+.detail-span {
+  grid-column: 1 / -1;
 }
 
-.detail-item span {
-  color: #2c3e50;
-  font-size: 0.9rem;
+/* URL 行：字段名与值同行显示，中间以「：」分隔 */
+.detail-inline {
+  flex-direction: row;
+  align-items: baseline;
+  gap: 0;
+}
+
+.detail-inline label {
+  flex-shrink: 0;
+}
+
+.detail-sep {
+  flex-shrink: 0;
+  color: #6b7280;
+  font-size: 12px;
+}
+
+.detail-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.config-details label {
+  font-size: 12px;
+  color: #6b7280;
+  font-weight: 500;
+}
+
+.detail-value {
+  color: #111827;
+  font-size: 13px;
+  line-height: 1.5;
   word-break: break-all;
+}
+
+.card-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 14px;
+}
+
+.footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.action-btn {
+  background: #fff;
+  border: 1px solid #d1d5db;
+  color: #374151;
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 14px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.action-btn:hover:not(:disabled) {
+  border-color: #9ca3af;
+}
+
+.action-btn.test-btn:hover:not(:disabled) {
+  border-color: var(--th-color-primary, #6c5ce7);
+  color: var(--th-color-primary, #6c5ce7);
+}
+
+.action-btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.action-btn.danger {
+  color: #dc2626;
+  border-color: #fca5a5;
+  background: #fff;
+}
+
+.action-btn.danger:hover:not(:disabled) {
+  background: #fef2f2;
+  border-color: #f87171;
 }
 
 .empty-state {
   text-align: center;
   padding: 80px 20px;
-  color: #666;
-}
-
-.empty-icon {
-  font-size: 4rem;
-  margin-bottom: 20px;
+  background: #fff;
+  border: 1px dashed #d1d5db;
+  border-radius: 12px;
 }
 
 .empty-state h3 {
-  color: #2c3e50;
-  margin-bottom: 10px;
-}
-
-.add-first-config-btn {
-  background: #3498db;
-  color: white;
-  border: none;
-  padding: 15px 30px;
-  border-radius: 8px;
-  cursor: pointer;
-  font-size: 1.1rem;
-  margin-top: 20px;
-  transition: background 0.3s ease;
-  pointer-events: auto;
-  z-index: 1;
-  position: relative;
-}
-
-.add-first-config-btn:hover {
-  background: #2980b9;
-}
-
-.modal-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 20px 30px;
-  border-bottom: 1px solid #eee;
-}
-
-.modal-header h3 {
-  margin: 0;
-  color: #2c3e50;
-}
-
-.close-btn {
-  background: none !important;
-  border: none !important;
-  font-size: 1.5rem !important;
-  cursor: pointer !important;
-  color: #666 !important;
-  padding: 5px 10px !important;
-  z-index: 10001 !important;
-  position: relative !important;
-  pointer-events: auto !important;
-}
-
-.close-btn:hover {
-  color: #333 !important;
-  background: #f0f0f0 !important;
-  border-radius: 3px !important;
-}
-
-.modal-body {
-  padding: 30px;
-}
-
-.form-group {
-  margin-bottom: 20px;
-}
-
-.form-group label {
-  display: block;
-  margin-bottom: 8px;
+  margin: 0 0 20px;
+  color: #111827;
+  font-size: 16px;
   font-weight: 600;
-  color: #2c3e50;
-}
-
-.form-input, .form-select {
-  width: 100%;
-  padding: 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  font-size: 1rem;
-  transition: border-color 0.3s ease;
-}
-
-.form-input:focus, .form-select:focus {
-  outline: none;
-  border-color: #3498db;
-  box-shadow: 0 0 0 2px rgba(52, 152, 219, 0.2);
-}
-
-.form-row {
-  display: grid;
-  grid-template-columns: 1fr 1fr 1fr;
-  gap: 15px;
-}
-
-.checkbox-group {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 18px;
-  padding: 10px 12px;
-  border: 1px solid #ddd;
-  border-radius: 6px;
-  background: #f8f9fa;
-}
-
-.checkbox-item {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  cursor: pointer;
-  padding: 4px;
-  border-radius: 4px;
-  transition: background 0.2s;
-}
-
-.checkbox-item:hover {
-  background: #e9ecef;
-}
-
-.checkbox-item input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-}
-
-.checkbox-item span {
-  font-size: 14px;
-  color: #2c3e50;
-}
-
-.checkbox-label {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  cursor: pointer;
-  user-select: none;
-}
-
-.checkbox-label input[type="checkbox"] {
-  width: auto;
-}
-
-.required {
-  color: #e74c3c;
 }
 
 .form-hint {
   display: block;
   margin-top: 5px;
-  color: #666;
+  color: #999;
   font-size: 0.85rem;
-  font-style: italic;
 }
 
-.modal-actions {
-  display: flex;
-  gap: 15px;
-  justify-content: flex-end;
-  margin-top: 30px;
-}
-
-.cancel-btn {
-  background: #95a5a6;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.cancel-btn:hover {
-  background: #7f8c8d;
-}
-
-.confirm-btn {
-  background: #27ae60;
-  color: white;
-  border: none;
-  padding: 10px 20px;
-  border-radius: 6px;
-  cursor: pointer;
-}
-
-.confirm-btn:hover:not(:disabled) {
-  background: #219a52;
-}
-
-.confirm-btn:disabled {
-  background: #bdc3c7;
-  cursor: not-allowed;
-}
-
+/* 连接测试结果弹窗（弹窗骨架见文件末尾全局样式） */
 .test-result {
   display: flex;
-  gap: 20px;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.result-banner {
+  display: flex;
+  gap: 14px;
   align-items: flex-start;
+  padding: 16px;
+  border-radius: var(--th-radius-md, 12px);
+  border: 1px solid var(--th-border, #e8ecf4);
+  background: var(--th-bg-muted, #f7f8fc);
+}
+
+.test-result.success .result-banner {
+  border-color: rgba(108, 92, 231, 0.3);
+  background: linear-gradient(135deg, rgba(108, 92, 231, 0.14), rgba(108, 92, 231, 0.05));
+}
+
+.test-result.error .result-banner {
+  border-color: rgba(239, 68, 68, 0.28);
+  background: linear-gradient(135deg, rgba(239, 68, 68, 0.1), rgba(239, 68, 68, 0.03));
 }
 
 .result-icon {
-  font-size: 3rem;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 42px;
+  height: 42px;
   flex-shrink: 0;
+  border-radius: 12px;
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(15, 23, 42, 0.12);
 }
 
-.result-content h4 {
-  margin: 0 0 10px 0;
-  color: #2c3e50;
+.test-result.success .result-icon {
+  background: linear-gradient(135deg, var(--th-color-primary-light, #8b7cf0), var(--th-color-primary, #6c5ce7));
 }
 
-.test-result.success .result-content h4 {
-  color: #27ae60;
+.test-result.error .result-icon {
+  background: linear-gradient(135deg, #f87171, #ef4444);
 }
 
-.test-result.error .result-content h4 {
-  color: #e74c3c;
+.result-heading {
+  min-width: 0;
 }
 
-.api-response {
-  margin-top: 15px;
-  padding: 15px;
-  background: #f8f9fa;
-  border-radius: 6px;
-  border-left: 4px solid #3498db;
+.result-heading h4 {
+  margin: 0 0 6px;
+  font-size: 15px;
+  font-weight: 650;
+  color: var(--th-text-primary, #1f2937);
 }
 
-.api-response label {
-  font-weight: 600;
-  color: #2c3e50;
-  margin-bottom: 8px;
+.test-result.success .result-heading h4 {
+  color: var(--th-color-primary, #6c5ce7);
 }
 
-.api-response p {
+.test-result.error .result-heading h4 {
+  color: #dc2626;
+}
+
+.result-message {
   margin: 0;
-  color: #666;
-  line-height: 1.5;
+  font-size: 13px;
+  line-height: 1.6;
+  color: var(--th-text-secondary, #6b7280);
+  word-break: break-word;
 }
 
-@media (max-width: 768px) {
+.test-result.success .result-message {
+  color: var(--th-color-primary-dark, #5a4bd1);
+}
+
+/* 深色模式：选择器挂在弹窗类上，避免污染其它页面的同名类 */
+:global(html.dark .test-result-dialog .test-result.success .result-heading h4) {
+  color: var(--th-color-primary-light, #a99af5);
+}
+
+:global(html.dark .test-result-dialog .test-result.error .result-heading h4) {
+  color: #f87171;
+}
+
+:global(html.dark .test-result-dialog .test-result.success .result-message) {
+  color: var(--th-color-primary, #8b7cf0);
+}
+
+:global(html.dark .test-result-dialog .result-icon) {
+  box-shadow: 0 6px 14px rgba(0, 0, 0, 0.35);
+}
+
+@media (max-width: 960px) {
   .configs-grid {
     grid-template-columns: 1fr;
   }
-  
-  .config-header {
+}
+
+@media (max-width: 640px) {
+  .section-header {
     flex-direction: column;
-    gap: 15px;
     align-items: flex-start;
   }
-  
+
   .config-details {
     grid-template-columns: 1fr;
   }
-  
-  .form-row {
-    grid-template-columns: 1fr;
-  }
+}
+
+:global(.is-dark) .config-card,
+:global(.is-dark) .action-btn,
+:global(.is-dark) .empty-state {
+  background: var(--th-bg-elevated, #1f2430);
+  border-color: var(--th-border, #2f3645);
+  color: var(--th-text-primary, #e8ecf4);
+}
+
+:global(.is-dark) .config-name,
+:global(.is-dark) .section-title h2,
+:global(.is-dark) .detail-value,
+:global(.is-dark) .empty-state h3 {
+  color: var(--th-text-primary, #e8ecf4);
+}
+
+:global(.is-dark) .name-model {
+  color: var(--th-text-secondary, #9aa3b2);
+}
+
+:global(.is-dark) .config-details label,
+:global(.is-dark) .detail-sep {
+  color: var(--th-text-secondary, #9aa3b2);
+}
+
+:global(.is-dark) .config-details {
+  border-top-color: var(--th-border, #2f3645);
+}
+
+:global(.is-dark) .tag-pill {
+  background: #2a3140;
+  color: var(--th-text-secondary, #9aa3b2);
+}
+
+:global(.is-dark) .tag-pill.tag-role {
+  background: rgba(139, 124, 240, 0.18);
+  color: #a99af5;
+}
+
+:global(.is-dark) .model-badge {
+  background: #2a3140;
+  color: var(--th-text-secondary, #9aa3b2);
+}
+
+:global(.is-dark) .count-badge {
+  background: rgba(108, 92, 231, 0.2);
 }
 </style>
 
 <style>
-/* 全局样式，不受scoped限制 */
-.config-modal, .test-result-modal {
-  position: fixed !important;
-  top: 0 !important;
-  left: 0 !important;
-  right: 0 !important;
-  bottom: 0 !important;
-  background: rgba(0, 0, 0, 0.5) !important;
-  display: flex !important;
-  align-items: center !important;
-  justify-content: center !important;
-  z-index: 9999 !important;
-  visibility: visible !important;
-  opacity: 1 !important;
+/* 连接测试结果弹窗：弹窗骨架节点由 el-dialog 内部渲染，须用全局样式覆盖 */
+.el-dialog.test-result-dialog {
+  border-radius: var(--th-radius-lg, 16px);
+  overflow: hidden;
+  box-shadow: var(--th-shadow-lg, 0 16px 40px rgba(31, 41, 55, 0.1));
 }
 
-/* 隐藏状态 */
-.config-modal.hidden, .test-result-modal.hidden {
-  display: none !important;
-  visibility: hidden !important;
-  opacity: 0 !important;
+.el-dialog.test-result-dialog .el-dialog__header {
+  margin-right: 0;
+  padding: 18px 22px 16px;
+  background: transparent;
+  border-bottom: 1px solid var(--th-border, #e8ecf4);
 }
 
-.config-modal .modal-content, .test-result-modal .modal-content {
-  background: white !important;
-  border-radius: 12px !important;
-  padding: 0 !important;
-  max-width: 600px !important;
-  width: 90% !important;
-  max-height: 90vh !important;
-  overflow-y: auto !important;
-  position: relative !important;
-  z-index: 10000 !important;
+.el-dialog.test-result-dialog .el-dialog__title {
+  font-size: 16px;
+  font-weight: 600;
+  color: var(--th-text-primary, #1f2937);
+}
+
+.el-dialog.test-result-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--th-color-primary, #6c5ce7);
+}
+
+.el-dialog.test-result-dialog .el-dialog__body {
+  padding: 20px 22px 24px;
+}
+
+html.dark .el-dialog.test-result-dialog .el-dialog__header {
+  border-bottom-color: var(--th-border, #2a3142);
+}
+
+html.dark .el-dialog.test-result-dialog .el-dialog__headerbtn:hover .el-dialog__close {
+  color: var(--th-color-primary-light, #a99af5);
 }
 </style>

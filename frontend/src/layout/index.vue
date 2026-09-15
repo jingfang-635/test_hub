@@ -213,20 +213,10 @@
 
           <!-- 配置中心模块菜单 -->
           <template v-else-if="currentModule === 'configuration' && appStore.isModuleEnabled('configuration')">
-            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/prompt-config', '/configuration/generation-config'])" index="ai-case-generation">
-              <template #title>
-                <el-icon><MagicStick /></el-icon>
-                <span>{{ $t('menu.aiCaseGenerationConfig') }}</span>
-              </template>
-              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/prompt-config')" index="/configuration/prompt-config">
-                <el-icon><Edit /></el-icon>
-                <span>{{ $t('menu.promptConfig') }}</span>
-              </el-menu-item>
-              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/generation-config')" index="/configuration/generation-config">
-                <el-icon><Setting /></el-icon>
-                <span>{{ $t('menu.generationConfig') }}</span>
-              </el-menu-item>
-            </el-sub-menu>
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/prompt-config')" index="/configuration/prompt-config">
+              <el-icon><Edit /></el-icon>
+              <span>{{ $t('menu.promptConfig') }}</span>
+            </el-menu-item>
             <el-menu-item v-if="appStore.isMenuEnabled('/configuration/knowledge-llm')" index="/configuration/knowledge-llm">
               <el-icon><Connection /></el-icon>
               <span>{{ $t('menu.knowledgeBaseConfig') }}</span>
@@ -503,7 +493,6 @@ const breadcrumbTitle = computed(() => {
     '/configuration/ai-model': t('menu.aiModelConfig'),
     '/configuration/projects': t('menu.projectAndVersion'),
     '/configuration/prompt-config': t('menu.promptConfig'),
-    '/configuration/generation-config': t('menu.generationConfig'),
     '/configuration/knowledge-base': t('menu.knowledgeBaseManage'),
     '/configuration/knowledge-llm': t('menu.knowledgeBaseConfig'),
     '/configuration/ui-env': t('menu.uiEnvConfig'),

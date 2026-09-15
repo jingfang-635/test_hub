@@ -269,6 +269,7 @@ class TestCaseGenerationTaskSerializer(serializers.ModelSerializer):
         model = TestCaseGenerationTask
         fields = ['id', 'task_id', 'title', 'requirement_text', 'status', 'status_display',
                  'progress', 'source_type', 'source_type_display', 'source_url',
+                 'output_mode', 'enable_auto_review',
                  'project', 'project_name', 'writer_model_config', 'writer_model_name', 
                  'reviewer_model_config', 'reviewer_model_name', 'writer_prompt_config', 'writer_prompt_name',
                  'reviewer_prompt_config', 'reviewer_prompt_name', 'generated_test_cases',
@@ -328,16 +329,11 @@ class FigmaFetchRequestSerializer(serializers.Serializer):
 
 
 class GenerationConfigSerializer(serializers.ModelSerializer):
-    """生成行为配置序列化器"""
-    default_output_mode_display = serializers.CharField(source='get_default_output_mode_display', read_only=True)
+    """生成设置序列化器（单例，仅超时时间可改）"""
 
     class Meta:
         model = GenerationConfig
-        fields = [
-            'id', 'name', 'default_output_mode', 'default_output_mode_display',
-            'enable_auto_review', 'review_timeout',
-            'is_active', 'created_at', 'updated_at'
-        ]
+        fields = ['id', 'review_timeout', 'created_at', 'updated_at']
         read_only_fields = ['created_at', 'updated_at']
 
 

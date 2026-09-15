@@ -103,11 +103,11 @@ def execute_generation_task(task_id):
         task.refresh_from_db()
         logger.info(f"开始执行任务 task_id={task_id} (成功抢占锁)")
 
-        # 读取生成行为配置
-        gen_config = GenerationConfig.get_active_config()
+        # 读取生成设置（超时时间）；输出模式与是否评审由任务自身记录
+        gen_config = GenerationConfig.get_config()
 
         # 获取配置参数，设置默认值
-        enable_auto_review = gen_config.enable_auto_review if gen_config else True
+        enable_auto_review = task.enable_auto_review
         review_timeout = gen_config.review_timeout if gen_config else 120
 
         logger.info(
@@ -1305,8 +1305,13 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
     """AI模型配置视图集"""
     queryset = AIModelConfig.objects.all()
     serializer_class = AIModelConfigSerializer
+    permission_classes = []  # 允许未认证用户访问
 
     def get_queryset(self):
+        # 安全检查：确保 request 有 query_params 属性
+        if not hasattr(self.request, 'query_params'):
+            return self.queryset.order_by('-created_at')
+
         queryset = super().get_queryset()
 
         # 按模型类型过滤
@@ -1315,6 +1320,8 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
             queryset = queryset.filter(model_type=model_type)
 
         # 按角色过滤（role 为多值列表，命中其一即返回）
+        # 注意用 __contains 而非 __icontains：后者是整列 LIKE，参数会被序列化成
+        # "['writer']"（Python repr）从而永远匹配不到 JSON 数组，查询恒为空。
         role = self.request.query_params.get('role')
         if role:
             queryset = queryset.filter(role__contains=[role])
@@ -1604,73 +1611,42 @@ class PromptConfigViewSet(viewsets.ModelViewSet):
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
-class GenerationConfigViewSet(viewsets.ModelViewSet):
-    """生成行为配置视图集"""
-    queryset = GenerationConfig.objects.all()
-    serializer_class = GenerationConfigSerializer
+class GenerationConfigViewSet(viewsets.ViewSet):
+    """生成设置视图集（单例）：仅暴露「评审和改进超时时间」。
 
-    def get_queryset(self):
-        queryset = super().get_queryset()
-        return queryset.order_by('-created_at')
+    原「生成行为配置」模块已下线，输出模式与「启用AI评审和改进」改为在
+    「AI 用例生成」页面的生成流程中按次选择，因此不再提供列表/新增/启用/删除。
+    - GET   /generation-config/           读取设置
+    - PATCH /generation-config/settings/  更新设置
+    """
 
-    @action(detail=False, methods=['get'])
-    def active(self, request):
-        """获取活跃的生成配置"""
+    def list(self, request):
+        """读取生成设置（不存在时按默认值创建）"""
         try:
-            config = GenerationConfig.get_active_config()
-            if not config:
-                return Response({
-                    'error': '未找到活跃的生成配置，请先创建并启用一个配置'
-                }, status=status.HTTP_404_NOT_FOUND)
-
-            serializer = self.get_serializer(config)
+            config = GenerationConfig.get_config()
+            serializer = GenerationConfigSerializer(config)
             return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
-            logger.error(f"获取活跃生成配置失败: {e}")
+            logger.error(f"获取生成设置失败: {e}")
             return Response({
                 'error': f'获取失败: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    @action(detail=True, methods=['post'])
-    def enable(self, request, pk=None):
-        """启用配置"""
+    @action(detail=False, methods=['patch', 'put'])
+    def settings(self, request):
+        """更新生成设置（仅超时时间）"""
         try:
-            # 禁用其他所有配置
-            GenerationConfig.objects.all().update(is_active=False)
-
-            # 启用当前配置
-            config = self.get_object()
-            config.is_active = True
-            config.save()
-
-            return Response({
-                'message': '生成配置已启用',
-                'id': config.id,
-                'is_active': True
-            }, status=status.HTTP_200_OK)
+            config = GenerationConfig.get_config()
+            serializer = GenerationConfigSerializer(
+                config, data=request.data, partial=True)
+            if not serializer.is_valid():
+                return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
+            serializer.save()
+            return Response(serializer.data, status=status.HTTP_200_OK)
         except Exception as e:
-            logger.error(f"启用生成配置失败: {e}")
+            logger.error(f"更新生成设置失败: {e}")
             return Response({
-                'error': f'启用失败: {str(e)}'
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-    @action(detail=True, methods=['post'])
-    def disable(self, request, pk=None):
-        """禁用配置"""
-        try:
-            config = self.get_object()
-            config.is_active = False
-            config.save()
-
-            return Response({
-                'message': '生成配置已禁用',
-                'id': config.id,
-                'is_active': False
-            }, status=status.HTTP_200_OK)
-        except Exception as e:
-            logger.error(f"禁用生成配置失败: {e}")
-            return Response({
-                'error': f'禁用失败: {str(e)}'
+                'error': f'保存失败: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
@@ -1920,19 +1896,12 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
             if source_url:
                 task_data['source_url'] = source_url
 
-            # 处理输出模式：优先使用用户指定的，否则使用生成行为配置的默认值
+            # 处理生成流程：输出模式与是否启用AI评审和改进由前端按次选择
             output_mode = request.data.get('output_mode')
-            if output_mode and output_mode in ['stream', 'complete']:
-                task_data['output_mode'] = output_mode
-            else:
-                # 从生成行为配置中读取默认值
-                from .models import GenerationConfig
-                gen_config = GenerationConfig.get_active_config()
-                if gen_config:
-                    task_data['output_mode'] = gen_config.default_output_mode
-                else:
-                    # 如果没有配置，默认使用流式输出
-                    task_data['output_mode'] = 'stream'
+            task_data['output_mode'] = output_mode if output_mode in ['stream', 'complete'] else 'stream'
+
+            enable_auto_review = request.data.get('enable_auto_review')
+            task_data['enable_auto_review'] = True if enable_auto_review is None else bool(enable_auto_review)
 
             task_serializer = TestCaseGenerationTaskSerializer(
                 data=task_data,
@@ -3228,7 +3197,7 @@ class ConfigStatusViewSet(viewsets.ViewSet):
                 AIModelConfig.any_of(role=['writer', 'reviewer'])
             )
 
-            # 检查writer模型配置
+            # 检查writer模型配置（role 为 JSON 数组，用 __contains=[value] 生成 JSON_CONTAINS）
             writer_model_enabled = ai_model_configs.filter(
                 role__contains=['writer'],
                 is_active=True
@@ -3283,9 +3252,6 @@ class ConfigStatusViewSet(viewsets.ViewSet):
                     reviewer_model_enabled is not None and
                     reviewer_prompt_enabled is not None
             )
-
-            # 检查生成行为配置
-            generation_config = GenerationConfig.get_active_config()
 
             # 判断是否有禁用的配置
             has_disabled = (
@@ -3353,15 +3319,6 @@ class ConfigStatusViewSet(viewsets.ViewSet):
                     'id': (reviewer_prompt_enabled or reviewer_prompt_disabled).id if (
                             reviewer_prompt_enabled or reviewer_prompt_disabled) else None,
                     'required': False
-                },
-                'generation_config': {
-                    'configured': generation_config is not None,
-                    'enabled': generation_config is not None,
-                    'name': generation_config.name if generation_config else None,
-                    'id': generation_config.id if generation_config else None,
-                    'required': True,
-                    'default_output_mode': generation_config.default_output_mode if generation_config else None,
-                    'enable_auto_review': generation_config.enable_auto_review if generation_config else None
                 }
             }
 

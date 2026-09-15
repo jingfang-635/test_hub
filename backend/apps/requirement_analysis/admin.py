@@ -73,23 +73,10 @@ class PromptConfigAdmin(admin.ModelAdmin):
 
 @admin.register(GenerationConfig)
 class GenerationConfigAdmin(admin.ModelAdmin):
-    list_display = [
-        'name', 'default_output_mode', 'enable_auto_review', 'is_active', 'updated_at'
-    ]
-    list_filter = ['default_output_mode', 'enable_auto_review', 'is_active']
-    search_fields = ['name']
+    list_display = ['id', 'review_timeout', 'updated_at']
     readonly_fields = ['created_at', 'updated_at']
 
     fieldsets = (
-        ('基本配置', {
-            'fields': ('name', 'is_active')
-        }),
-        ('输出模式配置', {
-            'fields': ('default_output_mode',)
-        }),
-        ('自动化配置', {
-            'fields': ('enable_auto_review',)
-        }),
         ('超时配置', {
             'fields': ('review_timeout',)
         }),
@@ -142,8 +129,9 @@ class KnowledgeDocumentChunkAdmin(admin.ModelAdmin):
 
 @admin.register(TestCaseGenerationTask)
 class TestCaseGenerationTaskAdmin(admin.ModelAdmin):
-    list_display = ['task_id', 'title', 'status', 'progress', 'source_type', 'output_mode', 'created_at']
-    list_filter = ['status', 'source_type', 'output_mode', 'created_at']
+    list_display = ['task_id', 'title', 'status', 'progress', 'source_type', 'output_mode',
+                    'enable_auto_review', 'created_at']
+    list_filter = ['status', 'source_type', 'output_mode', 'enable_auto_review', 'created_at']
     search_fields = ['task_id', 'title', 'requirement_text', 'source_url']
     readonly_fields = ['task_id', 'created_at', 'updated_at']
 

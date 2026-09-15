@@ -54,10 +54,8 @@ export default {
     aiExecutionRecords: 'AI测试报告',
 
     // 配置中心
-    aiCaseGenerationConfig: 'AI用例生成配置',
     aiModelConfig: '模型配置',
     promptConfig: '提示词配置',
-    generationConfig: '生成行为配置',
     knowledgeBaseManage: '知识库管理',
     knowledgeBaseConfig: '知识库配置',
     uiEnvConfig: 'UI环境配置',

@@ -283,7 +283,13 @@ class AIModelConfig(models.Model):
 
     @staticmethod
     def any_of(**filters) -> models.Q:
-        """构造「任一值命中」的 OR 查询，如 any_of(role=['writer', 'reviewer'])"""
+        """构造「任一值命中」的 OR 查询，如 any_of(role=['writer', 'reviewer'])
+
+        必须用 __contains=[value]，它会生成 JSON_CONTAINS(col, '["writer"]')，语义正确。
+        不要用 __icontains：它退化成整列 LIKE，传 list 时参数会被序列化成 Python repr
+        "['writer']"（带单引号），而列里存的是 JSON "writer"（双引号、无反斜杠），
+        永远匹配不上，查询恒为空。
+        """
         query = models.Q()
         for field, values in filters.items():
             if not values:
@@ -369,49 +375,35 @@ class PromptConfig(models.Model):
 
 
 class GenerationConfig(models.Model):
-    """生成行为配置模型"""
-    OUTPUT_MODE_CHOICES = [
-        ('stream', '实时流式输出'),
-        ('complete', '完整输出'),
-    ]
+    """生成设置（单例）：仅保留评审和改进的超时时间。
 
-    name = models.CharField(max_length=100, verbose_name='配置名称', default='默认生成配置')
-    default_output_mode = models.CharField(
-        max_length=10,
-        choices=OUTPUT_MODE_CHOICES,
-        default='stream',
-        verbose_name='默认输出模式',
-        help_text='测试用例生成的默认输出方式'
-    )
-
-    # 扩展配置字段
-    enable_auto_review = models.BooleanField(
-        default=True,
-        verbose_name='启用AI评审和改进',
-        help_text='生成完成后自动进行AI评审，并根据评审意见改进测试用例'
-    )
+    输出模式与「是否启用 AI 评审和改进」已移至「AI 用例生成」页面的生成流程中按次选择，
+    因此这里不再保存这两项行为配置。
+    """
     review_timeout = models.IntegerField(
         default=120,
         verbose_name='评审和改进超时时间（秒）',
         help_text='AI评审和改进的最大等待时间（总时长）'
     )
 
-    is_active = models.BooleanField(default=True, verbose_name='是否启用')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
     updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
 
     class Meta:
         db_table = 'generation_config'
-        verbose_name = '生成行为配置'
-        verbose_name_plural = '生成行为配置'
+        verbose_name = '生成设置'
+        verbose_name_plural = '生成设置'
 
     def __str__(self):
-        return self.name
+        return '生成设置'
 
     @classmethod
-    def get_active_config(cls):
-        """获取活跃的生成配置"""
-        return cls.objects.filter(is_active=True).first()
+    def get_config(cls):
+        """获取单例设置，不存在时按默认值创建"""
+        config = cls.objects.first()
+        if config is None:
+            config = cls.objects.create()
+        return config
 
 
 class KnowledgeBaseLLMConfig(models.Model):
@@ -634,6 +626,13 @@ class TestCaseGenerationTask(models.Model):
         choices=OUTPUT_MODE_CHOICES,
         default='stream',
         verbose_name='输出模式'
+    )
+
+    # 生成流程配置（按次选择，与任务一起固化）
+    enable_auto_review = models.BooleanField(
+        default=True,
+        verbose_name='启用AI评审和改进',
+        help_text='生成完成后自动进行AI评审，并根据评审意见改进测试用例'
     )
 
     # 流式缓冲区和状态跟踪

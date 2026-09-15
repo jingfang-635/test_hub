@@ -81,7 +81,6 @@ export const MENU_ITEMS = [
 
   // ===== 配置中心 =====
   { key: '/configuration/prompt-config', module: 'configuration', nameKey: 'menu.promptConfig', sort: 1 },
-  { key: '/configuration/generation-config', module: 'configuration', nameKey: 'menu.generationConfig', sort: 2 },
   { key: '/configuration/knowledge-llm', module: 'configuration', nameKey: 'menu.knowledgeBaseConfig', sort: 3 },
   { key: '/configuration/projects', module: 'configuration', nameKey: 'menu.projectAndVersion', sort: 4 },
   { key: '/configuration/ui-env', module: 'configuration', nameKey: 'menu.uiEnvConfig', sort: 5 },

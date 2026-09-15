@@ -419,11 +419,6 @@ const routes = [
             component: () => import('@/views/requirement-analysis/PromptConfig.vue')
           },
           {
-            path: 'generation-config',
-            name: 'ConfigGenerationConfig',
-            component: () => import('@/views/requirement-analysis/GenerationConfigView.vue')
-          },
-          {
             path: 'knowledge-base',
             name: 'ConfigKnowledgeBase',
             component: () => import('@/views/requirement-analysis/KnowledgeBaseManage.vue')

@@ -4,13 +4,16 @@ export default {
     title: 'AI Test Case Generation',
     subtitle: 'AI will generate high-quality test cases based on requirement descriptions or documents',
 
-    // Output Mode
-    outputModeTitle: 'Output Mode Settings',
-    outputModeDesc: 'Select the output method for test case generation (applies to all requirement input methods)',
+    // Generation Flow
+    generationFlowTitle: 'Test Case Generation Flow',
+    generationFlowDesc: 'Configure the output mode and whether to auto-review for test case generation (applies to all requirement input methods)',
+    outputModeLabel: 'Default Output Mode',
     realtimeStream: 'Real-time Stream',
     realtimeStreamDesc: 'Display character by character, smooth experience, suitable for large requirement documents',
     completeOutput: 'Complete Output',
     completeOutputDesc: 'Display all at once after completion, suitable for simple requirements',
+    enableAutoReview: 'Enable AI Review & Improve',
+    enableAutoReviewHint: 'Automatically run AI review after generation and improve test cases based on the feedback; the timeout can be set separately in "Behavior Config"',
 
     // Source selection
     sourceManual: 'Manual Requirement Input',
@@ -222,7 +225,19 @@ export default {
     pending: 'Pending',
     processing: 'Processing',
     completed: 'Completed',
-    failed: 'Failed'
+    failed: 'Failed',
+
+    // Behavior config (timeout settings)
+    behaviorConfig: 'Behavior Config',
+    behaviorConfigIcon: '⚙️',
+    behaviorConfigTitle: 'Behavior Config',
+    behaviorTimeoutSettings: 'Timeout Settings',
+    behaviorReviewTimeout: 'Review & Improve Timeout',
+    behaviorTimeoutHint: 'Total timeout for AI review and improvement (Recommended: 120s for small docs, 600-1800s for large docs, up to 3600s for very large docs)',
+    behaviorSeconds: 's',
+    behaviorLoadFailed: 'Failed to load generation settings',
+    behaviorConfigSaveSuccess: 'Behavior config saved',
+    behaviorConfigSaveFailed: 'Failed to save behavior config'
   },
   generatedTestCases: {
     // Page
@@ -492,86 +507,6 @@ export default {
     loadFailed: 'Load failed',
     pleaseLogin: 'Please login first'
   },
-  generationConfig: {
-    // Page
-    title: '⚙️ Generation Behavior Config',
-    subtitle: 'Configure default behavior and automation flow for test case generation',
-    description: 'Configure default behavior and automation flow for test case generation',
-
-    // Config List
-    configList: 'Configuration List',
-    addConfig: '➕ Add Config',
-    addFirstConfig: '➕ Add First Config',
-    emptyTitle: 'No Generation Config',
-    emptyDescription: 'Please add generation behavior config to control default behavior of test case generation',
-
-    // Config Card
-    enabled: '✅ Enabled',
-    disabled: '❌ Disabled',
-    streamMode: '⚡ Stream Output',
-    completeMode: '📄 Complete Output',
-    enable: '✅ Enable',
-    edit: '✏️ Edit',
-    delete: '🗑️ Delete',
-
-    // Sections
-    outputMode: '📤 Output Mode',
-    automationProcess: '🤖 Automation Process',
-    timeoutSettings: '⏱️ Timeout Settings',
-
-    // Fields
-    defaultMode: 'Default Mode:',
-    aiReview: 'AI Review & Improve:',
-    reviewTimeout: 'Review & Improve Timeout:',
-    seconds: 'seconds',
-    createdAt: 'Created At:',
-    updatedAt: 'Updated At:',
-
-    // Form
-    editTitle: 'Edit',
-    addTitle: 'Add',
-    formTitle: 'Generation Behavior Config',
-    basicInfo: '📋 Basic Information',
-    configName: 'Config Name',
-    configNamePlaceholder: 'e.g.: Default Generation Config',
-    defaultConfigName: 'Default Generation Config',
-    enableThisConfig: 'Enable this config',
-    enableHint: 'Note: Only one config can be enabled. Enabling this will automatically disable other configs',
-
-    // Output Mode
-    outputModeSettings: '📤 Output Mode Settings',
-    defaultOutputMode: 'Default Output Mode',
-    realtimeStream: '⚡ Real-time Stream',
-    completeOutput: '📄 Complete Output',
-    outputModeHint: 'Real-time Stream: Display character by character; Complete Output: Display all at once after completion',
-
-    // Automation
-    automationSettings: '🤖 Automation Process Config',
-    enableAutoReview: 'Enable AI Review & Improve',
-    autoReviewHint: 'Automatically perform AI review after generation and improve test cases based on review feedback',
-
-    // Timeout
-    timeoutSettingsLabel: '⏱️ Timeout Settings',
-    reviewTimeoutLabel: 'Review & Improve Timeout (seconds)',
-    timeoutHint: 'Total timeout for AI review and improvement (Recommended: 120s for small docs, 600-1800s for large docs, up to 3600s for very large docs)',
-
-    // Buttons
-    cancel: 'Cancel',
-    saving: '🔄 Saving...',
-    saveConfig: '💾 Save Config',
-
-    // Messages
-    loadFailed: 'Failed to load configurations',
-    pleaseLogin: 'Please login first',
-    saveSuccess: 'Configuration added successfully',
-    updateSuccess: 'Configuration updated successfully',
-    saveFailed: 'Failed to save',
-    enableSuccess: 'Configuration enabled',
-    enableFailed: 'Failed to enable',
-    deleteSuccess: 'Configuration deleted successfully',
-    deleteFailed: 'Failed to delete',
-    deleteConfirm: 'Are you sure to delete this configuration?'
-  },
 
   // Task Detail Page
   taskDetail: {
@@ -809,11 +744,9 @@ export default {
     // Configuration Groups
     modelConfig: 'Model Configuration',
     promptConfig: 'Prompt Configuration',
-    generationConfig: 'Generation Behavior Configuration',
     // Configuration Item Labels
     caseWriter: 'Case Writer',
     caseReviewer: 'Case Reviewer',
-    generationSettings: 'Generation Settings',
     // Status Text
     unconfigured: 'Not Configured',
     disabled: 'Disabled',
