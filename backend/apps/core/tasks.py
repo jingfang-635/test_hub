@@ -56,3 +56,33 @@ def aggregate_realtime_performance_stats():
     """实时聚合当天性能数据（每30分钟，Django-Q2 定时任务）"""
     today = timezone.localtime(timezone.now()).date()
     _aggregate(today)
+
+
+def backfill_performance_stats(days=30):
+    """回填最近 days 天缺失的性能统计（含今天）。
+
+    用于修复定时任务未注册/未运行期间产生的历史数据缺口：
+    只扫描 RequestPerformanceLog 中实际有数据的日期，逐日重建聚合。
+    """
+    tz = timezone.get_current_timezone()
+    today = timezone.localtime(timezone.now()).date()
+    start_date = today - timedelta(days=max(days - 1, 0))
+
+    from apps.core.models import RequestPerformanceLog
+
+    start = datetime.combine(start_date, time.min, tzinfo=tz)
+    end = datetime.combine(today, time.min, tzinfo=tz) + timedelta(days=1)
+    # MySQL 下按本地时区取日期，避免 __date lookup 在 USE_TZ=True 时失效
+    dates = {
+        timezone.localtime(dt).date()
+        for dt in RequestPerformanceLog.objects.filter(
+            created_at__gte=start, created_at__lt=end
+        ).values_list('created_at', flat=True)
+    }
+
+    count = 0
+    for date in sorted(dates):
+        if _aggregate(date) is not None:
+            count += 1
+    logger.info(f"性能统计回填完成：扫描 {len(dates)} 个有数据的日期，写入 {count} 条统计")
+    return count

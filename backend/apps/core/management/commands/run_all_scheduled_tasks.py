@@ -33,6 +33,18 @@ class Command(BaseCommand):
         self.stdout.write(self.style.SUCCESS(f"调度模块: API测试 + UI自动化 + APP自动化"))
         self.stdout.write(self.style.SUCCESS(f"{'='*60}"))
 
+        # 兜底注册 Django-Q2 侧的性能聚合定时任务（幂等）：
+        # 这些任务由 qcluster 执行，不在本调度器的循环里，只注册一次即可。
+        # 否则新部署环境没人执行 setup_performance_schedules，性能统计列表会一直为空。
+        try:
+            from apps.core.management.commands.setup_performance_schedules import ensure_schedules
+
+            created, _ = ensure_schedules()
+            if created:
+                self.stdout.write(self.style.SUCCESS(f"已注册性能聚合定时任务: {', '.join(created)}"))
+        except Exception as e:
+            logger.error(f"注册性能聚合定时任务失败: {e}", exc_info=True)
+
         while True:
             try:
                 now = timezone.now()
