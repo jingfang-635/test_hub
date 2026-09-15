@@ -7,14 +7,17 @@ import yaml
 from django.http import HttpResponse
 from django.utils import timezone
 from django_filters.rest_framework import DjangoFilterBackend
+import django_filters
 from rest_framework import filters, status, viewsets
 from rest_framework.decorators import action
 from rest_framework.parsers import FormParser, JSONParser, MultiPartParser
 from rest_framework.permissions import IsAuthenticated
 from rest_framework.response import Response
+from rest_framework.views import APIView
 
 from .mcp_client import discover_tools, get_preset, list_presets_public
 from .models import (
+    EmailConfig,
     UnifiedNotificationConfig,
     NotificationTemplate,
     RequestPerformanceLog,
@@ -24,6 +27,7 @@ from .models import (
     ModuleSwitch,
 )
 from .serializers import (
+    EmailConfigSerializer,
     UnifiedNotificationConfigSerializer,
     NotificationTemplateSerializer,
     RequestPerformanceLogSerializer,
@@ -49,6 +53,58 @@ def _parse_bool(value, default=False):
     if isinstance(value, (int, float)):
         return value != 0
     return str(value).strip().lower() in ('1', 'true', 'yes', 'on')
+
+
+class EmailConfigView(APIView):
+    """邮箱配置（单例）读取与保存
+
+    - GET  /core/email-config/   读取当前配置（未配置时返回空白默认值）
+    - PUT  /core/email-config/   保存配置
+    - POST /core/email-config/   保存配置（兼容前端直接用 POST 的场景）
+
+    单例语义：始终读写同一条记录，避免前端需要先查 ID。
+    """
+    permission_classes = [IsAuthenticated]
+
+    def get(self, request):
+        config = EmailConfig.get_solo()
+        if not config:
+            # 未配置过时返回一份空白默认值，前端可直接渲染表单
+            return Response(EmailConfigSerializer(EmailConfig()).data)
+        return Response(EmailConfigSerializer(config).data)
+
+    def _save(self, request):
+        config = EmailConfig.get_solo()
+        serializer = EmailConfigSerializer(config, data=request.data, partial=bool(config))
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        logger.info('保存邮箱配置: %s', serializer.instance.sender_email)
+        return Response(serializer.data)
+
+    def put(self, request):
+        return self._save(request)
+
+    def post(self, request):
+        return self._save(request)
+
+
+class EmailConfigTestView(APIView):
+    """测试邮箱配置：校验 SMTP 连接，可选发送测试邮件"""
+
+    permission_classes = [IsAuthenticated]
+
+    def post(self, request):
+        config = EmailConfig.get_solo()
+        if config is None or not config.is_configured:
+            return Response({'detail': '请先保存 SMTP 服务器与发件人邮箱'}, status=status.HTTP_400_BAD_REQUEST)
+
+        from .email_service import test_email_config
+
+        ok, detail = test_email_config(config, recipient=request.data.get('recipient'))
+        return Response(
+            {'ok': ok, 'detail': detail},
+            status=status.HTTP_200_OK if ok else status.HTTP_400_BAD_REQUEST,
+        )
 
 
 class UnifiedNotificationConfigViewSet(viewsets.ModelViewSet):
@@ -95,6 +151,43 @@ class UnifiedNotificationConfigViewSet(viewsets.ModelViewSet):
         serializer = self.get_serializer(configs, many=True)
         return Response(serializer.data)
 
+    @action(detail=False, methods=['post'])
+    def test_webhook(self, request):
+        """测试飞书机器人 Webhook：发送一条测试消息
+
+        请求体可选传 webhook_url / bot_name，便于在保存前先验证；
+        未传时回退到已保存的飞书机器人配置。
+        """
+        from .notification_service import send_test_webhook
+
+        webhook_url = (request.data.get('webhook_url') or '').strip()
+        bot_name = (request.data.get('bot_name') or '').strip()
+
+        if not webhook_url:
+            # 回退：取已保存的启用飞书机器人
+            for config in UnifiedNotificationConfig.objects.filter(
+                config_type='webhook_feishu', is_active=True
+            ):
+                for bot in config.get_webhook_bots():
+                    if bot.get('webhook_url'):
+                        webhook_url = bot['webhook_url']
+                        bot_name = bot_name or bot.get('name', '')
+                        break
+                if webhook_url:
+                    break
+
+        if not webhook_url:
+            return Response(
+                {'detail': '请先填写 Webhook URL'},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
+        ok, detail = send_test_webhook(webhook_url, bot_name=bot_name)
+        return Response(
+            {'ok': ok, 'detail': detail},
+            status=status.HTTP_200_OK if ok else status.HTTP_400_BAD_REQUEST,
+        )
+
 
 class NotificationTemplateViewSet(viewsets.ModelViewSet):
     """通知模板视图集"""
@@ -120,27 +213,62 @@ class NotificationTemplateViewSet(viewsets.ModelViewSet):
         instance.delete()
 
 
-class RequestPerformanceLogViewSet(viewsets.ReadOnlyModelViewSet):
-    """请求性能日志视图集（只读，用于详情弹窗）"""
+class RequestPerformanceLogFilter(django_filters.FilterSet):
+    """请求性能日志筛选：方法、状态码、创建时间段。"""
+    method = django_filters.CharFilter(field_name='method')
+    status_code = django_filters.NumberFilter(field_name='status_code')
+    start_date = django_filters.DateFilter(field_name='created_at', lookup_expr='date__gte')
+    end_date = django_filters.DateFilter(field_name='created_at', lookup_expr='date__lte')
+
+    class Meta:
+        model = RequestPerformanceLog
+        fields = ['method', 'status_code', 'start_date', 'end_date']
+
+
+class RequestPerformanceLogViewSet(viewsets.ModelViewSet):
+    """请求性能日志视图集（仅列表 / 详情 / 删除，不支持新增与编辑）"""
     queryset = RequestPerformanceLog.objects.select_related('user').all()
     serializer_class = RequestPerformanceLogSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'delete', 'head', 'options']
     filter_backends = [DjangoFilterBackend, filters.SearchFilter, filters.OrderingFilter]
-    filterset_fields = ['method', 'status_code']
+    filterset_class = RequestPerformanceLogFilter
     search_fields = ['path', 'user_agent', 'ip_address']
     ordering_fields = ['created_at', 'response_time']
     ordering = ['-created_at']
 
+    def perform_destroy(self, instance):
+        instance.delete()
+        logger.info('删除请求性能日志: id=%s, path=%s', instance.pk, instance.path)
 
-class PerformanceStatisticsViewSet(viewsets.ReadOnlyModelViewSet):
-    """性能统计视图集（只读，用于详情弹窗）"""
+    @action(detail=False, methods=['get'], url_path='filter_options')
+    def filter_options(self, request):
+        """筛选下拉候选值：请求方法、状态码（均为库内实际出现过的去重值）。"""
+        methods = list(
+            RequestPerformanceLog.objects.exclude(method='')
+            .values_list('method', flat=True).distinct().order_by('method')
+        )
+        status_codes = list(
+            RequestPerformanceLog.objects.exclude(status_code=None)
+            .values_list('status_code', flat=True).distinct().order_by('status_code')
+        )
+        return Response({'methods': methods, 'status_codes': status_codes})
+
+
+class PerformanceStatisticsViewSet(viewsets.ModelViewSet):
+    """性能统计视图集（仅列表 / 详情 / 删除，不支持新增与编辑）"""
     queryset = PerformanceStatistics.objects.all()
     serializer_class = PerformanceStatisticsSerializer
     permission_classes = [IsAuthenticated]
+    http_method_names = ['get', 'delete', 'head', 'options']
     filter_backends = [DjangoFilterBackend, filters.OrderingFilter]
     filterset_fields = ['date']
     ordering_fields = ['date', 'total_requests']
     ordering = ['-date']
+
+    def perform_destroy(self, instance):
+        instance.delete()
+        logger.info('删除性能统计: id=%s, date=%s', instance.pk, instance.date)
 
 
 class SkillViewSet(viewsets.ModelViewSet):

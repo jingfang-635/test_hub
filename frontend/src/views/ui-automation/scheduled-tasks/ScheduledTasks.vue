@@ -380,6 +380,26 @@
           </el-select>
         </el-form-item>
 
+        <el-form-item
+          v-if="taskForm.notify_on_success || taskForm.notify_on_failure"
+          :label="$t('uiAutomation.scheduledTask.notificationTemplate')"
+        >
+          <el-select
+            v-model="taskForm.notification_template"
+            clearable
+            filterable
+            :placeholder="$t('uiAutomation.scheduledTask.selectNotificationTemplate')"
+            style="width: 100%"
+          >
+            <el-option
+              v-for="tpl in notificationTemplates"
+              :key="tpl.id"
+              :label="tpl.is_default ? `${tpl.name}（${$t('uiAutomation.scheduledTask.defaultTemplate')}）` : tpl.name"
+              :value="tpl.id"
+            />
+          </el-select>
+        </el-form-item>
+
         <el-form-item v-if="(taskForm.notify_on_success || taskForm.notify_on_failure) && (taskForm.notification_type === 'email' || taskForm.notification_type === 'both')" :label="$t('uiAutomation.scheduledTask.notifyEmails')">
           <el-select
             v-model="taskForm.notify_emails"
@@ -400,7 +420,7 @@
       <template #footer>
         <el-button @click="showCreateDialog = false">{{ $t('uiAutomation.common.cancel') }}</el-button>
         <el-button type="primary" @click="submitTaskForm" :loading="submitting">
-          {{ editingTask ? $t('uiAutomation.messages.success.update') : $t('uiAutomation.messages.success.create') }}
+          {{ $t('uiAutomation.common.save') }}
         </el-button>
       </template>
     </el-dialog>
@@ -456,6 +476,9 @@
         </el-descriptions-item>
         <el-descriptions-item :label="$t('uiAutomation.scheduledTask.notificationType')">
           {{ detailTask.notification_type ? getNotificationTypeText(detailTask.notification_type) : '-' }}
+        </el-descriptions-item>
+        <el-descriptions-item :label="$t('uiAutomation.scheduledTask.notificationTemplate')">
+          {{ detailTask.notification_template_name || '-' }}
         </el-descriptions-item>
         <el-descriptions-item :label="$t('uiAutomation.scheduledTask.notifyOnSuccess')">
           {{ detailTask.notify_on_success ? $t('uiAutomation.common.yes') : $t('uiAutomation.common.no') }}
@@ -535,6 +558,7 @@ import {
   getTestCases,
   getUiUsers
 } from '@/api/ui_automation.js'
+import { getNotificationTemplates } from '@/api/core.js'
 
 const { t, locale } = useI18n()
 
@@ -544,6 +568,7 @@ const projects = ref([])
 const testSuites = ref([])
 const testCases = ref([])
 const users = ref([])
+const notificationTemplates = ref([])
 const loading = ref(false)
 const submitting = ref(false)
 const showCreateDialog = ref(false)
@@ -593,6 +618,7 @@ const taskForm = reactive({
   notify_on_success: false,
   notify_on_failure: false,
   notification_type: '',
+  notification_template: null,
   notify_emails: []
 })
 
@@ -748,6 +774,7 @@ onMounted(() => {
   loadTasks()
   loadProjects()
   loadUsers()
+  loadNotificationTemplates()
 })
 
 // 加载任务列表
@@ -801,6 +828,18 @@ const loadUsers = async () => {
   }
 }
 
+// 加载通知模板（与配置中心「通知模板」列表同源）
+const loadNotificationTemplates = async () => {
+  try {
+    const response = await getNotificationTemplates({ is_active: true, page_size: 200 })
+    const data = response?.data || response || {}
+    notificationTemplates.value = data.results || (Array.isArray(data) ? data : [])
+  } catch (error) {
+    console.error('Load notification templates failed:', error)
+    notificationTemplates.value = []
+  }
+}
+
 // 项目变化时加载对应的套件和用例
 const onProjectChange = async (projectId) => {
   if (!projectId) return
@@ -828,6 +867,7 @@ const onTaskTypeChange = () => {
 const handleCreateClick = () => {
   editingTask.value = null
   resetTaskForm()
+  loadNotificationTemplates()
   showCreateDialog.value = true
 }
 
@@ -904,6 +944,7 @@ const resetTaskForm = () => {
     notify_on_success: false,
     notify_on_failure: false,
     notification_type: '',
+    notification_template: null,
     notify_emails: []
   })
   resetScheduleConfig()
@@ -948,9 +989,16 @@ const submitTaskForm = async () => {
       if (taskForm.notification_type) {
         submitData.notification_type = taskForm.notification_type
       }
+      if (taskForm.notification_template) {
+        submitData.notification_template = taskForm.notification_template
+      } else {
+        submitData.notification_template = null
+      }
       if (taskForm.notify_emails && taskForm.notify_emails.length > 0) {
         submitData.notify_emails = taskForm.notify_emails
       }
+    } else {
+      submitData.notification_template = null
     }
 
     // 根据触发器类型添加对应字段
@@ -1082,6 +1130,7 @@ const editTask = async (task) => {
     notify_on_success: task.notify_on_success || false,
     notify_on_failure: task.notify_on_failure || false,
     notification_type: task.notification_type || '',
+    notification_template: task.notification_template || null,
     notify_emails: task.notify_emails || []
   })
 
@@ -1092,6 +1141,7 @@ const editTask = async (task) => {
     await onProjectChange(task.project)
   }
 
+  await loadNotificationTemplates()
   showCreateDialog.value = true
 }
 

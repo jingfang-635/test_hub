@@ -3,6 +3,34 @@
  */
 import request from '@/utils/api'
 
+// ==================== 邮箱配置（定时任务通知） ====================
+
+// 获取邮箱配置（单例）
+export function getEmailConfig() {
+  return request({
+    url: '/core/email-config/',
+    method: 'get'
+  })
+}
+
+// 保存邮箱配置（单例）
+export function saveEmailConfig(data) {
+  return request({
+    url: '/core/email-config/',
+    method: 'put',
+    data
+  })
+}
+
+// 测试邮箱配置（连接，可选发送测试邮件）
+export function testEmailConfig(data = {}) {
+  return request({
+    url: '/core/email-config/test/',
+    method: 'post',
+    data
+  })
+}
+
 // ==================== 统一通知配置 ====================
 
 // 获取所有通知配置
@@ -56,6 +84,16 @@ export function setDefaultNotificationConfig(id) {
   })
 }
 
+// 测试 Webhook（飞书机器人）：发送一条测试消息
+export function testNotificationWebhook(data = {}) {
+  return request({
+    url: '/core/notification-configs/test_webhook/',
+    method: 'post',
+    data,
+    timeout: 30000
+  })
+}
+
 // 获取所有启用的配置
 export function getActiveNotificationConfigs() {
   return request({
@@ -104,7 +142,24 @@ export function deleteNotificationTemplate(id) {
   })
 }
 
-// ==================== 请求性能日志 / 性能统计（详情） ====================
+// ==================== 请求性能日志 / 性能统计 ====================
+
+// 请求性能日志列表（支持 search / method / status_code / page）
+export function getRequestPerformanceLogs(params) {
+  return request({
+    url: '/core/request-performance-logs/',
+    method: 'get',
+    params
+  })
+}
+
+// 请求性能日志筛选项（请求方法、状态码的去重候选值）
+export function getRequestPerformanceLogFilterOptions() {
+  return request({
+    url: '/core/request-performance-logs/filter_options/',
+    method: 'get'
+  })
+}
 
 export function getRequestPerformanceLogDetail(id) {
   return request({
@@ -113,10 +168,33 @@ export function getRequestPerformanceLogDetail(id) {
   })
 }
 
+export function deleteRequestPerformanceLog(id) {
+  return request({
+    url: `/core/request-performance-logs/${id}/`,
+    method: 'delete'
+  })
+}
+
+// 性能统计列表（支持 date / page）
+export function getPerformanceStatisticsList(params) {
+  return request({
+    url: '/core/performance-statistics/',
+    method: 'get',
+    params
+  })
+}
+
 export function getPerformanceStatisticsDetail(id) {
   return request({
     url: `/core/performance-statistics/${id}/`,
     method: 'get'
+  })
+}
+
+export function deletePerformanceStatistics(id) {
+  return request({
+    url: `/core/performance-statistics/${id}/`,
+    method: 'delete'
   })
 }
 

@@ -7,20 +7,66 @@ from django.contrib.auth import get_user_model
 User = get_user_model()
 
 
+class EmailConfig(models.Model):
+    """邮箱配置（单例）- 定时任务邮件通知的发件服务器与收件人候选
+
+    由「配置中心 → 定时任务配置」维护，保存后立即生效，
+    无需修改 config.yaml / 环境变量，也无需重启服务。
+    未配置或未启用时，发送逻辑回退到 settings 中的 EMAIL_* 配置。
+    """
+
+    name = models.CharField(max_length=100, default='默认邮箱配置', verbose_name='配置名称')
+    smtp_host = models.CharField(max_length=255, blank=True, verbose_name='SMTP服务器',
+                                 help_text='如 smtp.qq.com / smtp.163.com')
+    smtp_port = models.PositiveIntegerField(default=465, verbose_name='SMTP端口',
+                                            help_text='SSL 通常为 465，TLS/STARTTLS 通常为 587')
+    sender_email = models.CharField(max_length=255, blank=True, verbose_name='发件人邮箱')
+    smtp_password = models.CharField(max_length=255, blank=True, verbose_name='授权码',
+                                     help_text='邮箱 SMTP 授权码（非登录密码）')
+    use_ssl = models.BooleanField(default=True, verbose_name='使用SSL')
+    use_tls = models.BooleanField(default=False, verbose_name='使用TLS')
+    recipient_emails = models.JSONField(default=list, blank=True, verbose_name='通知收件人',
+                                        help_text='定时任务「通知邮箱」下拉的候选邮箱列表')
+    is_active = models.BooleanField(default=True, verbose_name='是否启用',
+                                    help_text='关闭后发送逻辑回退到 settings 中的 EMAIL_* 配置')
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
+    updated_at = models.DateTimeField(auto_now=True, verbose_name='更新时间')
+
+    class Meta:
+        db_table = 'core_email_configs'
+        verbose_name = '邮箱配置'
+        verbose_name_plural = '邮箱配置'
+        ordering = ['id']
+        indexes = [
+            models.Index(fields=['is_active']),
+        ]
+
+    def __str__(self):
+        return self.sender_email or self.name
+
+    @property
+    def is_configured(self):
+        """是否已填写发件所需的必填项"""
+        return bool(self.smtp_host and self.sender_email)
+
+    @classmethod
+    def get_solo(cls):
+        """获取唯一的邮箱配置记录；不存在时返回未保存的默认实例"""
+        return cls.objects.order_by('id').first()
+
+
 class UnifiedNotificationConfig(models.Model):
-    """统一通知配置模型 - 用于配置飞书、企微、钉钉机器人"""
+    """统一通知配置模型 - 用于配置飞书机器人"""
 
     CONFIG_TYPE_CHOICES = [
         ('webhook_feishu', '飞书机器人'),
-        ('webhook_wechat', '企业微信机器人'),
-        ('webhook_dingtalk', '钉钉机器人'),
     ]
 
     name = models.CharField(max_length=100, verbose_name='配置名称', help_text='用于标识该通知配置的名称')
     config_type = models.CharField(max_length=20, choices=CONFIG_TYPE_CHOICES, default='webhook_feishu',
                                    verbose_name='配置类型')
     webhook_bots = models.JSONField(default=dict, blank=True, null=True, verbose_name='Webhook机器人配置',
-                                    help_text='飞书、企微、钉钉机器人配置')
+                                    help_text='飞书机器人配置')
     is_default = models.BooleanField(default=False, verbose_name='是否默认配置')
     is_active = models.BooleanField(default=True, verbose_name='是否启用')
     created_at = models.DateTimeField(auto_now_add=True, verbose_name='创建时间')
@@ -56,18 +102,18 @@ class UnifiedNotificationConfig(models.Model):
         bots = []
         if self.webhook_bots:
             for bot_type, bot_config in self.webhook_bots.items():
+                # 仅保留飞书机器人（企微/钉钉配置已下线）
+                if bot_type != 'feishu':
+                    continue
                 bot_data = {
                     'type': bot_type,
                     'name': bot_config.get('name', f'{bot_type}机器人'),
                     'webhook_url': bot_config.get('webhook_url'),
                     'enabled': bot_config.get('enabled', True),
-                    # 业务类型勾选框
-                    'enable_ui_automation': bot_config.get('enable_ui_automation', True),
-                    'enable_api_testing': bot_config.get('enable_api_testing', True)
+                    # 业务类型已下线：配置后全模块（UI自动化/接口测试/APP自动化）均生效
+                    'enable_ui_automation': True,
+                    'enable_api_testing': True
                 }
-                # 钉钉机器人需要额外包含secret字段
-                if bot_type == 'dingtalk' and bot_config.get('secret'):
-                    bot_data['secret'] = bot_config.get('secret')
                 bots.append(bot_data)
         return bots
 

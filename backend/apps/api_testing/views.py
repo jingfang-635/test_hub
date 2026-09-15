@@ -1966,38 +1966,43 @@ class TestExecutionViewSet(mixins.DestroyModelMixin, viewsets.ReadOnlyModelViewS
 
 
 class UserViewSet(viewsets.ViewSet):
-    """通知邮箱候选列表：从 config.yaml / settings 读取 EMAIL_HOST_USER"""
+    """通知邮箱候选列表：优先取「配置中心 → 定时任务配置」的邮箱配置收件人，
+    未配置时回退到 config.yaml / settings 的 EMAIL_HOST_USER"""
     permission_classes = [IsAuthenticated]
 
-    def list(self, request):
-        email = (getattr(settings, 'EMAIL_HOST_USER', '') or '').strip()
+    def _build_results(self):
+        from apps.core.email_service import get_notification_recipients
+
         results = []
-        if email:
+        for index, email in enumerate(get_notification_recipients(), start=1):
             local_part = email.split('@')[0] if '@' in email else email
             results.append({
-                'id': 1,
+                'id': index,
                 'username': local_part,
                 'email': email,
-                'first_name': '系统邮箱',
+                'first_name': '',
                 'last_name': '',
             })
+        return results
+
+    def list(self, request):
+        results = self._build_results()
         return Response({
             'count': len(results),
             'results': results,
         })
 
     def retrieve(self, request, pk=None):
-        email = (getattr(settings, 'EMAIL_HOST_USER', '') or '').strip()
-        if not email or str(pk) != '1':
+        try:
+            target_id = int(pk)
+        except (TypeError, ValueError):
             return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
-        local_part = email.split('@')[0] if '@' in email else email
-        return Response({
-            'id': 1,
-            'username': local_part,
-            'email': email,
-            'first_name': '系统邮箱',
-            'last_name': '',
-        })
+
+        results = self._build_results()
+        for item in results:
+            if item['id'] == target_id:
+                return Response(item)
+        return Response({'detail': 'Not found.'}, status=status.HTTP_404_NOT_FOUND)
 
 
 class ScheduledTaskViewSet(viewsets.ModelViewSet):
@@ -2266,8 +2271,6 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
         try:
             import logging
             logger = logging.getLogger(__name__)
-            from django.core.mail import send_mail
-            from django.conf import settings
 
             logger.info("=== _send_notification 方法被调用 ===")
             logger.info(f"任务ID: {task.id}, 任务名称: {task.name}, 执行状态: {success}")
@@ -2336,11 +2339,10 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
 
     def _send_email_notification(self, task, execution_log, notification_setting, notification_config, success):
         """发送邮件通知"""
+        from_email = ''
         try:
             import logging
             logger = logging.getLogger(__name__)
-            from django.core.mail import send_mail
-            from django.conf import settings
 
             logger.info("=== 开始发送邮件通知 ===")
 
@@ -2399,15 +2401,13 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                 return
 
             # 发送邮件
-            from_email = settings.DEFAULT_FROM_EMAIL
+            from apps.core.email_service import get_sender_address, send_notification_mail
+
+            from_email = get_sender_address()
             logger.info(f"准备发送邮件，发件人: {from_email}, 收件人: {recipients}")
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=from_email,
-                recipient_list=recipients,
-                fail_silently=False,
-            )
+            ok, detail = send_notification_mail(subject, message, recipients)
+            if not ok:
+                raise RuntimeError(detail or '邮件发送失败')
             logger.info("邮件发送成功")
 
             # 记录通知日志
@@ -2436,7 +2436,7 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                     task_type=task.task_type,
                     notification_type='task_execution',
                     sender_name='系统邮件通知',
-                    sender_email=settings.DEFAULT_FROM_EMAIL,
+                    sender_email=from_email if 'from_email' in locals() else '',
                     recipient_info=[{'email': email} for email in recipients] if 'recipients' in locals() else [],
                     notification_content=f"发送邮件通知失败: {str(e)}",
                     status='failed',
@@ -2461,7 +2461,7 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
             try:
                 from apps.core.models import UnifiedNotificationConfig
                 all_webhook_configs = UnifiedNotificationConfig.objects.filter(
-                    config_type__in=['webhook_wechat', 'webhook_feishu', 'webhook_dingtalk'],
+                    config_type='webhook_feishu',
                     is_active=True
                 )
                 logger.info("使用统一通知配置 (UnifiedNotificationConfig)")
@@ -2469,12 +2469,10 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                 for config in all_webhook_configs:
                     bots = config.get_webhook_bots()
                     for bot in bots:
-                        # 只添加启用了"接口测试"的机器人
-                        if bot.get('enabled', True) and bot.get('enable_api_testing', True):
+                        # 业务类型已下线：启用的机器人对所有模块生效
+                        if bot.get('enabled', True):
                             all_webhook_bots.append(bot)
-                            logger.info(f"从统一配置获取机器人: {bot.get('name')} (接口测试已启用)")
-                        elif bot.get('enabled', True):
-                            logger.info(f"统一配置机器人 {bot.get('name')} 未启用接口测试，跳过")
+                            logger.info(f"从统一配置获取机器人: {bot.get('name')}")
 
             except ImportError:
                 logger.warning("无法导入统一配置，尝试使用 API 测试模块配置")
@@ -2499,8 +2497,6 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                         'webhook_url': bot_config.get('webhook_url'),
                         'enabled': bot_config.get('enabled', True)
                     }
-                    if bot_type == 'dingtalk' and bot_config.get('secret'):
-                        bot_data['secret'] = bot_config.get('secret')
 
                     if bot_data.get('enabled', True) and bot_data.get('webhook_url'):
                         all_webhook_bots.append(bot_data)
@@ -2525,23 +2521,8 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                 webhook_url = bot['webhook_url']
                 logger.info(f"发送通知到 {bot_type} 机器人: {bot.get('name', 'Unknown')}")
 
-                # 根据机器人类型构造消息格式
-                if bot_type == 'wechat':  # 企业微信
-                    message_data = {
-                        "msgtype": "markdown",
-                        "markdown": {
-                            "content": f"""**定时任务执行{status_text}**
-
-任务名称: {task.name}
-
-执行状态: {status_text}
-
-执行时间: {execution_log.created_at.strftime('%Y-%m-%d %H:%M:%S')}
-
-任务类型: {'测试套件执行' if task.task_type == 'TEST_SUITE' else 'API请求执行'}"""
-                        }
-                    }
-                elif bot_type == 'feishu':  # 飞书
+                # 根据机器人类型构造消息格式（仅支持飞书）
+                if bot_type == 'feishu':
                     message_data = {
                         "msg_type": "interactive",
                         "card": {
@@ -2561,55 +2542,9 @@ class ScheduledTaskViewSet(viewsets.ModelViewSet):
                             }
                         }
                     }
-                elif bot_type == 'dingtalk':  # 钉钉
-                    message_data = {
-                        "msgtype": "markdown",
-                        "markdown": {
-                            "title": f"定时任务执行{status_text}",
-                            "text": f"""**定时任务执行{status_text}**
-
-任务名称: {task.name}
-
-执行状态: {status_text}
-
-执行时间: {execution_log.created_at.strftime('%Y-%m-%d %H:%M:%S')}
-
-任务类型: {'测试套件执行' if task.task_type == 'TEST_SUITE' else 'API请求执行'}"""
-                        }
-                    }
-
-                    # 钉钉机器人签名验证
-                    secret = bot.get('secret')
-                    if secret:
-                        import time
-                        import hmac
-                        import hashlib
-                        import base64
-                        import urllib.parse
-
-                        timestamp = str(round(time.time() * 1000))
-                        string_to_sign = f'{timestamp}\n{secret}'
-                        string_to_sign_enc = string_to_sign.encode('utf-8')
-                        secret_enc = secret.encode('utf-8')
-                        hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-                        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
-
-                        # 在URL中添加签名参数
-                        if '?' in webhook_url:
-                            webhook_url += f'&timestamp={timestamp}&sign={sign}'
-                        else:
-                            webhook_url += f'?timestamp={timestamp}&sign={sign}'
-
-                        logger.info(f"钉钉机器人签名验证 - 时间戳: {timestamp}")
-                        logger.info(f"签名字符串: {string_to_sign}")
-                        logger.info(f"生成的签名: {sign}")
-                        logger.info(f"最终URL: {webhook_url}")
-                    else:
-                        logger.info("钉钉机器人未配置签名密钥，使用无签名模式")
-                else:  # 通用格式
-                    message_data = {
-                        "text": f"定时任务执行{status_text}\n任务名称: {task.name}\n执行状态: {status_text}\n执行时间: {execution_log.created_at.strftime('%Y-%m-%d %H:%M:%S')}\n任务类型: {'测试套件执行' if task.task_type == 'TEST_SUITE' else 'API请求执行'}"
-                    }
+                else:
+                    logger.warning(f"不支持的机器人类型（已下线企微/钉钉）: {bot_type}")
+                    continue
 
                 # 发送webhook请求
                 try:

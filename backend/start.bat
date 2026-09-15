@@ -1,30 +1,31 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+title TestHub Backend
 
-REM Read backend port from config.yaml
-set BACKEND_PORT=
-for /f "tokens=2 delims=: " %%p in ('findstr /b "BACKEND_PORT" ..\config.yaml 2^>nul') do set BACKEND_PORT=%%p
-if "%BACKEND_PORT%"=="" set BACKEND_PORT=8000
+REM ============================================
+REM   TestHub 后端启动（单窗口版）
+REM   Django-Q2 集群 + 定时任务调度器 + Uvicorn
+REM   全部收敛到当前窗口，Ctrl+C 一键全停
+REM   详细日志：..\logs\start\<服务名>.log
+REM ============================================
 
-REM Python path (absolute, survives cd)
+REM Python 路径（绝对路径，不受 cd 影响）
 set PYTHON=%~dp0..\venv\Scripts\python.exe
-set ROOT=%~dp0..
+if not exist "%PYTHON%" set PYTHON=python
 
-echo ============================================
-echo   TestHub Backend Start
-echo   Uvicorn ASGI + Django-Q2 + Scheduler
-echo   (HTTP + SSE + WebSocket)
-echo   Backend Port: %BACKEND_PORT%
-echo ============================================
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+set PYTHONUNBUFFERED=1
 
-REM Start Django-Q2 cluster (separate window)
-start "TestHub-QCluster" cmd /k "cd /d %~dp0 && %PYTHON% manage.py qcluster"
+REM 不管理 MySQL / Redis、不启动前端：只跑后端相关服务
+"%PYTHON%" "%~dp0..\start_all.py" --no-infra --no-frontend %*
 
-REM Start scheduler (separate window)
-start "TestHub-Scheduler" cmd /k "cd /d %~dp0 && %PYTHON% manage.py run_all_scheduled_tasks"
+if "%errorlevel%"=="0" exit
+if "%errorlevel%"=="130" exit
 
-REM Start Uvicorn ASGI (current window)
-cd /d "%ROOT%"
-%PYTHON% start_backend.py --port %BACKEND_PORT%
+echo.
+echo [启动器异常退出] errorlevel=%errorlevel%
+echo 请查看上方错误信息，或 ..\logs\start\ 下的服务日志。
+echo.
 pause

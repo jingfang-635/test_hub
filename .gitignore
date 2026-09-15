@@ -7,6 +7,12 @@ venv*/
 .vscode/
 .trae/
 __pycache__/
+
+# 忽略本机专用启动脚本（含本地路径配置）
+start.bat
+backend/start.bat
+check_services.bat
+check_services.ps1
 .DS_Store
 .pytest_cache
 # 忽略 allure 命令行工具二进制（部署时单独安装）

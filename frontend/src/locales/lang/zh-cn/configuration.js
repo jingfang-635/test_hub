@@ -194,6 +194,7 @@ export default {
     selectModelType: '请选择模型类型',
     role: '角色',
     selectRole: '请选择角色',
+    roleMultiHint: '可多选，该配置将同时承担所选的全部角色',
     apiKey: 'API Key',
     apiKeyPlaceholder: '输入您的API Key',
     apiKeyPlaceholderEdit: '不修改请保持原值不变，填写新值则更新',
@@ -225,8 +226,22 @@ export default {
     },
     roles: {
       writer: '测试用例编写专家',
-      reviewer: '测试评审专家'
+      reviewer: '测试评审专家',
+      browser_use_text: 'Browser Use - 文本模式',
+      browser_use_vision: 'Browser Use - 视觉模式',
+      code_generator: '代码生成专家',
+      test_oracle: '测试预言专家'
     },
+    scenarios: {
+      testcase_generation: '测试用例生成',
+      ui_automation: 'UI 自动化测试',
+      api_testing: '接口测试',
+      code_generation: '代码生成',
+      other: '其他'
+    },
+    scenario: '用途场景',
+    selectScenario: '请选择用途场景',
+    scenarioMultiHint: '可多选，该配置将同时服务于所选的全部场景',
     messages: {
       loadFailed: '加载配置失败',
       saveSuccess: '配置添加成功',

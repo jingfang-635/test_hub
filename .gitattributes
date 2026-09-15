@@ -1,0 +1,55 @@
+# 统一换行符归一化策略，保证跨平台（Windows / macOS / Linux）协作一致。
+# 索引中统一存 LF，检出时由 core.autocrlf 决定工作区换行符。
+* text=auto
+
+# 明确声明为 LF 的脚本
+*.sh    text eol=lf
+
+# Windows 脚本必须保留 CRLF
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# 二进制文件：禁止任何换行/编码转换，避免文件被破坏
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.bmp   binary
+*.webp  binary
+*.svg   text
+*.woff  binary
+*.woff2 binary
+*.ttf   binary
+*.eot   binary
+*.otf   binary
+*.pdf   binary
+*.zip   binary
+*.gz    binary
+*.7z    binary
+*.rar   binary
+*.tar   binary
+*.xls   binary
+*.xlsx  binary
+*.doc   binary
+*.docx  binary
+*.ppt   binary
+*.pptx  binary
+*.pyc   binary
+*.pyo   binary
+*.so    binary
+*.dll   binary
+*.exe   binary
+*.db    binary
+*.sqlite3 binary
+*.rdb   binary
+*.mp3   binary
+*.mp4   binary
+*.webm  binary
+*.avi   binary
+
+# Git 差异统计时排除生成物 / 依赖目录
+package-lock.json     -diff
+pnpm-lock.yaml        -diff
+yarn.lock             -diff

@@ -80,22 +80,21 @@ export const MENU_ITEMS = [
   { key: '/ai-intelligent-mode/exploration', module: 'ai-intelligent-mode', name: 'AI探索测试', sort: 5 },
 
   // ===== 配置中心 =====
-  { key: '/configuration/ai-model', module: 'configuration', nameKey: 'menu.aiModelConfig', sort: 1 },
-  { key: '/configuration/prompt-config', module: 'configuration', nameKey: 'menu.promptConfig', sort: 2 },
-  { key: '/configuration/generation-config', module: 'configuration', nameKey: 'menu.generationConfig', sort: 3 },
-  { key: '/configuration/knowledge-llm', module: 'configuration', nameKey: 'menu.knowledgeBaseConfig', sort: 4 },
-  { key: '/configuration/projects', module: 'configuration', nameKey: 'menu.projectAndVersion', sort: 5 },
-  { key: '/configuration/ui-env', module: 'configuration', nameKey: 'menu.uiEnvConfig', sort: 6 },
-  { key: '/configuration/app-env', module: 'configuration', name: 'APP环境配置', sort: 7 },
-  { key: '/configuration/ai-mode', module: 'configuration', nameKey: 'menu.aiModeConfig', sort: 8 },
-  { key: '/configuration/skills', module: 'configuration', nameKey: 'menu.skillsConfig', sort: 9 },
-  { key: '/configuration/scheduled-task', module: 'configuration', nameKey: 'menu.scheduledTaskConfig', sort: 10 },
+  { key: '/configuration/prompt-config', module: 'configuration', nameKey: 'menu.promptConfig', sort: 1 },
+  { key: '/configuration/generation-config', module: 'configuration', nameKey: 'menu.generationConfig', sort: 2 },
+  { key: '/configuration/knowledge-llm', module: 'configuration', nameKey: 'menu.knowledgeBaseConfig', sort: 3 },
+  { key: '/configuration/projects', module: 'configuration', nameKey: 'menu.projectAndVersion', sort: 4 },
+  { key: '/configuration/ui-env', module: 'configuration', nameKey: 'menu.uiEnvConfig', sort: 5 },
+  { key: '/configuration/app-env', module: 'configuration', name: 'APP环境配置', sort: 6 },
+  { key: '/configuration/ai-model', module: 'configuration', nameKey: 'menu.aiModelConfig', sort: 7 },
+  { key: '/configuration/skills', module: 'configuration', nameKey: 'menu.skillsConfig', sort: 8 },
+  { key: '/configuration/scheduled-task', module: 'configuration', nameKey: 'menu.notificationConfig', sort: 9 },
+  { key: '/configuration/notification-template', module: 'configuration', nameKey: 'menu.notificationTemplate', sort: 10 },
   { key: '/configuration/dify', module: 'configuration', nameKey: 'menu.difyConfig', sort: 11 },
   { key: '/configuration/mcp-server', module: 'configuration', nameKey: 'menu.mcpServerConfig', sort: 12 },
   { key: '/configuration/module-switch', module: 'configuration', nameKey: 'menu.moduleSwitchConfig', sort: 13 },
   { key: '/configuration/performance-stats', module: 'configuration', nameKey: 'menu.performanceStats', sort: 14 },
   { key: '/configuration/request-performance-log', module: 'configuration', nameKey: 'menu.requestPerformanceLog', sort: 15 },
-  { key: '/configuration/notification-template', module: 'configuration', nameKey: 'menu.notificationTemplate', sort: 16 },
 
   ...HOME_ENTRIES
 ]

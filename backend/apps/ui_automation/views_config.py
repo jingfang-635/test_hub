@@ -218,7 +218,8 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
     模型配置视图集 (Browser-use) - 使用ModelViewSet支持标准CRUD
     """
     permission_classes = [IsAuthenticated]
-    queryset = AIModelConfig.objects.filter(role='browser_use_text')
+    # role 为多值列表，用 __contains 命中 browser_use_text
+    queryset = AIModelConfig.objects.filter(role__contains=['browser_use_text'])
 
     def list(self, request):
         """
@@ -262,7 +263,8 @@ class AIIntelligentModeConfigViewSet(viewsets.ViewSet):
         config = AIModelConfig.objects.create(
             name=data['name'],
             model_type=data['model_type'],
-            role='browser_use_text',
+            role=['browser_use_text'],
+            scenario=['ui_automation'],
             model_name=data['model_name'],
             api_key=data['api_key'],
             base_url=data.get('base_url', ''),

@@ -211,11 +211,33 @@ class AIModelConfig(models.Model):
         ('writer', '测试用例编写专家'),
         ('reviewer', '测试评审专家'),
         ('browser_use_text', 'Browser Use - 文本模式'),
+        ('browser_use_vision', 'Browser Use - 视觉模式'),
+        ('code_generator', '代码生成专家'),
+        ('test_oracle', '测试预言专家'),
+    ]
+    # 配置中心默认列表展示的「通用角色」；纯 browser_use_* 由 AI 智能模式页管理
+    GENERAL_ROLES = ('writer', 'reviewer', 'code_generator', 'test_oracle')
+    BROWSER_USE_ROLES = ('browser_use_text', 'browser_use_vision')
+
+    # 新增：用途场景字段
+    SCENARIO_CHOICES = [
+        ('testcase_generation', '测试用例生成'),
+        ('ui_automation', 'UI 自动化测试'),
+        ('api_testing', '接口测试'),
+        ('code_generation', '代码生成'),
+        ('other', '其他'),
     ]
 
     name = models.CharField(max_length=100, verbose_name='配置名称')
     model_type = models.CharField(max_length=20, choices=MODEL_CHOICES, verbose_name='模型类型')
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, verbose_name='角色')
+    role = models.JSONField(
+        default=list, blank=True, verbose_name='角色',
+        help_text='角色列表，一个配置可承担多个角色'
+    )
+    scenario = models.JSONField(
+        default=list, blank=True, verbose_name='用途场景',
+        help_text='用途场景列表，一个配置可服务多个场景'
+    )
     api_key = models.CharField(max_length=200, verbose_name='API Key', blank=True, null=True)
     base_url = models.URLField(verbose_name='API Base URL')
     model_name = models.CharField(max_length=100, verbose_name='模型名称')
@@ -232,19 +254,86 @@ class AIModelConfig(models.Model):
         verbose_name = 'AI模型配置'
         verbose_name_plural = 'AI模型配置'
         # 移除 unique_together 约束，允许同一个 role 有多个配置
-        # 在应用层面通过代码控制：每个 role 只能有一个 is_active=True 的配置
+        # 在应用层面通过代码控制：同一个 (scenario, role) 组合只能有一个 is_active=True 的配置
+        # 注意：role/scenario 均为 JSON 列，MySQL 无法直接建索引，故只保留 model_type 相关索引
+        indexes = [
+            models.Index(fields=['model_type', 'is_active']),
+        ]
 
     def __str__(self):
-        return f"{self.get_model_type_display()} - {self.get_role_display()}"
+        role_display = '、'.join(self.get_role_display_labels())
+        scenario_display = '、'.join(self.get_scenario_display_labels())
+        return f"{self.get_model_type_display()} - {role_display} ({scenario_display})"
+
+    def get_role_display_labels(self) -> List[str]:
+        """返回角色的中文标签列表（role 为多值列表）"""
+        label_map = dict(self.ROLE_CHOICES)
+        return [label_map.get(r, r) for r in (self.role or [])]
+
+    def get_scenario_display_labels(self) -> List[str]:
+        """返回场景的中文标签列表（scenario 为多值列表）"""
+        label_map = dict(self.SCENARIO_CHOICES)
+        return [label_map.get(s, s) for s in (self.scenario or [])]
+
+    # ---------- JSON 多值查询辅助 ----------
+    # role/scenario 为 JSON 列表，用 __contains 查询。注意两个易错语义：
+    #   1) filter(role__contains=[a, b]) 表示「同时包含 a 和 b」（AND），不是「含任一」；
+    #   2) exclude(role__contains=[a, b]) 因此会保留「只含其一」的行 —— 排除多个角色必须用 Q 取反。
+    # 统一通过下面两个 helper 构造查询，避免各处写错。
+
+    @staticmethod
+    def any_of(**filters) -> models.Q:
+        """构造「任一值命中」的 OR 查询，如 any_of(role=['writer', 'reviewer'])"""
+        query = models.Q()
+        for field, values in filters.items():
+            if not values:
+                continue
+            for value in values:
+                query |= models.Q(**{f'{field}__contains': [value]})
+        return query
+
+    @staticmethod
+    def none_of(**filters) -> models.Q:
+        """构造「任一值都不命中」的 AND 取反查询，如 none_of(role=['browser_use_text'])"""
+        query = models.Q()
+        for field, values in filters.items():
+            for value in values or []:
+                query &= ~models.Q(**{f'{field}__contains': [value]})
+        return query
 
     @classmethod
-    def get_active_config(cls, model_type: str, role: str):
-        """获取活跃的配置"""
-        return cls.objects.filter(
-            model_type=model_type,
-            role=role,
-            is_active=True
-        ).first()
+    def get_active_config(cls, model_type: str = None, role: str = None, scenario: str = None):
+        """获取活跃的配置
+
+        Args:
+            model_type: 模型类型
+            role: 角色（单个；配置可承担多个角色，命中其一即返回）
+            scenario: 用途场景（单个；配置可服务多个场景，命中其一即返回）
+
+        Returns:
+            符合条件的第一个活跃配置
+        """
+        filters = {'is_active': True}
+        if model_type:
+            filters['model_type'] = model_type
+        if role:
+            filters['role__contains'] = [role]
+        if scenario:
+            filters['scenario__contains'] = [scenario]
+        return cls.objects.filter(**filters).first()
+
+    @classmethod
+    def get_active_configs_for_scenario(cls, scenario: str):
+        """获取指定场景下所有活跃的配置"""
+        return cls.objects.filter(scenario__contains=[scenario], is_active=True)
+
+    @classmethod
+    def get_active_configs_for_role(cls, role: str, scenario: str = None):
+        """获取指定角色下所有活跃的配置"""
+        filters = {'role__contains': [role], 'is_active': True}
+        if scenario:
+            filters['scenario__contains'] = [scenario]
+        return cls.objects.filter(**filters)
 
 
 class PromptConfig(models.Model):

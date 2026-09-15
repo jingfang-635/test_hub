@@ -3,6 +3,7 @@ Core 应用序列化器
 """
 from rest_framework import serializers
 from .models import (
+    EmailConfig,
     UnifiedNotificationConfig,
     NotificationTemplate,
     RequestPerformanceLog,
@@ -11,6 +12,54 @@ from .models import (
     MCPServer,
     ModuleSwitch,
 )
+
+
+class EmailConfigSerializer(serializers.ModelSerializer):
+    """邮箱配置序列化器
+
+    smtp_password 只写不读，避免授权码回显到前端。
+    """
+
+    is_configured = serializers.BooleanField(read_only=True)
+    has_password = serializers.SerializerMethodField()
+
+    class Meta:
+        model = EmailConfig
+        fields = [
+            'id', 'name', 'smtp_host', 'smtp_port', 'sender_email', 'smtp_password',
+            'use_ssl', 'use_tls', 'recipient_emails', 'is_active',
+            'is_configured', 'has_password', 'created_at', 'updated_at',
+        ]
+        read_only_fields = ['created_at', 'updated_at', 'is_configured', 'has_password']
+        extra_kwargs = {
+            'smtp_password': {'write_only': True, 'required': False},
+        }
+
+    def get_has_password(self, obj):
+        return bool(obj.smtp_password)
+
+    def validate_recipient_emails(self, value):
+        if value in (None, ''):
+            return []
+        if not isinstance(value, list):
+            raise serializers.ValidationError('通知收件人必须是邮箱列表')
+        cleaned = []
+        for item in value:
+            email = str(item or '').strip()
+            if not email:
+                continue
+            if '@' not in email:
+                raise serializers.ValidationError(f'无效的邮箱地址: {email}')
+            if email not in cleaned:
+                cleaned.append(email)
+        return cleaned
+
+    def validate(self, attrs):
+        use_ssl = attrs.get('use_ssl', getattr(self.instance, 'use_ssl', True))
+        use_tls = attrs.get('use_tls', getattr(self.instance, 'use_tls', False))
+        if use_ssl and use_tls:
+            raise serializers.ValidationError('SSL 与 TLS 只能启用其中一个')
+        return attrs
 
 
 class UnifiedNotificationConfigSerializer(serializers.ModelSerializer):

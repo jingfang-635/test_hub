@@ -194,6 +194,7 @@ export default {
     selectModelType: 'Select Model Type',
     role: 'Role',
     selectRole: 'Select Role',
+    roleMultiHint: 'Multiple selections allowed; this config will serve all selected roles.',
     apiKey: 'API Key',
     apiKeyPlaceholder: 'Enter your API Key',
     apiKeyPlaceholderEdit: 'Leave unchanged or enter new value to update',
@@ -225,8 +226,22 @@ export default {
     },
     roles: {
       writer: 'Test Case Writer',
-      reviewer: 'Test Reviewer'
+      reviewer: 'Test Reviewer',
+      browser_use_text: 'Browser Use - Text Mode',
+      browser_use_vision: 'Browser Use - Vision Mode',
+      code_generator: 'Code Generation Expert',
+      test_oracle: 'Test Oracle Expert'
     },
+    scenarios: {
+      testcase_generation: 'Test Case Generation',
+      ui_automation: 'UI Automation Testing',
+      api_testing: 'API Testing',
+      code_generation: 'Code Generation',
+      other: 'Other'
+    },
+    scenario: 'Usage Scenario',
+    selectScenario: 'Select Usage Scenario',
+    scenarioMultiHint: 'Multiple selections allowed; this config will serve all selected scenarios.',
     messages: {
       loadFailed: 'Failed to load configurations',
       saveSuccess: 'Configuration added successfully',

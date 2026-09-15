@@ -1,44 +1,32 @@
 @echo off
 chcp 65001 >nul
 cd /d "%~dp0"
+title TestHub Launcher
 
-REM Read ports from config.yaml
-set BACKEND_PORT=
-for /f "tokens=2 delims=: " %%p in ('findstr /b "BACKEND_PORT" config.yaml 2^>nul') do set BACKEND_PORT=%%p
-if "%BACKEND_PORT%"=="" set BACKEND_PORT=8000
+REM ============================================
+REM   TestHub One-Click Start（单窗口版）
+REM   MySQL + Redis + 前端 + Q2 集群 + 调度器 + 后端
+REM   全部收敛到当前窗口，Ctrl+C 一键全停
+REM   详细日志：logs\start\<服务名>.log
+REM ============================================
 
-set FRONTEND_PORT=
-for /f "tokens=2 delims=: " %%p in ('findstr /b "FRONTEND_PORT" config.yaml 2^>nul') do set FRONTEND_PORT=%%p
-if "%FRONTEND_PORT%"=="" set FRONTEND_PORT=3000
-
-REM Python path (no venv activation needed)
+REM Python 路径（无需激活虚拟环境）
 set PYTHON=%~dp0venv\Scripts\python.exe
+if not exist "%PYTHON%" set PYTHON=python
 
-echo ============================================
-echo   TestHub One-Click Start
-echo   Frontend Port: %FRONTEND_PORT%
-echo   Backend Port: %BACKEND_PORT%
-echo   Uvicorn ASGI + Django-Q2 + Scheduler
-echo   (HTTP + SSE + WebSocket on one port)
-echo ============================================
+set PYTHONUTF8=1
+set PYTHONIOENCODING=utf-8
+set PYTHONUNBUFFERED=1
 
-REM Free backend port if a previous start_backend is still holding it
-for /f "tokens=5" %%a in ('netstat -ano ^| findstr /R /C:":%BACKEND_PORT% .*LISTENING"') do (
-  echo Stopping old backend PID %%a on port %BACKEND_PORT% ...
-  taskkill /F /PID %%a >nul 2>&1
-)
+"%PYTHON%" "%~dp0start_all.py" %*
 
-REM 1. Start frontend (separate window)
-start "TestHub-Frontend" cmd /k "cd /d %~dp0frontend && npm run dev"
+REM 正常退出（0）或用户 Ctrl+C（130）直接关窗；
+REM 异常退出时保留窗口，方便查看错误原因。
+if "%errorlevel%"=="0" exit
+if "%errorlevel%"=="130" exit
 
-REM 2. Start backend services
-REM    a) Django-Q2 cluster (separate window)
-start "TestHub-QCluster" cmd /k "cd /d %~dp0backend && %PYTHON% manage.py qcluster"
-
-REM    b) Scheduler (separate window)
-start "TestHub-Scheduler" cmd /k "cd /d %~dp0backend && %PYTHON% manage.py run_all_scheduled_tasks"
-
-REM    c) Uvicorn ASGI server (current window) — HTTP/SSE/WebSocket
-cd /d %~dp0
-%PYTHON% start_backend.py --port %BACKEND_PORT%
+echo.
+echo [启动器异常退出] errorlevel=%errorlevel%
+echo 请查看上方错误信息，或 logs\start\ 下的服务日志。
+echo.
 pause

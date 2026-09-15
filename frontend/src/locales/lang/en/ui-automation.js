@@ -781,6 +781,9 @@ export default {
     notifyEmails: 'Notification Emails',
     selectNotifyEmails: 'Please select notification emails',
     selectNotificationType: 'Please select notification type',
+    notificationTemplate: 'Notification Template',
+    selectNotificationTemplate: 'Please select notification template',
+    defaultTemplate: 'Default',
     cronHelp: {
       title: 'Cron Help',
       format: 'Cron format: minute hour day month weekday',
@@ -950,8 +953,44 @@ export default {
     },
     configs: {
       title: 'Notification Configs',
-      pageTitle: 'UI Automation Notification Config',
-      pageDesc: 'Configure Feishu, WeCom, DingTalk Webhook robot addresses',
+      pageTitle: 'Notification Configuration',
+      pageDesc: 'Configure scheduled task notifications: Email (SMTP) and Feishu robot',
+      // Email config
+      emailTab: 'Email Config',
+      smtpHost: 'SMTP Server',
+      smtpHostPlaceholder: 'e.g. smtp.gmail.com',
+      smtpHostHint: 'Picking a provider auto-fills the port and encryption; you can also type a custom SMTP host.',
+      smtpProviders: {
+        qq: 'QQ Mail',
+        qqExmail: 'Tencent Exmail',
+        netease163: 'NetEase 163 Mail',
+        netease126: 'NetEase 126 Mail',
+        neteaseQiye: 'NetEase Enterprise Mail',
+        aliyun: 'Alibaba Mail',
+        feishu: 'Feishu Mail',
+        gmail: 'Gmail',
+        outlook: 'Outlook',
+        sina: 'Sina Mail'
+      },
+      smtpPort: 'SMTP Port',
+      smtpPortHint: 'Usually 465 for SSL, 587 for TLS/STARTTLS',
+      senderEmail: 'Sender Email',
+      senderEmailPlaceholder: 'Email address used to send notifications',
+      authCode: 'Auth Code',
+      authCodePlaceholder: 'Please enter SMTP auth code',
+      authCodeKeepPlaceholder: 'Saved; leave blank to keep unchanged',
+      authCodeHint: 'SMTP auth code (not your login password). Leave blank to keep the saved one.',
+      secureMode: 'Encryption',
+      useSsl: 'SSL',
+      useTls: 'TLS/STARTTLS',
+      secureModeHint: 'Only one of SSL / TLS can be enabled; the default port is adjusted automatically',
+      emailActiveHint: 'When disabled, email notifications fall back to EMAIL_* in config.yaml / environment variables',
+      recipientEmails: 'Notification Recipients',
+      recipientEmailsPlaceholder: 'Type an email and press Enter; multiple allowed',
+      recipientEmailsHint: 'These emails appear as options in the "Notify Emails" dropdown of the scheduled task form',
+      testConnection: 'Test Connection',
+      saveEmailConfig: 'Save Email Config',
+      testSend: 'Test Send',
       newConfig: 'New Config',
       searchPlaceholder: 'Search config name',
       configName: 'Config Name',
@@ -968,31 +1007,15 @@ export default {
       // Robot config
       botName: 'Robot Name',
       enable: 'Enable',
-      businessType: 'Business Type',
-      uiAutomationTest: 'UI Automation Test',
-      apiTest: 'API Test',
-      signatureSecret: 'Signature Secret',
-      signatureSecretPlaceholder: 'Please enter DingTalk robot signature secret (optional)',
-      signatureSecretHint: 'DingTalk robot signature secret for security verification. Fill this if the robot has enabled "Sign" security setting.',
       // Tab labels
       feishuBot: 'Feishu Robot',
-      wechatBot: 'WeCom Robot',
-      dingtalkBot: 'DingTalk Robot',
       // Form hints
       feishuBotNamePlaceholder: 'Please enter Feishu robot name',
       feishuUrlHint: 'Feishu Webhook URL format: https://open.feishu.cn/open-apis/bot/v2/hook/...',
-      wechatBotNamePlaceholder: 'Please enter WeCom robot name',
-      wechatUrlHint: 'WeCom Webhook URL format: https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
-      dingtalkBotNamePlaceholder: 'Please enter DingTalk robot name',
-      dingtalkUrlHint: 'DingTalk Webhook URL format: https://oapi.dingtalk.com/robot/send?access_token=...',
       // Save buttons
       saveFeishuConfig: 'Save Feishu Robot Config',
-      saveWechatConfig: 'Save WeCom Robot Config',
-      saveDingtalkConfig: 'Save DingTalk Robot Config',
       platforms: {
-        feishu: 'Feishu',
-        wechatWork: 'WeCom',
-        dingtalk: 'DingTalk'
+        feishu: 'Feishu'
       },
       rules: {
         nameRequired: 'Please enter config name',
@@ -1010,19 +1033,32 @@ export default {
         deleteFailed: 'Failed to delete notification config',
         testSuccess: 'Test message sent successfully',
         testFailed: 'Failed to send test message',
+        // Email config messages
+        emailRequired: 'Please fill in the SMTP server and sender email first',
+        emailSaveSuccess: 'Email config saved successfully',
+        emailSaveFailed: 'Failed to save email config',
+        emailTestSuccess: 'Email connection test succeeded',
+        emailTestFailed: 'Email connection test failed',
+        emailGetFailed: 'Failed to get email config',
         // Robot config messages
         feishuUpdateSuccess: 'Feishu robot config updated successfully',
         feishuCreateSuccess: 'Feishu robot config created successfully',
         feishuSaveFailed: 'Failed to save Feishu robot config',
-        wechatUpdateSuccess: 'WeCom robot config updated successfully',
-        wechatCreateSuccess: 'WeCom robot config created successfully',
-        wechatSaveFailed: 'Failed to save WeCom robot config',
-        dingtalkUpdateSuccess: 'DingTalk robot config updated successfully',
-        dingtalkCreateSuccess: 'DingTalk robot config created successfully',
-        dingtalkSaveFailed: 'Failed to save DingTalk robot config',
         noExistingConfig: 'No existing Webhook config found, will create new config',
         getConfigFailed: 'Failed to get Webhook robot config',
-        getAllConfigFailed: 'Failed to get all Webhook robot configs'
+        getAllConfigFailed: 'Failed to get all Webhook robot configs',
+        // Webhook test messages
+        webhookRequired: 'Please enter the Webhook URL first',
+        webhookTestSuccess: 'Test message sent, please check your Feishu group',
+        webhookTestFailed: 'Failed to send test message',
+        // Webhook test messages
+        webhookRequired: 'Please enter the Webhook URL first',
+        webhookTestSuccess: 'Test message sent; please check your Feishu group',
+        webhookTestFailed: 'Failed to send test message',
+        // Webhook test message
+        webhookRequired: 'Please fill in the Webhook URL first',
+        webhookTestSuccess: 'Test message sent; please check your Feishu group',
+        webhookTestFailed: 'Failed to send test message'
       }
     }
   },

@@ -1,4 +1,4 @@
-<template>
+﻿<template>
   <div class="ai-model-config">
     <div class="page-header">
       <h1>{{ $t('configuration.aiModel.title') }}</h1>
@@ -28,8 +28,11 @@
                     <span class="model-badge" :class="config.model_type">
                       {{ $t('configuration.aiModel.modelTypes.' + config.model_type) }}
                     </span>
-                    <span class="role-badge" :class="config.role">
-                      {{ $t('configuration.aiModel.roles.' + config.role) }}
+                    <span v-for="rl in (config.role || [])" :key="rl" class="role-badge" :class="rl">
+                      {{ $t('configuration.aiModel.roles.' + rl) }}
+                    </span>
+                    <span v-for="sc in (config.scenario || [])" :key="sc" class="scenario-badge" :class="sc">
+                      {{ $t('configuration.aiModel.scenarios.' + sc) }}
                     </span>
                     <span class="status-badge" :class="{ active: config.is_active }">
                       {{ config.is_active ? $t('configuration.common.enabled') : $t('configuration.common.disabled') }}
@@ -132,15 +135,30 @@
 
             <div class="form-group">
               <label>{{ $t('configuration.aiModel.role') }} <span class="required">*</span></label>
-              <select
-                v-model="configForm.role"
-                class="form-select"
-                required
-                @change="console.log('Role changed to:', configForm.role)">
-                <option value="">{{ $t('configuration.aiModel.selectRole') }}</option>
-                <option value="writer">{{ $t('configuration.aiModel.roles.writer') }}</option>
-                <option value="reviewer">{{ $t('configuration.aiModel.roles.reviewer') }}</option>
-              </select>
+              <div class="checkbox-group">
+                <label class="checkbox-item" v-for="roleOption in roleOptions" :key="roleOption">
+                  <input
+                    type="checkbox"
+                    :value="roleOption"
+                    v-model="configForm.roles">
+                  <span>{{ $t('configuration.aiModel.roles.' + roleOption) }}</span>
+                </label>
+              </div>
+              <small class="form-hint">{{ $t('configuration.aiModel.roleMultiHint') }}</small>
+            </div>
+
+            <div class="form-group">
+              <label>{{ $t('configuration.aiModel.scenario') }} <span class="required">*</span></label>
+              <div class="checkbox-group">
+                <label class="checkbox-item" v-for="scenarioOption in scenarioOptions" :key="scenarioOption">
+                  <input
+                    type="checkbox"
+                    :value="scenarioOption"
+                    v-model="configForm.scenarios">
+                  <span>{{ $t('configuration.aiModel.scenarios.' + scenarioOption) }}</span>
+                </label>
+              </div>
+              <small class="form-hint">{{ $t('configuration.aiModel.scenarioMultiHint') }}</small>
             </div>
 
             <div class="form-group">
@@ -296,7 +314,8 @@ export default {
       configForm: {
         name: '',
         model_type: '',
-        role: '',
+        roles: [],
+        scenarios: ['testcase_generation'],
         api_key: '',
         base_url: '',
         model_name: '',
@@ -305,6 +324,23 @@ export default {
         top_p: 0.9,
         is_active: true
       },
+      // 角色选项（文案取自 i18n: configuration.aiModel.roles.*）
+      roleOptions: [
+        'writer',
+        'reviewer',
+        'browser_use_text',
+        'browser_use_vision',
+        'code_generator',
+        'test_oracle'
+      ],
+      // 场景选项（文案取自 i18n: configuration.aiModel.scenarios.*）
+      scenarioOptions: [
+        'testcase_generation',
+        'ui_automation',
+        'api_testing',
+        'code_generation',
+        'other'
+      ],
       // 模型类型与API Base URL的映射关系
       modelBaseUrlMap: {
         deepseek: 'https://api.deepseek.com',
@@ -437,20 +473,51 @@ export default {
     },
 
     resetForm() {
+
       // 使用Object.assign确保响应式
+
       Object.assign(this.configForm, {
+
         name: '',
+
         model_type: '',
-        role: '',
+
+        roles: [],
+
+        scenarios: ['testcase_generation'],
+
         api_key: '',
+
         base_url: '',
+
         model_name: '',
+
         max_tokens: 4096,
+
         temperature: 0.7,
+
         top_p: 0.9,
+
         is_active: true
+
       })
+
       console.log('Form reset:', JSON.stringify(this.configForm))
+
+    },
+
+    /**
+     * 归一化多选值为数组，兼容历史单值字符串与逗号串
+     * （role / scenario 均为多值字段）
+     */
+    normalizeMultiValue(value) {
+      if (Array.isArray(value)) {
+        return value.filter(Boolean)
+      }
+      if (typeof value === 'string' && value.trim()) {
+        return value.split(',').map(s => s.trim()).filter(Boolean)
+      }
+      return []
     },
 
     editConfig(config) {
@@ -459,8 +526,9 @@ export default {
       this.configForm = {
         name: config.name,
         model_type: config.model_type,
-        role: config.role,
-        api_key: config.api_key_masked || '', // 显示掩码版本的API Key
+        roles: this.normalizeMultiValue(config.role),
+        scenarios: this.normalizeMultiValue(config.scenario),
+        api_key: config.api_key_masked || '',
         base_url: config.base_url,
         model_name: config.model_name,
         max_tokens: config.max_tokens,
@@ -470,29 +538,23 @@ export default {
       }
       this.showEditModal = true
     },
-
     async saveConfig() {
       console.log('Saving config with data:', this.configForm)
-      
-      // 详细检查每个字段
-      console.log('Field values:')
-      console.log('- name:', this.configForm.name, 'length:', this.configForm.name?.length)
-      console.log('- model_type:', this.configForm.model_type, 'length:', this.configForm.model_type?.length)
-      console.log('- role:', this.configForm.role, 'length:', this.configForm.role?.length)
-      console.log('- api_key:', this.configForm.api_key, 'length:', this.configForm.api_key?.length)
-      console.log('- base_url:', this.configForm.base_url, 'length:', this.configForm.base_url?.length)
-      console.log('- model_name:', this.configForm.model_name, 'length:', this.configForm.model_name?.length)
-      
+
+      // role / scenario 均为多选，各至少选择一个
+      const roles = this.normalizeMultiValue(this.configForm.roles)
+      const scenarios = this.normalizeMultiValue(this.configForm.scenarios)
+
       // 验证必填字段
       const requiredFields = [
         { name: 'name', value: this.configForm.name },
         { name: 'model_type', value: this.configForm.model_type },
-        { name: 'role', value: this.configForm.role },
+        { name: 'role', value: roles.length ? 'selected' : '' },
+        { name: 'scenario', value: scenarios.length ? 'selected' : '' },
         { name: 'api_key', value: this.configForm.api_key },
         { name: 'base_url', value: this.configForm.base_url },
         { name: 'model_name', value: this.configForm.model_name }
       ]
-      
       const emptyFields = requiredFields.filter(field => !field.value || field.value.trim() === '')
       
       if (emptyFields.length > 0) {
@@ -502,12 +564,18 @@ export default {
       }
       
       // 检查唯一约束冲突（仅在创建新配置且is_active为true时）
+      // 约定：同一 (role, scenario) 组合只能有一个 active 配置，
+      // 因此「角色有交集 且 场景有交集」即视为重复。
       if (!this.isEditing && this.configForm.is_active) {
-        const existingConfig = this.configs.find(config => 
-          config.model_type === this.configForm.model_type && 
-          config.role === this.configForm.role && 
-          config.is_active === true
-        )
+        const existingConfig = this.configs.find(config => {
+          if (config.is_active !== true) return false
+          if (config.model_type !== this.configForm.model_type) return false
+          const existingRoles = this.normalizeMultiValue(config.role)
+          const existingScenarios = this.normalizeMultiValue(config.scenario)
+          const roleOverlap = existingRoles.some(r => roles.includes(r))
+          const scenarioOverlap = existingScenarios.some(sc => scenarios.includes(sc))
+          return roleOverlap && scenarioOverlap
+        })
         
         if (existingConfig) {
           ElMessage.error(this.t('configuration.aiModel.messages.duplicateConfig', { name: existingConfig.name }))
@@ -518,20 +586,34 @@ export default {
       this.isSaving = true
       
       try {
+        // 准备提交的数据
+        const submitData = {
+          name: this.configForm.name,
+          model_type: this.configForm.model_type,
+          role: roles,
+          scenario: scenarios,
+          api_key: this.configForm.api_key,
+          base_url: this.configForm.base_url,
+          model_name: this.configForm.model_name,
+          max_tokens: this.configForm.max_tokens,
+          temperature: this.configForm.temperature,
+          top_p: this.configForm.top_p,
+          is_active: this.configForm.is_active
+        }
+        
         if (this.isEditing) {
           // 编辑时，如果API Key是掩码格式或为空，则不更新它
-          const updateData = { ...this.configForm }
-          if (!updateData.api_key || updateData.api_key.includes('*')) {
-            delete updateData.api_key
+          if (!submitData.api_key || submitData.api_key.includes('*')) {
+            delete submitData.api_key
           }
-          
-          console.log('Updating with data:', updateData)
-          await api.patch(`/requirement-analysis/ai-models/${this.editingConfigId}/`, updateData)
-          ElMessage.success(this.t('configuration.aiModel.messages.updateSuccess'))
+
+          console.log('Updating with data:', submitData)
+          await api.patch(`/requirement-analysis/ai-models/${this.editingConfigId}/`, submitData)
+          ElMessage.success(this.$t('configuration.aiModel.messages.updateSuccess'))
         } else {
-          console.log('Creating with data:', this.configForm)
-          await api.post('/requirement-analysis/ai-models/', this.configForm)
-          ElMessage.success(this.t('configuration.aiModel.messages.saveSuccess'))
+          console.log('Creating with data:', submitData)
+          await api.post('/requirement-analysis/ai-models/', submitData)
+          ElMessage.success(this.$t('configuration.aiModel.messages.saveSuccess'))
         }
         
         this.closeModals()
@@ -772,7 +854,7 @@ export default {
   flex-wrap: wrap;
 }
 
-.model-badge, .role-badge, .status-badge {
+.model-badge, .role-badge, .scenario-badge, .status-badge {
   padding: 4px 12px;
   border-radius: 20px;
   font-size: 0.8rem;
@@ -807,6 +889,47 @@ export default {
 .role-badge.reviewer {
   background: #fff3e0;
   color: #f57c00;
+}
+
+.role-badge.browser_use_text,
+.role-badge.browser_use_vision {
+  background: #e1f5fe;
+  color: #0277bd;
+}
+
+.role-badge.code_generator {
+  background: #ede7f6;
+  color: #5e35b1;
+}
+
+.role-badge.test_oracle {
+  background: #fce4ec;
+  color: #c2185b;
+}
+
+.scenario-badge {
+  background: #eceff1;
+  color: #455a64;
+}
+
+.scenario-badge.testcase_generation {
+  background: #e8f5e8;
+  color: #388e3c;
+}
+
+.scenario-badge.ui_automation {
+  background: #e1f5fe;
+  color: #0277bd;
+}
+
+.scenario-badge.api_testing {
+  background: #ede7f6;
+  color: #5e35b1;
+}
+
+.scenario-badge.code_generation {
+  background: #fff8e1;
+  color: #f9a825;
 }
 
 .status-badge {
@@ -990,6 +1113,41 @@ export default {
   display: grid;
   grid-template-columns: 1fr 1fr 1fr;
   gap: 15px;
+}
+
+.checkbox-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  padding: 10px 12px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
+  background: #f8f9fa;
+}
+
+.checkbox-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+
+.checkbox-item:hover {
+  background: #e9ecef;
+}
+
+.checkbox-item input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.checkbox-item span {
+  font-size: 14px;
+  color: #2c3e50;
 }
 
 .checkbox-label {

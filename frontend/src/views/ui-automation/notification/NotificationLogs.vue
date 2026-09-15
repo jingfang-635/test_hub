@@ -149,8 +149,10 @@
     <!-- 详情弹窗 -->
     <el-dialog
         v-model="detailDialogVisible"
+        class="notification-detail-dialog"
         :title="$t('uiAutomation.notification.logs.detailTitle')"
         width="600px"
+        align-center
         :before-close="handleDetailDialogClose"
     >
       <el-form
@@ -210,10 +212,18 @@
             <el-form-item :label="$t('uiAutomation.notification.logs.content')">
               <div class="notification-content">
                 <div v-if="parsedNotificationContent" class="notification-content-parsed">
-                  <div class="content-item" v-for="(item, index) in parsedNotificationContent" :key="index">
-                    <span class="content-label">{{ item.label }}:</span>
-                    <span class="content-value">{{ item.value }}</span>
-                  </div>
+                  <template v-for="(item, index) in parsedNotificationContent" :key="index">
+                    <div v-if="item.type === 'heading'" class="content-heading">
+                      {{ item.value }}
+                    </div>
+                    <div v-else-if="item.type === 'field'" class="content-item">
+                      <span class="content-label">{{ item.label }}:</span>
+                      <span class="content-value">{{ item.value }}</span>
+                    </div>
+                    <div v-else class="content-item content-item--text">
+                      <span class="content-value">{{ item.value }}</span>
+                    </div>
+                  </template>
                 </div>
                 <div v-else class="notification-content-raw">
                   <pre>{{ selectedLog.notification_content || '-' }}</pre>
@@ -404,6 +414,91 @@ export default {
       return typeMap[typeDisplay] || 'info'
     }
 
+    // 将通知正文按行解析为可展示条目（保留全部内容，不丢弃任何行）
+    const parseContentText = (text) => {
+      if (!text) return []
+
+      const result = []
+      const lines = String(text).split('\n')
+
+      lines.forEach((rawLine) => {
+        const line = rawLine.replace(/\r$/, '').trim()
+        if (!line) return
+
+        // 去掉 markdown 加粗标记后再解析（模板中常见 **标签**: 值 写法）
+        const plainLine = line.replace(/\*\*/g, '').trim()
+        if (!plainLine) return
+
+        // Markdown 标题行（整行加粗 或 # 标题）单独成行展示
+        const headingMatch = line.match(/^\*\*(.+?)\*\*$/) || line.match(/^#{1,6}\s+(.+)$/)
+        if (headingMatch) {
+          result.push({
+            type: 'heading',
+            label: '',
+            value: headingMatch[1].replace(/\*\*/g, '').trim()
+          })
+          return
+        }
+
+        // 键值对行：标签: 值（冒号需为半角或全角，且后面有内容）
+        const kvMatch = plainLine.match(/^([^:：]{1,50})[:：]\s*(.+)$/)
+        // 排除裸 URL（如 https://example.com）被误判为「标签: 值」
+        const looksLikeUrl = kvMatch && kvMatch[2].trim().startsWith('//')
+        if (kvMatch && !looksLikeUrl) {
+          result.push({
+            type: 'field',
+            label: kvMatch[1].trim(),
+            value: kvMatch[2].trim()
+          })
+          return
+        }
+
+        // 其余行原样保留（说明文字、列表项等）
+        result.push({
+          type: 'text',
+          label: '',
+          value: plainLine
+        })
+      })
+
+      return result
+    }
+
+    // 提取 Webhook JSON 消息体中的正文文本
+    const extractWebhookText = (jsonContent) => {
+      // 飞书 interactive 卡片：标题 + 全部 elements
+      if (jsonContent.msg_type === 'interactive' && jsonContent.card) {
+        const elements = jsonContent.card.elements || []
+        const bodyTexts = elements
+            .map(el => (el && el.text && el.text.content) || '')
+            .filter(Boolean)
+        const body = bodyTexts.join('\n')
+
+        const headerTitle = jsonContent.card.header?.title?.content || ''
+        // 正文通常已包含标题，避免重复展示
+        const needHeader = headerTitle && !body.includes(headerTitle)
+
+        const parts = needHeader ? [headerTitle, ...bodyTexts] : bodyTexts
+        if (parts.length) return parts.join('\n')
+      }
+
+      // 企业微信 / 钉钉 markdown 格式
+      if (jsonContent.markdown) {
+        if (jsonContent.markdown.text) return jsonContent.markdown.text
+        if (jsonContent.markdown.content) return jsonContent.markdown.content
+      }
+
+      // 通用兜底：从常见字段中查找正文
+      const fallbackCandidates = [
+        jsonContent.content,
+        jsonContent.text && jsonContent.text.content,
+        jsonContent.text,
+        jsonContent.body
+      ]
+      const found = fallbackCandidates.find(v => typeof v === 'string' && v.trim())
+      return found || ''
+    }
+
     // 解析通知内容为结构化数据
     const parsedNotificationContent = computed(() => {
       if (!selectedLog.value || !selectedLog.value.notification_content) {
@@ -412,96 +507,21 @@ export default {
 
       const content = selectedLog.value.notification_content
 
+      // 尝试解析JSON格式的通知内容(Webhook)
       try {
-        // 尝试解析JSON格式的通知内容(Webhook)
         const jsonContent = JSON.parse(content)
-        const result = []
-
-        // 提取内容文本
-        let contentText = ''
-
-        // 处理企业微信格式
-        if (jsonContent.msgtype === 'markdown' && jsonContent.markdown) {
-          // 优先使用text字段(钉钉格式)
-          if (jsonContent.markdown.text) {
-            contentText = jsonContent.markdown.text
-          } else if (jsonContent.markdown.content) {
-            contentText = jsonContent.markdown.content
-          }
-        }
-        // 处理飞书格式
-        else if (jsonContent.msg_type === 'interactive' && jsonContent.card) {
-          if (jsonContent.card.elements && jsonContent.card.elements[0] && jsonContent.card.elements[0].text) {
-            contentText = jsonContent.card.elements[0].text.content
-          }
-        }
-
+        const contentText = extractWebhookText(jsonContent)
         if (contentText) {
-          // 解析文本内容,提取关键信息
-          const lines = contentText.split('\n').filter(line => line.trim())
-
-          lines.forEach(line => {
-            // 跳过标题行(包含**的行)和空行
-            if (line.includes('**') || line.trim() === '') {
-              return
-            }
-
-            // 解析键值对
-            const colonIndex = line.indexOf(':')
-            if (colonIndex > 0) {
-              const label = line.substring(0, colonIndex).trim()
-              const value = line.substring(colonIndex + 1).trim()
-
-              if (label && value) {
-                result.push({
-                  label: label,
-                  value: value
-                })
-              }
-            }
-          })
-
-          return result.length > 0 ? result : null
+          const parsed = parseContentText(contentText)
+          return parsed.length > 0 ? parsed : null
         }
-      } catch (e) {
-        // JSON解析失败,尝试作为纯文本解析(邮件通知)
-        console.log('Attempting to parse as plain text format')
+      } catch {
+        // JSON解析失败,继续尝试纯文本格式(邮件通知)
       }
 
-      // 解析纯文本格式的邮件内容
-      try {
-        const result = []
-        const lines = content.split('\n').filter(line => line.trim())
-
-        lines.forEach(line => {
-          // 跳过空行
-          if (!line.trim()) {
-            return
-          }
-
-          // 解析键值对 (格式: "标签: 值")
-          const colonIndex = line.indexOf(':')
-          if (colonIndex > 0) {
-            const label = line.substring(0, colonIndex).trim()
-            const value = line.substring(colonIndex + 1).trim()
-
-            // 过滤掉包含详细测试结果的行(通常会是大字典或JSON字符串)
-            // 跳过包含'results'关键字的超长值
-            if (label && value && !value.includes("'results':") && !value.includes('"results":')) {
-              result.push({
-                label: label,
-                value: value
-              })
-            }
-          }
-        })
-
-        return result.length > 0 ? result : null
-      } catch (e) {
-        // 如果所有解析都失败,返回null以显示原始内容
-        console.error('Failed to parse notification content:', e)
-        return null
-      }
+      // 纯文本格式（邮件正文 / 兜底文案）
+      const parsed = parseContentText(content)
+      return parsed.length > 0 ? parsed : null
     })
 
     // 组件挂载时获取数据
@@ -606,22 +626,44 @@ export default {
   padding: 20px;
   border: 1px solid #e4e7ed;
   box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+  box-sizing: border-box;
+  width: 100%;
+  overflow-wrap: anywhere;
+}
+
+/* 结构化内容行：键值对 / 小标题 / 普通文本 */
+.content-item,
+.content-heading,
+.content-item--text {
+  padding: 12px 0;
+  border-bottom: 1px solid #f0f2f5;
+  font-size: 14px;
+  line-height: 1.8;
+}
+
+.notification-content-parsed > :first-child {
+  padding-top: 0;
+}
+
+.notification-content-parsed > :last-child {
+  border-bottom: none;
+  padding-bottom: 0;
 }
 
 .content-item {
   display: flex;
   align-items: flex-start;
-  padding: 12px 0;
-  border-bottom: 1px solid #f0f2f5;
 }
 
-.content-item:last-child {
-  border-bottom: none;
-  padding-bottom: 0;
+/* 小标题行（原 Markdown 加粗标题） */
+.content-heading {
+  font-weight: 600;
+  color: #303133;
 }
 
-.content-item:first-child {
-  padding-top: 0;
+/* 普通文本行（非键值对，如说明文字、列表项） */
+.content-item--text .content-value {
+  color: #606266;
 }
 
 .content-label {
@@ -653,8 +695,6 @@ export default {
   font-size: 13px;
   line-height: 1.6;
   color: #606266;
-  max-height: 400px;
-  overflow-y: auto;
 }
 
 .notification-content-raw pre::-webkit-scrollbar {
@@ -689,5 +729,26 @@ export default {
   display: flex;
   justify-content: flex-end;
   gap: 10px;
+}
+</style>
+
+<style>
+/* 仅改弹窗本体高度；居中交给 align-center，勿改 overlay，否则蒙层易残留 */
+.el-dialog.notification-detail-dialog {
+  height: 700px;
+  display: flex;
+  flex-direction: column;
+}
+
+.el-dialog.notification-detail-dialog .el-dialog__header,
+.el-dialog.notification-detail-dialog .el-dialog__footer {
+  flex-shrink: 0;
+}
+
+.el-dialog.notification-detail-dialog .el-dialog__body {
+  flex: 1;
+  overflow-y: auto;
+  overflow-x: hidden;
+  min-height: 0;
 }
 </style>

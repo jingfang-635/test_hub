@@ -476,37 +476,25 @@ const routes = [
           {
             path: 'performance-stats',
             name: 'ConfigPerformanceStats',
-            component: () => import('@/views/configuration/AdminEmbed.vue'),
-            props: { path: '/admin/core/performancestatistics/' },
+            component: () => import('@/views/configuration/PerformanceStats.vue'),
             meta: {
-              title: '性能统计',
-              embedTitle: '性能统计',
-              adminPath: '/admin/core/performancestatistics/',
-              refreshLabel: '刷新列表'
+              title: '性能统计'
             }
           },
           {
             path: 'request-performance-log',
             name: 'ConfigRequestPerformanceLog',
-            component: () => import('@/views/configuration/AdminEmbed.vue'),
-            props: { path: '/admin/core/requestperformancelog/' },
+            component: () => import('@/views/configuration/RequestPerformanceLog.vue'),
             meta: {
-              title: '请求性能日志',
-              embedTitle: '请求性能日志',
-              adminPath: '/admin/core/requestperformancelog/',
-              refreshLabel: '刷新列表'
+              title: '请求性能日志'
             }
           },
           {
             path: 'notification-template',
             name: 'ConfigNotificationTemplate',
-            component: () => import('@/views/configuration/AdminEmbed.vue'),
-            props: { path: '/admin/core/notificationtemplate/' },
+            component: () => import('@/views/configuration/NotificationTemplateConfig.vue'),
             meta: {
-              title: '通知模板列表',
-              embedTitle: '通知模板列表',
-              adminPath: '/admin/core/notificationtemplate/',
-              refreshLabel: '刷新列表'
+              title: '通知模板列表'
             }
           }
         ]

@@ -1314,13 +1314,22 @@ class AIModelConfigViewSet(viewsets.ModelViewSet):
         if model_type:
             queryset = queryset.filter(model_type=model_type)
 
-        # 按角色过滤
+        # 按角色过滤（role 为多值列表，命中其一即返回）
         role = self.request.query_params.get('role')
         if role:
-            queryset = queryset.filter(role=role)
+            queryset = queryset.filter(role__contains=[role])
         else:
-            # 如果没有指定角色，默认排除 AI智能模式专用模型
-            queryset = queryset.exclude(role__in=['browser_use_text', 'browser_use_vision'])
+            # 默认只展示「承担通用角色」的配置；纯 browser_use_* 配置由 AI 智能模式页管理。
+            # 不能简单 exclude(browser_use_*)：多角色时代共享配置（如 writer+browser_use_text）
+            # 会被误杀，导致配置中心列表与 generate/config-status 查询不一致。
+            queryset = queryset.filter(
+                AIModelConfig.any_of(role=list(AIModelConfig.GENERAL_ROLES))
+            )
+
+        # 按场景过滤（scenario 为多值列表，命中其一即返回）
+        scenario = self.request.query_params.get('scenario')
+        if scenario:
+            queryset = queryset.filter(scenario__contains=[scenario])
 
         # 按是否启用过滤
         is_active = self.request.query_params.get('is_active')
@@ -1855,8 +1864,10 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
             reviewer_prompt = None
 
             if validated_data.get('use_writer_model', True):
-                # 优先查找任意启用的编写模型配置
-                writer_config = AIModelConfig.objects.filter(role='writer', is_active=True).first()
+                # 优先查找任意启用的编写模型配置（role 为多值列表，命中 writer 即可）
+                writer_config = AIModelConfig.objects.filter(
+                    role__contains=['writer'], is_active=True
+                ).first()
 
                 if not writer_config:
                     return Response(
@@ -1872,8 +1883,10 @@ class TestCaseGenerationTaskViewSet(viewsets.ModelViewSet):
                     )
 
             if validated_data.get('use_reviewer_model', True):
-                # 优先查找任意启用的评审模型配置
-                reviewer_config = AIModelConfig.objects.filter(role='reviewer', is_active=True).first()
+                # 优先查找任意启用的评审模型配置（role 为多值列表，命中 reviewer 即可）
+                reviewer_config = AIModelConfig.objects.filter(
+                    role__contains=['reviewer'], is_active=True
+                ).first()
 
                 if not reviewer_config:
                     return Response(
@@ -3207,30 +3220,33 @@ class ConfigStatusViewSet(viewsets.ViewSet):
     def check(self, request):
         """检查AI配置状态"""
         try:
-            # 检查AI模型配置
+            # 检查AI模型配置（role 为多值列表，用 Q 表达「含 writer 或 reviewer」）
+            # 注意：单值时代这里还有一个 exclude(browser_use_*) 的兜底，但 filter 已把范围
+            # 限定在 writer/reviewer，该 exclude 本就是冗余的；改为多值后它会误杀
+            # 「同时承担 browser_use_text + writer」的共享配置，故移除。
             ai_model_configs = AIModelConfig.objects.filter(
-                role__in=['writer', 'reviewer']
-            ).exclude(role__in=['browser_use_text', 'browser_use_vision'])
+                AIModelConfig.any_of(role=['writer', 'reviewer'])
+            )
 
             # 检查writer模型配置
             writer_model_enabled = ai_model_configs.filter(
-                role='writer',
+                role__contains=['writer'],
                 is_active=True
             ).first()
 
             writer_model_disabled = ai_model_configs.filter(
-                role='writer',
+                role__contains=['writer'],
                 is_active=False
             ).first()
 
             # 检查reviewer模型配置
             reviewer_model_enabled = ai_model_configs.filter(
-                role='reviewer',
+                role__contains=['reviewer'],
                 is_active=True
             ).first()
 
             reviewer_model_disabled = ai_model_configs.filter(
-                role='reviewer',
+                role__contains=['reviewer'],
                 is_active=False
             ).first()
 

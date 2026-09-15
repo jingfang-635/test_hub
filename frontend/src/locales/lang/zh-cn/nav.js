@@ -55,7 +55,7 @@ export default {
 
     // 配置中心
     aiCaseGenerationConfig: 'AI用例生成配置',
-    aiModelConfig: '用例模型配置',
+    aiModelConfig: '模型配置',
     promptConfig: '提示词配置',
     generationConfig: '生成行为配置',
     knowledgeBaseManage: '知识库管理',
@@ -64,11 +64,12 @@ export default {
     aiModeConfig: '模型配置',
     skillsConfig: 'Skills 技能配置',
     scheduledTaskConfig: '定时任务配置',
+    notificationConfig: '通知配置',
     difyConfig: 'AI评测师配置',
     mcpServerConfig: 'MCP服务器配置',
     moduleSwitchConfig: '功能模块开关',
-    // 核心模块
-    coreModule: '核心模块',
+    // 性能统计
+    coreModule: '性能统计',
     performanceStats: '性能统计',
     requestPerformanceLog: '请求性能日志',
     notificationTemplate: '通知模板'

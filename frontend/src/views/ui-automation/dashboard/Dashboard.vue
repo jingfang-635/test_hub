@@ -142,7 +142,7 @@
     <!-- 核心功能介绍 -->
     <div class="features-section">
       <h2 class="section-title">{{ $t('uiAutomation.dashboard.coreFeatures') }}</h2>
-      <el-row :gutter="20">
+      <el-row :gutter="20" class="features-row">
         <el-col :span="6">
           <el-card shadow="hover" class="feature-card">
             <div class="feature-icon">
@@ -594,6 +594,10 @@ onMounted(() => {
   margin-bottom: 40px;
 }
 
+.features-row {
+  row-gap: 20px;
+}
+
 .section-title {
   font-size: 24px;
   font-weight: bold;
@@ -809,6 +813,10 @@ onMounted(() => {
     padding: 20px;
   }
   
+  .features-row {
+    row-gap: 16px;
+  }
+  
   .feature-icon {
     width: 70px;
     height: 70px;
@@ -881,6 +889,10 @@ onMounted(() => {
     padding: 15px;
   }
   
+  .features-row {
+    row-gap: 14px;
+  }
+  
   .feature-icon {
     width: 60px;
     height: 60px;
@@ -942,6 +954,10 @@ onMounted(() => {
   
   .feature-card {
     padding: 12px;
+  }
+  
+  .features-row {
+    row-gap: 12px;
   }
   
   .feature-icon {
@@ -1033,6 +1049,10 @@ onMounted(() => {
   
   .feature-card {
     padding: 10px;
+  }
+  
+  .features-row {
+    row-gap: 10px;
   }
   
   .feature-icon {
@@ -1128,6 +1148,10 @@ onMounted(() => {
   
   .feature-card {
     padding: 8px;
+  }
+  
+  .features-row {
+    row-gap: 8px;
   }
   
   .feature-icon {

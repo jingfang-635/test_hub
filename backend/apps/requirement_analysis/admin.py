@@ -49,10 +49,18 @@ class AnalysisTaskAdmin(admin.ModelAdmin):
 
 @admin.register(AIModelConfig)
 class AIModelConfigAdmin(admin.ModelAdmin):
-    list_display = ['name', 'model_type', 'role', 'model_name', 'is_active', 'created_at']
-    list_filter = ['model_type', 'role', 'is_active', 'created_at']
+    list_display = ['name', 'model_type', 'role_labels', 'scenario_labels', 'model_name', 'is_active', 'created_at']
+    list_filter = ['model_type', 'is_active', 'created_at']
     search_fields = ['name', 'model_name']
     readonly_fields = ['created_at', 'updated_at']
+
+    @admin.display(description='角色')
+    def role_labels(self, obj):
+        return '、'.join(obj.get_role_display_labels())
+
+    @admin.display(description='用途场景')
+    def scenario_labels(self, obj):
+        return '、'.join(obj.get_scenario_display_labels())
 
 
 @admin.register(PromptConfig)

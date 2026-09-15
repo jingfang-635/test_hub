@@ -441,7 +441,7 @@ class AppNotificationLogSerializer(serializers.ModelSerializer):
     def get_actual_notification_type_display(self, obj):
         if obj.webhook_bot_info:
             bot_type = obj.webhook_bot_info.get('type', '') or obj.webhook_bot_info.get('bot_type', '')
-            type_map = {'wechat': '企微机器人', 'feishu': '飞书机器人', 'dingtalk': '钉钉机器人'}
+            type_map = {'feishu': '飞书机器人'}
             return type_map.get(bot_type, 'Webhook机器人')
         if obj.recipient_info and isinstance(obj.recipient_info, list) and len(obj.recipient_info) > 0:
             return '邮箱通知'

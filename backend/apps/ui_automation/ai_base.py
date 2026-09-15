@@ -1019,7 +1019,9 @@ class BaseBrowserAgent:
 
         # Select Config (always use text mode config)
         role_name = 'browser_use_text'
-        config_obj = AIModelConfig.objects.filter(role=role_name, is_active=True).first()
+        config_obj = AIModelConfig.objects.filter(
+            role__contains=[role_name], is_active=True
+        ).first()
 
         model_config = {}
         if config_obj:

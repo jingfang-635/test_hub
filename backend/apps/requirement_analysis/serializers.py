@@ -159,19 +159,47 @@ class TestCaseReviewRequestSerializer(serializers.Serializer):
 class AIModelConfigSerializer(serializers.ModelSerializer):
     """AI模型配置序列化器"""
     model_type_display = serializers.CharField(source='get_model_type_display', read_only=True)
-    role_display = serializers.CharField(source='get_role_display', read_only=True)
+    role = serializers.ListField(
+        child=serializers.ChoiceField(choices=AIModelConfig.ROLE_CHOICES, allow_blank=False),
+        allow_empty=False,
+        help_text='角色列表，一个配置可承担多个角色',
+    )
+    scenario = serializers.ListField(
+        child=serializers.ChoiceField(choices=AIModelConfig.SCENARIO_CHOICES, allow_blank=False),
+        allow_empty=False,
+        help_text='用途场景列表，一个配置可服务多个场景',
+    )
+    role_display = serializers.SerializerMethodField(read_only=True)
+    scenario_display = serializers.SerializerMethodField(read_only=True)
     created_by_name = serializers.CharField(source='created_by.username', read_only=True)
     api_key_masked = serializers.SerializerMethodField(read_only=True)
     
     class Meta:
         model = AIModelConfig
-        fields = ['id', 'name', 'model_type', 'model_type_display', 'role', 'role_display',
+        fields = ['id', 'name', 'model_type', 'model_type_display', 'role', 'role_display', 
+                 'scenario', 'scenario_display',
                  'api_key', 'api_key_masked', 'base_url', 'model_name', 'max_tokens', 'temperature', 'top_p', 
                  'is_active', 'created_by', 'created_by_name', 'created_at', 'updated_at']
         read_only_fields = ['created_by', 'created_by_name']
         extra_kwargs = {
             'api_key': {'write_only': True}  # API Key只用于写入，不在响应中返回
         }
+
+    def validate_role(self, value):
+        """去重并保持用户选择顺序（与 Project.project_types 的处理保持一致）"""
+        return list(dict.fromkeys(value))
+
+    def validate_scenario(self, value):
+        """去重并保持用户选择顺序（与 Project.project_types 的处理保持一致）"""
+        return list(dict.fromkeys(value))
+
+    def get_role_display(self, obj):
+        """返回角色中文标签列表，供前端直接展示"""
+        return obj.get_role_display_labels()
+
+    def get_scenario_display(self, obj):
+        """返回场景中文标签列表，供前端直接展示"""
+        return obj.get_scenario_display_labels()
     
     def get_api_key_masked(self, obj):
         """返回掩码版本的API Key"""

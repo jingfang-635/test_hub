@@ -184,7 +184,7 @@ def _get_llm_config(task):
         cfg = AIModelConfig.objects.filter(id=task.ai_model_config_id, is_active=True).first()
         if cfg:
             return cfg
-    return AIModelConfig.objects.filter(role='browser_use_text', is_active=True).first()
+    return AIModelConfig.objects.filter(role__contains=['browser_use_text'], is_active=True).first()
 
 
 async def _run_llm(config, messages, max_tokens=8192, timeout=300):

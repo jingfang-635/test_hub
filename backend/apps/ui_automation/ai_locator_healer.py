@@ -158,7 +158,7 @@ def _load_ai_config() -> Optional[Dict[str, Any]]:
 
         config_obj = (
             AIModelConfig.objects
-            .filter(role='browser_use_text', is_active=True)
+            .filter(role__contains=['browser_use_text'], is_active=True)
             .order_by('-updated_at', '-id')
             .first()
         )

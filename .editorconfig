@@ -1,0 +1,32 @@
+# https://editorconfig.org
+# 统一编辑器行为：强制 UTF-8，避免在中文 Windows 上被存成 GBK（cp936）导致乱码。
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+insert_final_newline = true
+trim_trailing_whitespace = true
+indent_style = space
+indent_size = 2
+
+[*.py]
+indent_size = 4
+max_line_length = 120
+
+[*.{js,jsx,ts,tsx,mjs,cjs,vue,json,jsonc,yml,yaml,html,css,scss,less}]
+indent_size = 2
+
+[*.{md,markdown}]
+trim_trailing_whitespace = false
+
+# Windows 脚本必须保持 CRLF，否则某些环境下无法执行
+[*.{bat,cmd,ps1}]
+end_of_line = crlf
+indent_size = 4
+
+[*.{ini,cfg,properties,toml}]
+indent_size = 4
+
+[Makefile]
+indent_style = tab

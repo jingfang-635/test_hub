@@ -688,6 +688,9 @@ class UiScheduledTaskSerializer(serializers.ModelSerializer):
     status_display = serializers.CharField(source='get_status_display', read_only=True)
     trigger_type_display = serializers.CharField(source='get_trigger_type_display', read_only=True)
     notification_type_display = serializers.SerializerMethodField()
+    notification_template_name = serializers.CharField(
+        source='notification_template.name', read_only=True, allow_null=True
+    )
 
     class Meta:
         model = UiScheduledTask
@@ -698,6 +701,7 @@ class UiScheduledTaskSerializer(serializers.ModelSerializer):
             'test_suite', 'test_suite_name', 'test_cases',
             'engine', 'browser', 'headless',
             'notify_on_success', 'notify_on_failure', 'notification_type', 'notification_type_display', 'notify_emails',
+            'notification_template', 'notification_template_name',
             'status', 'status_display',
             'last_run_time', 'next_run_time', 'total_runs',
             'successful_runs', 'failed_runs', 'last_result', 'error_message',
@@ -795,7 +799,7 @@ class UiScheduledTaskSerializer(serializers.ModelSerializer):
             if notification_type in ['webhook', 'both']:
                 # 如果需要Webhook通知，优先选择Webhook配置
                 notification_config = UnifiedNotificationConfig.objects.filter(
-                    config_type__in=['webhook_wechat', 'webhook_feishu', 'webhook_dingtalk'],
+                    config_type='webhook_feishu',
                     is_active=True
                 ).first()
 
@@ -840,7 +844,7 @@ class UiScheduledTaskSerializer(serializers.ModelSerializer):
             if notification_type in ['webhook', 'both']:
                 # 如果需要Webhook通知，优先选择Webhook配置
                 notification_config = UnifiedNotificationConfig.objects.filter(
-                    config_type__in=['webhook_wechat', 'webhook_feishu', 'webhook_dingtalk'],
+                    config_type='webhook_feishu',
                     is_active=True
                 ).first()
 
@@ -972,9 +976,7 @@ class UiNotificationLogSerializer(serializers.ModelSerializer):
             bot_type = obj.webhook_bot_info.get('bot_type', '') or obj.webhook_bot_info.get('type', '')
             # 根据机器人类型返回友好名称
             type_map = {
-                'wechat': '企微机器人',
                 'feishu': '飞书机器人',
-                'dingtalk': '钉钉机器人'
             }
             return type_map.get(bot_type, 'Webhook机器人')
 

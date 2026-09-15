@@ -844,6 +844,14 @@ class UiScheduledTask(models.Model):
     notification_type = models.CharField(max_length=20, blank=True, choices=NOTIFICATION_TYPE_CHOICES, 
                                         verbose_name='通知类型')
     notify_emails = models.JSONField(default=list, blank=True, verbose_name='通知邮箱列表')
+    notification_template = models.ForeignKey(
+        'core.NotificationTemplate',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='ui_scheduled_tasks',
+        verbose_name='通知模板',
+    )
 
     # 状态管理
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='ACTIVE', verbose_name='任务状态')

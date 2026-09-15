@@ -783,6 +783,9 @@ export default {
     notifyEmails: '通知邮箱',
     selectNotifyEmails: '请选择通知邮箱',
     selectNotificationType: '请选择通知类型',
+    notificationTemplate: '通知模板',
+    selectNotificationTemplate: '请选择通知模板',
+    defaultTemplate: '默认',
     cronHelp: {
       title: 'Cron帮助信息',
       format: 'Cron表达式格式: 分 时 日 月 周',
@@ -952,8 +955,44 @@ export default {
     },
     configs: {
       title: '通知配置',
-      pageTitle: 'UI自动化通知配置',
-      pageDesc: '配置飞书、企微、钉钉Webhook机器人地址',
+      pageTitle: '通知配置',
+      pageDesc: '配置定时任务通知：邮箱（SMTP）与飞书机器人',
+      // 邮箱配置
+      emailTab: '邮箱配置',
+      smtpHost: 'SMTP服务器',
+      smtpHostPlaceholder: '例如：smtp.qq.com',
+      smtpHostHint: '选择服务商会自动填充端口与加密方式；也可直接输入自定义 SMTP 域名',
+      smtpProviders: {
+        qq: 'QQ邮箱',
+        qqExmail: '腾讯企业邮箱',
+        netease163: '网易163邮箱',
+        netease126: '网易126邮箱',
+        neteaseQiye: '网易企业邮箱',
+        aliyun: '阿里云邮箱',
+        feishu: '飞书邮箱',
+        gmail: 'Gmail',
+        outlook: 'Outlook',
+        sina: '新浪邮箱'
+      },
+      smtpPort: 'SMTP端口',
+      smtpPortHint: 'SSL 通常为 465，TLS/STARTTLS 通常为 587',
+      senderEmail: '发件人邮箱',
+      senderEmailPlaceholder: '用于发送通知的邮箱地址',
+      authCode: '授权码',
+      authCodePlaceholder: '请输入邮箱SMTP授权码',
+      authCodeKeepPlaceholder: '已保存，留空表示不修改',
+      authCodeHint: '邮箱 SMTP 授权码（非登录密码）；留空则保留已保存的授权码',
+      secureMode: '加密方式',
+      useSsl: 'SSL',
+      useTls: 'TLS/STARTTLS',
+      secureModeHint: 'SSL 与 TLS 只能启用其中一个，切换时会自动调整默认端口',
+      emailActiveHint: '关闭后邮件通知将回退到 config.yaml / 环境变量中的 EMAIL_* 配置',
+      recipientEmails: '通知收件人',
+      recipientEmailsPlaceholder: '输入邮箱后回车添加，可添加多个',
+      recipientEmailsHint: '这里配置的邮箱会出现在「新建定时任务」页的「通知邮箱」下拉候选中',
+      testConnection: '测试连接',
+      saveEmailConfig: '保存邮箱配置',
+      testSend: '测试发送',
       newConfig: '新建配置',
       searchPlaceholder: '搜索配置名称',
       configName: '配置名称',
@@ -970,31 +1009,15 @@ export default {
       // 机器人配置
       botName: '机器人名称',
       enable: '启用',
-      businessType: '业务类型',
-      uiAutomationTest: 'UI自动化测试',
-      apiTest: '接口测试',
-      signatureSecret: '签名密钥',
-      signatureSecretPlaceholder: '请输入钉钉机器人签名密钥（可选）',
-      signatureSecretHint: '钉钉机器人的签名密钥，用于安全验证。如果机器人开启了"加签"安全设置，请填写此字段。',
       // Tab标签
       feishuBot: '飞书机器人',
-      wechatBot: '企微机器人',
-      dingtalkBot: '钉钉机器人',
       // 表单提示
       feishuBotNamePlaceholder: '请输入飞书机器人名称',
       feishuUrlHint: '飞书机器人Webhook URL格式：https://open.feishu.cn/open-apis/bot/v2/hook/...',
-      wechatBotNamePlaceholder: '请输入企业微信机器人名称',
-      wechatUrlHint: '企业微信机器人Webhook URL格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=...',
-      dingtalkBotNamePlaceholder: '请输入钉钉机器人名称',
-      dingtalkUrlHint: '钉钉机器人Webhook URL格式：https://oapi.dingtalk.com/robot/send?access_token=...',
       // 保存按钮
       saveFeishuConfig: '保存飞书机器人配置',
-      saveWechatConfig: '保存企微机器人配置',
-      saveDingtalkConfig: '保存钉钉机器人配置',
       platforms: {
-        feishu: '飞书',
-        wechatWork: '企业微信',
-        dingtalk: '钉钉'
+        feishu: '飞书'
       },
       rules: {
         nameRequired: '请输入配置名称',
@@ -1012,19 +1035,24 @@ export default {
         deleteFailed: '删除通知配置失败',
         testSuccess: '测试消息发送成功',
         testFailed: '测试消息发送失败',
+        // 邮箱配置消息
+        emailRequired: '请先填写 SMTP 服务器与发件人邮箱',
+        emailSaveSuccess: '邮箱配置保存成功',
+        emailSaveFailed: '保存邮箱配置失败',
+        emailTestSuccess: '邮箱连接测试成功',
+        emailTestFailed: '邮箱连接测试失败',
+        emailGetFailed: '获取邮箱配置失败',
         // 机器人配置消息
         feishuUpdateSuccess: '飞书机器人配置更新成功',
         feishuCreateSuccess: '飞书机器人配置创建成功',
         feishuSaveFailed: '飞书机器人配置保存失败',
-        wechatUpdateSuccess: '企微机器人配置更新成功',
-        wechatCreateSuccess: '企微机器人配置创建成功',
-        wechatSaveFailed: '企微机器人配置保存失败',
-        dingtalkUpdateSuccess: '钉钉机器人配置更新成功',
-        dingtalkCreateSuccess: '钉钉机器人配置创建成功',
-        dingtalkSaveFailed: '钉钉机器人配置保存失败',
         noExistingConfig: '未找到现有Webhook配置，将创建新配置',
         getConfigFailed: '获取Webhook机器人配置失败',
-        getAllConfigFailed: '获取所有Webhook机器人配置失败'
+        getAllConfigFailed: '获取所有Webhook机器人配置失败',
+        // Webhook 测试消息
+        webhookRequired: '请先填写 Webhook URL',
+        webhookTestSuccess: '测试消息已发送，请到飞书群确认',
+        webhookTestFailed: '测试消息发送失败'
       }
     }
   },

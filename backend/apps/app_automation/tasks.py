@@ -63,7 +63,7 @@ def _send_app_webhook_notification(task, detail_content, status_text):
     try:
         from apps.core.models import UnifiedNotificationConfig
         configs = UnifiedNotificationConfig.objects.filter(
-            config_type__in=['webhook_wechat', 'webhook_feishu', 'webhook_dingtalk'],
+            config_type='webhook_feishu',
             is_active=True
         )
     except Exception as e:
@@ -87,19 +87,10 @@ def _send_app_webhook_notification(task, detail_content, status_text):
         bot_type = bot.get('type', 'unknown')
         success = status_text == '成功'
 
-        if bot_type == 'wechat':
-            message_data = {"msgtype": "markdown", "markdown": {"content": f"**APP自动化定时任务执行{status_text}**\n\n{detail_content}"}}
-        elif bot_type == 'feishu':
+        if bot_type == 'feishu':
             message_data = {"msg_type": "interactive", "card": {"elements": [{"tag": "div", "text": {"content": f"**APP自动化定时任务执行{status_text}**\n\n{detail_content}", "tag": "lark_md"}}], "header": {"title": {"content": f"APP自动化定时任务执行{status_text}", "tag": "plain_text"}, "template": "green" if success else "red"}}}
-        elif bot_type == 'dingtalk':
-            message_data = {"msgtype": "markdown", "markdown": {"title": f"APP自动化定时任务执行{status_text}", "text": f"**APP自动化定时任务执行{status_text}**\n\n{detail_content}"}}
-            secret = bot.get('secret')
-            if secret:
-                import time as _time, hmac, hashlib, base64, urllib.parse
-                timestamp = str(round(_time.time() * 1000))
-                sign = urllib.parse.quote_plus(base64.b64encode(hmac.new(secret.encode('utf-8'), f'{timestamp}\n{secret}'.encode('utf-8'), digestmod=hashlib.sha256).digest()))
-                webhook_url += f'{"&" if "?" in webhook_url else "?"}timestamp={timestamp}&sign={sign}'
         else:
+            logger.warning(f"不支持的机器人类型（已下线企微/钉钉）: {bot_type}")
             continue
 
         try:
@@ -138,15 +129,14 @@ def _send_app_email_notification(task, detail_content, status_text):
     if not recipients:
         return
 
-    try:
-        from django.core.mail import send_mail
-        from django.conf import settings
+    from apps.core.email_service import get_sender_address, send_notification_mail
 
-        subject = f"APP自动化定时任务执行{status_text}: {task.name}"
-        from_email = settings.DEFAULT_FROM_EMAIL
+    subject = f"APP自动化定时任务执行{status_text}: {task.name}"
+    from_email = get_sender_address()
 
-        send_mail(subject=subject, message=detail_content, from_email=from_email, recipient_list=recipients, fail_silently=False)
+    ok, detail = send_notification_mail(subject, detail_content, recipients)
 
+    if ok:
         AppNotificationLog.objects.create(
             task=task, task_name=task.name, task_type=task.task_type,
             notification_type='task_execution', sender_name='系统邮件通知',
@@ -154,14 +144,14 @@ def _send_app_email_notification(task, detail_content, status_text):
             recipient_info=[{'email': e} for e in recipients],
             notification_content=detail_content, status='success', sent_at=timezone.now()
         )
-    except Exception as e:
-        logger.error(f"发送邮件失败: {e}", exc_info=True)
+    else:
+        logger.error(f"发送邮件失败: {detail}")
         AppNotificationLog.objects.create(
             task=task, task_name=task.name, task_type=task.task_type,
             notification_type='task_execution', sender_name='系统邮件通知',
-            sender_email='',
+            sender_email=from_email,
             recipient_info=[{'email': e} for e in recipients],
-            notification_content=f"发送失败: {e}", status='failed', error_message=str(e)
+            notification_content=f"发送失败: {detail}", status='failed', error_message=str(detail)
         )
 
 

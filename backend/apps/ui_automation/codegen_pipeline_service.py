@@ -272,9 +272,9 @@ def _run_ai(
 ) -> str:
     from apps.requirement_analysis.models import AIModelConfig, AIModelService
 
-    config = AIModelConfig.objects.filter(role='writer', is_active=True).first()
+    config = AIModelConfig.objects.filter(role__contains=['writer'], is_active=True).first()
     if not config:
-        raise RuntimeError('未配置可用的 AI 模型（role=writer 且 is_active=True），请先在配置中心启用')
+        raise RuntimeError('未配置可用的 AI 模型（role 含 writer 且 is_active=True），请先在配置中心启用')
 
     loop = asyncio.new_event_loop()
     try:

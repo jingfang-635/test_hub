@@ -64,11 +64,12 @@ export default {
     aiModeConfig: 'AI Mode Configuration',
     skillsConfig: 'Skills Configuration',
     scheduledTaskConfig: 'Scheduled Task Configuration',
+    notificationConfig: 'Notification Configuration',
     difyConfig: 'Dify Configuration',
     mcpServerConfig: 'MCP Server Configuration',
     moduleSwitchConfig: 'Module Switches',
-    // Core Module
-    coreModule: 'Core Module',
+    // Performance Statistics
+    coreModule: 'Performance Statistics',
     performanceStats: 'Performance Statistics',
     requestPerformanceLog: 'Request Performance Log',
     notificationTemplate: 'Notification Template'

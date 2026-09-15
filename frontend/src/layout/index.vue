@@ -213,15 +213,11 @@
 
           <!-- 配置中心模块菜单 -->
           <template v-else-if="currentModule === 'configuration' && appStore.isModuleEnabled('configuration')">
-            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/ai-model', '/configuration/prompt-config', '/configuration/generation-config'])" index="ai-case-generation">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/prompt-config', '/configuration/generation-config'])" index="ai-case-generation">
               <template #title>
                 <el-icon><MagicStick /></el-icon>
                 <span>{{ $t('menu.aiCaseGenerationConfig') }}</span>
               </template>
-              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ai-model')" index="/configuration/ai-model">
-                <el-icon><Cpu /></el-icon>
-                <span>{{ $t('menu.aiModelConfig') }}</span>
-              </el-menu-item>
               <el-menu-item v-if="appStore.isMenuEnabled('/configuration/prompt-config')" index="/configuration/prompt-config">
                 <el-icon><Edit /></el-icon>
                 <span>{{ $t('menu.promptConfig') }}</span>
@@ -247,18 +243,28 @@
               <el-icon><Cellphone /></el-icon>
               <span>APP环境配置</span>
             </el-menu-item>
-            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ai-mode')" index="/configuration/ai-mode">
-              <el-icon><MagicStick /></el-icon>
-              <span>{{ $t('menu.aiModeConfig') }}</span>
+            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/ai-model')" index="/configuration/ai-model">
+              <el-icon><Cpu /></el-icon>
+              <span>{{ $t('menu.aiModelConfig') }}</span>
             </el-menu-item>
             <el-menu-item v-if="appStore.isMenuEnabled('/configuration/skills')" index="/configuration/skills">
               <el-icon><Collection /></el-icon>
               <span>{{ $t('menu.skillsConfig') }}</span>
             </el-menu-item>
-            <el-menu-item v-if="appStore.isMenuEnabled('/configuration/scheduled-task')" index="/configuration/scheduled-task">
-              <el-icon><Timer /></el-icon>
-              <span>{{ $t('menu.scheduledTaskConfig') }}</span>
-            </el-menu-item>
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/scheduled-task', '/configuration/notification-template'])" index="scheduled-task-config">
+              <template #title>
+                <el-icon><Timer /></el-icon>
+                <span>{{ $t('menu.scheduledTaskConfig') }}</span>
+              </template>
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/scheduled-task')" index="/configuration/scheduled-task">
+                <el-icon><Bell /></el-icon>
+                <span>{{ $t('menu.notificationConfig') }}</span>
+              </el-menu-item>
+              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/notification-template')" index="/configuration/notification-template">
+                <el-icon><Document /></el-icon>
+                <span>{{ $t('menu.notificationTemplate') }}</span>
+              </el-menu-item>
+            </el-sub-menu>
             <el-menu-item v-if="appStore.isMenuEnabled('/configuration/dify')" index="/configuration/dify">
               <el-icon><ChatDotRound /></el-icon>
               <span>{{ $t('menu.difyConfig') }}</span>
@@ -271,7 +277,7 @@
               <el-icon><Switch /></el-icon>
               <span>{{ $t('menu.moduleSwitchConfig') }}</span>
             </el-menu-item>
-            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/performance-stats', '/configuration/request-performance-log', '/configuration/notification-template'])" index="core-module">
+            <el-sub-menu v-if="appStore.isAnyEnabled(['/configuration/performance-stats', '/configuration/request-performance-log'])" index="core-module">
               <template #title>
                 <el-icon><DataAnalysis /></el-icon>
                 <span>{{ $t('menu.coreModule') }}</span>
@@ -283,10 +289,6 @@
               <el-menu-item v-if="appStore.isMenuEnabled('/configuration/request-performance-log')" index="/configuration/request-performance-log">
                 <el-icon><Document /></el-icon>
                 <span>{{ $t('menu.requestPerformanceLog') }}</span>
-              </el-menu-item>
-              <el-menu-item v-if="appStore.isMenuEnabled('/configuration/notification-template')" index="/configuration/notification-template">
-                <el-icon><Bell /></el-icon>
-                <span>{{ $t('menu.notificationTemplate') }}</span>
               </el-menu-item>
             </el-sub-menu>
           </template>
@@ -505,9 +507,9 @@ const breadcrumbTitle = computed(() => {
     '/configuration/knowledge-base': t('menu.knowledgeBaseManage'),
     '/configuration/knowledge-llm': t('menu.knowledgeBaseConfig'),
     '/configuration/ui-env': t('menu.uiEnvConfig'),
-    '/configuration/ai-mode': t('menu.aiModeConfig'),
     '/configuration/skills': t('menu.skillsConfig'),
-    '/configuration/scheduled-task': t('menu.scheduledTaskConfig'),
+    '/configuration/scheduled-task': t('menu.notificationConfig'),
+    '/configuration/notification-template': t('menu.notificationTemplate'),
     '/configuration/dify': t('menu.difyConfig'),
     '/configuration/mcp-server': t('menu.mcpServerConfig'),
     '/configuration/module-switch': t('menu.moduleSwitchConfig'),

@@ -243,7 +243,9 @@ def _ensure_ai_login_state(ui_project_id, base_url):
     返回 (storage_path|None, log_message)。
     """
     from .auth_state import (
+        auth_path_for_project,
         ensure_project_auth_state,
+        load_path_if_fresh,
         post_login_start_url,
     )
     from .codegen_service import codegen_recorder
@@ -258,6 +260,12 @@ def _ensure_ai_login_state(ui_project_id, base_url):
             username=login_username,
             password=login_password,
         )
+        if not storage:
+            # ensure 失败可能只是探测/静默登录的瞬时问题：TTL 内的文件仍可信，回退复用，
+            # 避免把「静默登录未成功」一律当成本次不复用（执行 #18 即因此完全没注入登录态）
+            storage = load_path_if_fresh(auth_path_for_project(ui_project_id))
+            if storage:
+                logger.info('AI执行登录态：ensure 失败但回退到 TTL 内已存登录态 path=%s', storage)
         if storage:
             start = post_login_start_url(base_url) if base_url else ''
             msg = (
@@ -2947,7 +2955,9 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
         accessible_projects = UiProject.objects.filter(
             models.Q(owner=user) | models.Q(members=user)
         ).distinct()
-        return UiScheduledTask.objects.filter(project__in=accessible_projects)
+        return UiScheduledTask.objects.filter(project__in=accessible_projects).select_related(
+            'notification_template', 'project', 'test_suite', 'created_by'
+        )
 
     def perform_create(self, serializer):
         """创建定时任务"""
@@ -3027,20 +3037,81 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                             headless=task.headless,
                             executed_by=task.created_by
                         )
+                        start_ts = time.time()
                         executor.run()
+                        runtime = round(time.time() - start_ts, 2)
 
-                        # 更新任务执行结果
-                        task.successful_runs += 1
-                        task.last_result = {'status': 'success', 'message': '测试套件执行成功'}
-                        task.error_message = ''
-                        task.save()
+                        # 从执行记录/套件统计填充模板变量
+                        test_suite.refresh_from_db()
+                        execution = executor.execution
+                        if execution:
+                            try:
+                                execution.refresh_from_db()
+                            except Exception:
+                                pass
 
-                        # 发送成功通知
-                        self._send_task_notification(task, success=True)
+                        passed = getattr(execution, 'passed_cases', None)
+                        if passed is None:
+                            passed = getattr(test_suite, 'passed_count', 0) or 0
+                        failed = getattr(execution, 'failed_cases', None)
+                        if failed is None:
+                            failed = getattr(test_suite, 'failed_count', 0) or 0
+                        skipped = getattr(execution, 'skipped_cases', 0) or 0
+                        total = getattr(execution, 'total_cases', None)
+                        if total is None:
+                            total = (passed or 0) + (failed or 0) + (skipped or 0)
+                        duration = getattr(execution, 'duration', None) or runtime
+                        error_cases = 0
+                        run_success = (failed or 0) == 0 and (test_suite.execution_status != 'failed')
+
+                        result_payload = {
+                            'status': 'success' if run_success else 'failed',
+                            'message': (
+                                f'测试套件执行成功: 通过 {passed} / 失败 {failed}'
+                                if run_success else
+                                f'测试套件执行失败: 通过 {passed} / 失败 {failed}'
+                            ),
+                            'total_cases': total,
+                            'passed_cases': passed,
+                            'failed_cases': failed,
+                            'error_cases': error_cases,
+                            'skipped_cases': skipped,
+                            'success_count': passed,
+                            'failed_count': failed,
+                            'runtime': f'{duration}s',
+                            'begin_time': timezone.localtime(task.last_run_time).strftime('%Y-%m-%d %H:%M:%S')
+                            if task.last_run_time else '',
+                        }
+
+                        if run_success:
+                            task.successful_runs += 1
+                            task.last_result = result_payload
+                            task.error_message = ''
+                            task.save()
+                            self._send_task_notification(task, success=True)
+                        else:
+                            task.failed_runs += 1
+                            task.last_result = result_payload
+                            task.error_message = getattr(execution, 'error_message', '') or result_payload['message']
+                            task.save()
+                            self._send_task_notification(task, success=False)
 
                     except Exception as e:
                         task.failed_runs += 1
-                        task.last_result = {'status': 'failed', 'message': str(e)}
+                        task.last_result = {
+                            'status': 'failed',
+                            'message': str(e),
+                            'total_cases': 0,
+                            'passed_cases': 0,
+                            'failed_cases': 0,
+                            'error_cases': 0,
+                            'skipped_cases': 0,
+                            'success_count': 0,
+                            'failed_count': 0,
+                            'runtime': '',
+                            'begin_time': timezone.localtime(task.last_run_time).strftime('%Y-%m-%d %H:%M:%S')
+                            if task.last_run_time else '',
+                        }
                         task.error_message = str(e)
                         test_suite.execution_status = 'failed'
                         test_suite.save()
@@ -3090,6 +3161,7 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                     """在后台线程中执行测试用例"""
                     success_count = 0
                     failed_count = 0
+                    cases_start_ts = time.time()
 
                     try:
                         for test_case in test_cases:
@@ -3398,14 +3470,24 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                                 execution.save()
                                 failed_count += 1
 
-                        # 更新任务执行结果
+                        # 更新任务执行结果（字段名对齐通知模板变量）
+                        total = success_count + failed_count
+                        runtime = f'{round(time.time() - cases_start_ts, 2)}s'
+                        begin_time = timezone.localtime(task.last_run_time).strftime('%Y-%m-%d %H:%M:%S') if task.last_run_time else ''
                         if failed_count == 0:
                             task.successful_runs += 1
                             task.last_result = {
                                 'status': 'success',
                                 'message': f'执行完成: {success_count}个成功',
+                                'total_cases': total,
+                                'passed_cases': success_count,
+                                'failed_cases': failed_count,
+                                'error_cases': 0,
+                                'skipped_cases': 0,
                                 'success_count': success_count,
-                                'failed_count': failed_count
+                                'failed_count': failed_count,
+                                'runtime': runtime,
+                                'begin_time': begin_time,
                             }
                             task.error_message = ''
                             task.save()
@@ -3417,8 +3499,15 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                             task.last_result = {
                                 'status': 'partial',
                                 'message': f'执行完成: {success_count}个成功, {failed_count}个失败',
+                                'total_cases': total,
+                                'passed_cases': success_count,
+                                'failed_cases': failed_count,
+                                'error_cases': 0,
+                                'skipped_cases': 0,
                                 'success_count': success_count,
-                                'failed_count': failed_count
+                                'failed_count': failed_count,
+                                'runtime': runtime,
+                                'begin_time': begin_time,
                             }
                             task.error_message = f'{failed_count}个测试用例执行失败'
                             task.save()
@@ -3429,7 +3518,20 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                     except Exception as e:
                         logger.error(f"执行定时任务测试用例时发生异常: {str(e)}")
                         task.failed_runs += 1
-                        task.last_result = {'status': 'failed', 'message': str(e)}
+                        task.last_result = {
+                            'status': 'failed',
+                            'message': str(e),
+                            'total_cases': 0,
+                            'passed_cases': 0,
+                            'failed_cases': 0,
+                            'error_cases': 0,
+                            'skipped_cases': 0,
+                            'success_count': 0,
+                            'failed_count': 0,
+                            'runtime': '',
+                            'begin_time': timezone.localtime(task.last_run_time).strftime('%Y-%m-%d %H:%M:%S')
+                            if task.last_run_time else '',
+                        }
                         task.error_message = str(e)
                         task.save()
 
@@ -3464,8 +3566,83 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 'error': f'执行失败: {str(e)}'
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+    def _resolve_notification_template(self, task):
+        """解析通知模板：优先任务所选模板，其次默认启用模板。"""
+        from apps.core.models import NotificationTemplate
+
+        template = getattr(task, 'notification_template', None)
+        if template and getattr(template, 'is_active', True):
+            return template
+        # 任务上可能只有 ID，补拉一次
+        template_id = getattr(task, 'notification_template_id', None)
+        if template_id:
+            template = NotificationTemplate.objects.filter(id=template_id, is_active=True).first()
+            if template:
+                return template
+        return NotificationTemplate.objects.filter(is_default=True, is_active=True).first()
+
+    def _build_notification_context(self, task, success):
+        """将执行结果字段填入通知模板上下文。"""
+        status_text = '成功' if success else '失败'
+        task_type_text = '测试套件执行' if task.task_type == 'TEST_SUITE' else '测试用例执行'
+        local_run_time = timezone.localtime(task.last_run_time).strftime(
+            '%Y-%m-%d %H:%M:%S') if task.last_run_time else '未知'
+        last_result = task.last_result or {}
+
+        def pick(*keys, default=''):
+            for key in keys:
+                if key in last_result and last_result.get(key) not in (None, ''):
+                    return last_result.get(key)
+            return default
+
+        passed = pick('passed_cases', 'success_count', default=0)
+        failed = pick('failed_cases', 'failed_count', default=0)
+        skipped = pick('skipped_cases', default=0)
+        error_cases = pick('error_cases', default=0)
+        total = pick('total_cases', default='')
+        if total in ('', None):
+            try:
+                total = int(passed or 0) + int(failed or 0) + int(skipped or 0) + int(error_cases or 0)
+            except Exception:
+                total = ''
+
+        return {
+            'task_name': task.name,
+            'status_text': status_text,
+            'execution_time': local_run_time,
+            'task_type': task_type_text,
+            'title': f"UI自动化定时任务执行{status_text}: {task.name}",
+            'tester': getattr(task.created_by, 'username', '') or '',
+            'total_cases': total,
+            'passed_cases': passed,
+            'failed_cases': failed,
+            'error_cases': error_cases,
+            'skipped_cases': skipped,
+            'runtime': pick('runtime', default=''),
+            'begin_time': pick('begin_time', default=local_run_time),
+            'message': pick('message', default=''),
+            'error_message': task.error_message or '',
+            'engine': (task.engine or '').upper(),
+            'browser': (task.browser or '').capitalize(),
+        }
+
+    def _fallback_notification_text(self, context):
+        """无模板时的兜底正文。"""
+        return (
+            f"任务名称: {context.get('task_name')}\n"
+            f"执行状态: {context.get('status_text')}\n"
+            f"执行时间: {context.get('execution_time')}\n"
+            f"任务类型: {context.get('task_type')}\n"
+            f"执行引擎: {context.get('engine')}\n"
+            f"浏览器: {context.get('browser')}\n"
+            f"用例总数: {context.get('total_cases')}\n"
+            f"通过: {context.get('passed_cases')} / 失败: {context.get('failed_cases')}\n"
+            f"执行结果: {context.get('message') or '无详细信息'}\n"
+            f"错误信息: {context.get('error_message') or '无错误信息'}"
+        )
+
     def _send_task_notification(self, task, success):
-        """发送任务执行通知"""
+        """发送任务执行通知（按所选模板渲染）。"""
         try:
             logger.info(f"准备发送任务 {task.id} 的通知，执行结果: {'成功' if success else '失败'}")
 
@@ -3483,38 +3660,45 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 logger.info("未设置通知类型")
                 return
 
-            logger.info(f"通知类型: {task.notification_type}")
+            # 后台线程中刷新关联，避免拿不到模板
+            try:
+                task.refresh_from_db()
+            except Exception:
+                pass
 
-            # 根据通知类型发送不同的通知
+            context = self._build_notification_context(task, success)
+            template = self._resolve_notification_template(task)
+            logger.info(
+                "通知类型: %s, 使用模板: %s",
+                task.notification_type,
+                getattr(template, 'name', None) or '无（兜底文案）',
+            )
+
             if task.notification_type in ['webhook', 'both']:
-                logger.info("发送Webhook通知")
-                self._send_webhook_notification(task, success)
+                self._send_webhook_notification(task, success, context=context, template=template)
 
             if task.notification_type in ['email', 'both']:
-                logger.info("发送邮件通知")
-                self._send_email_notification(task, success)
+                self._send_email_notification(task, success, context=context, template=template)
 
         except Exception as e:
             logger.error(f"发送通知失败: {str(e)}", exc_info=True)
 
-    def _send_webhook_notification(self, task, success):
-        """发送Webhook通知"""
+    def _send_webhook_notification(self, task, success, context=None, template=None):
+        """发送Webhook通知（优先使用所选模板渲染内容）。"""
         try:
             import requests
             import json
 
             logger.info("=== 开始发送Webhook通知 ===")
 
-            # 使用统一的通知配置
             try:
                 from apps.core.models import UnifiedNotificationConfig
                 all_webhook_configs = UnifiedNotificationConfig.objects.filter(
-                    config_type__in=['webhook_wechat', 'webhook_feishu', 'webhook_dingtalk'],
+                    config_type='webhook_feishu',
                     is_active=True
                 )
                 logger.info("使用统一通知配置 (UnifiedNotificationConfig)")
             except ImportError as e:
-                # 如果 core 模块不可用，记录错误并返回
                 logger.error(f"无法导入统一通知配置: {e}")
                 logger.warning("通知发送失败：无法找到通知配置模块")
                 return
@@ -3527,12 +3711,9 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 bots = config.get_webhook_bots()
                 if bots:
                     for bot in bots:
-                        # 只添加启用了"UI自动化测试"的机器人
-                        if bot.get('enabled', True) and bot.get('enable_ui_automation', True):
+                        if bot.get('enabled', True):
                             all_webhook_bots.append(bot)
-                            logger.info(f"添加机器人: {bot.get('name')} (UI自动化测试已启用)")
-                        elif bot.get('enabled', True):
-                            logger.info(f"配置中心机器人 {bot.get('name')} 未启用UI自动化测试，跳过")
+                            logger.info(f"添加机器人: {bot.get('name')}")
 
             if not all_webhook_bots:
                 logger.warning("没有找到任何启用的webhook机器人配置")
@@ -3540,17 +3721,17 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
 
             logger.info(f"找到 {len(all_webhook_bots)} 个启用的webhook机器人配置")
 
-            # 准备通知内容
-            status_text = '成功' if success else '失败'
-            task_type_text = '测试套件执行' if task.task_type == 'TEST_SUITE' else '测试用例执行'
+            context = context or self._build_notification_context(task, success)
+            template = template if template is not None else self._resolve_notification_template(task)
+            status_text = context.get('status_text', '成功' if success else '失败')
 
-            # 获取最后执行结果的详细信息
-            last_result = task.last_result or {}
-            result_message = last_result.get('message', '')
-            success_count = last_result.get('success_count', 0)
-            failed_count = last_result.get('failed_count', 0)
+            if template:
+                rendered_content = template.render(context)
+                header_title = template.render_subject(context) or f"UI自动化定时任务执行{status_text}"
+            else:
+                rendered_content = self._fallback_notification_text(context)
+                header_title = f"UI自动化定时任务执行{status_text}"
 
-            # 为不同的机器人平台准备消息格式
             for bot in all_webhook_bots:
                 if not bot.get('enabled', True) or not bot.get('webhook_url'):
                     logger.info(f"跳过未启用或无URL的机器人: {bot.get('name', 'Unknown')}")
@@ -3560,95 +3741,30 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 webhook_url = bot['webhook_url']
                 logger.info(f"发送通知到 {bot_type} 机器人: {bot.get('name', 'Unknown')}")
 
-                # 构造详细内容
-                # 转换执行时间到本地时区
-                local_run_time = timezone.localtime(task.last_run_time).strftime(
-                    '%Y-%m-%d %H:%M:%S') if task.last_run_time else '未知'
-                detail_content = f"""任务名称: {task.name}
-
-执行状态: {status_text}
-
-执行时间: {local_run_time}
-
-任务类型: {task_type_text}
-
-执行引擎: {task.engine.upper()}
-
-浏览器: {task.browser.capitalize()}"""
-
-                if result_message:
-                    detail_content += f"\n\n执行结果: {result_message}"
-
-                if success_count > 0 or failed_count > 0:
-                    detail_content += f"\n\n成功: {success_count} 个，失败: {failed_count} 个"
-
-                # 根据机器人类型构造消息格式
-                if bot_type == 'wechat':  # 企业微信
-                    message_data = {
-                        "msgtype": "markdown",
-                        "markdown": {
-                            "content": f"""**UI自动化定时任务执行{status_text}**
-
-{detail_content}"""
-                        }
-                    }
-                elif bot_type == 'feishu':  # 飞书
+                if bot_type == 'feishu':
                     message_data = {
                         "msg_type": "interactive",
                         "card": {
                             "elements": [{
                                 "tag": "div",
                                 "text": {
-                                    "content": f"**UI自动化定时任务执行{status_text}**\n\n{detail_content}",
+                                    "content": rendered_content,
                                     "tag": "lark_md"
                                 }
                             }],
                             "header": {
                                 "title": {
-                                    "content": f"UI自动化定时任务执行{status_text}",
+                                    "content": header_title[:100],
                                     "tag": "plain_text"
                                 },
                                 "template": "green" if success else "red"
                             }
                         }
                     }
-                elif bot_type == 'dingtalk':  # 钉钉
-                    message_data = {
-                        "msgtype": "markdown",
-                        "markdown": {
-                            "title": f"UI自动化定时任务执行{status_text}",
-                            "text": f"""**UI自动化定时任务执行{status_text}**
-
-{detail_content}"""
-                        }
-                    }
-
-                    # 钉钉机器人签名验证
-                    secret = bot.get('secret')
-                    if secret:
-                        import time
-                        import hmac
-                        import hashlib
-                        import base64
-                        import urllib.parse
-
-                        timestamp = str(round(time.time() * 1000))
-                        string_to_sign = f'{timestamp}\n{secret}'
-                        string_to_sign_enc = string_to_sign.encode('utf-8')
-                        secret_enc = secret.encode('utf-8')
-                        hmac_code = hmac.new(secret_enc, string_to_sign_enc, digestmod=hashlib.sha256).digest()
-                        sign = urllib.parse.quote_plus(base64.b64encode(hmac_code))
-
-                        # 在URL中添加签名参数
-                        if '?' in webhook_url:
-                            webhook_url += f'&timestamp={timestamp}&sign={sign}'
-                        else:
-                            webhook_url += f'?timestamp={timestamp}&sign={sign}'
                 else:
-                    logger.warning(f"未知的机器人类型: {bot_type}")
+                    logger.warning(f"不支持的机器人类型（已下线企微/钉钉）: {bot_type}")
                     continue
 
-                # 发送webhook请求
                 try:
                     logger.info(f"发送请求到: {webhook_url}")
                     logger.info(f"消息数据: {json.dumps(message_data, ensure_ascii=False, indent=2)}")
@@ -3666,7 +3782,6 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                     if response.status_code == 200:
                         logger.info(f"成功发送通知到 {bot.get('name', 'Unknown')}")
 
-                        # 记录通知日志
                         UiNotificationLog.objects.create(
                             task=task,
                             task_name=task.name,
@@ -3684,7 +3799,6 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                     else:
                         logger.error(f"发送通知失败，状态码: {response.status_code}, 响应: {response.text}")
 
-                        # 记录失败日志
                         UiNotificationLog.objects.create(
                             task=task,
                             task_name=task.name,
@@ -3703,7 +3817,6 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 except requests.exceptions.RequestException as e:
                     logger.error(f"发送webhook请求失败: {str(e)}")
 
-                    # 记录失败日志
                     UiNotificationLog.objects.create(
                         task=task,
                         task_name=task.name,
@@ -3721,16 +3834,17 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"发送Webhook通知失败: {str(e)}", exc_info=True)
 
-    def _send_email_notification(self, task, success):
-        """发送邮件通知"""
+    def _send_email_notification(self, task, success, context=None, template=None):
+        """发送邮件通知（优先使用所选模板渲染主题和正文）。"""
+        from_email = ''
+        recipients = []
         try:
-            from django.core.mail import send_mail
-            from django.conf import settings
+            from apps.core.email_service import get_sender_address, send_notification_mail
+            from apps.core.notification_service import send_email_notification
 
+            from_email = get_sender_address()
             logger.info("=== 开始发送邮件通知 ===")
 
-            # 获取收件人列表
-            recipients = []
             if task.notify_emails:
                 if isinstance(task.notify_emails, list):
                     recipients = task.notify_emails
@@ -3741,48 +3855,25 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                 logger.warning("没有找到任何邮件收件人")
                 return
 
-            # 准备邮件内容
-            status_text = '成功' if success else '失败'
-            task_type_text = '测试套件执行' if task.task_type == 'TEST_SUITE' else '测试用例执行'
+            context = context or self._build_notification_context(task, success)
+            template = template if template is not None else self._resolve_notification_template(task)
 
-            subject = f"UI自动化定时任务执行{status_text}: {task.name}"
+            if template:
+                ok = send_email_notification(template, context, recipients)
+                if not ok:
+                    raise RuntimeError('邮件发送失败')
+                subject = template.render_subject(context) or template.name
+                message = template.render(context)
+            else:
+                subject = context.get('title') or f"UI自动化定时任务执行{context.get('status_text')}: {task.name}"
+                message = self._fallback_notification_text(context)
+                logger.info(f"准备发送邮件，发件人: {from_email}, 收件人: {recipients}")
+                ok, detail = send_notification_mail(subject, message, recipients)
+                if not ok:
+                    raise RuntimeError(detail or '邮件发送失败')
 
-            last_result = task.last_result or {}
-            result_message = last_result.get('message', '')
-
-            # 转换执行时间到本地时区
-            local_run_time = timezone.localtime(task.last_run_time).strftime(
-                '%Y-%m-%d %H:%M:%S') if task.last_run_time else '未知'
-
-            message = f"""
-任务名称: {task.name}
-执行状态: {status_text}
-执行时间: {local_run_time}
-任务类型: {task_type_text}
-执行引擎: {task.engine.upper()}
-浏览器: {task.browser.capitalize()}
-
-执行结果:
-{result_message if result_message else '无详细信息'}
-
-错误信息:
-{task.error_message if task.error_message else '无错误信息'}
-            """
-
-            # 发送邮件
-            from_email = settings.DEFAULT_FROM_EMAIL
-            logger.info(f"准备发送邮件，发件人: {from_email}, 收件人: {recipients}")
-
-            send_mail(
-                subject=subject,
-                message=message,
-                from_email=from_email,
-                recipient_list=recipients,
-                fail_silently=False,
-            )
             logger.info("邮件发送成功")
 
-            # 记录通知日志
             UiNotificationLog.objects.create(
                 task=task,
                 task_name=task.name,
@@ -3799,7 +3890,6 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
         except Exception as e:
             logger.error(f"发送邮件通知失败: {str(e)}", exc_info=True)
 
-            # 记录失败日志
             try:
                 UiNotificationLog.objects.create(
                     task=task,
@@ -3807,13 +3897,13 @@ class UiScheduledTaskViewSet(viewsets.ModelViewSet):
                     task_type=task.task_type,
                     notification_type='task_execution',
                     sender_name='系统邮件通知',
-                    sender_email=settings.DEFAULT_FROM_EMAIL,
+                    sender_email=from_email,
                     recipient_info=[{'email': email} for email in recipients] if recipients else [],
                     notification_content=f"发送邮件通知失败: {str(e)}",
                     status='failed',
                     error_message=str(e)
                 )
-            except:
+            except Exception:
                 pass
 
 
