@@ -83,6 +83,8 @@ frontend/node_modules/
 frontend/.DS_Store
 frontend/*.log
 frontend/dist/
+# 忽略本地校验用的临时构建产物
+frontend/dist-verify-tmp/
 frontend_dist/
 
 # ========== 重构升级新增排除项 ==========
@@ -116,6 +118,9 @@ media/ui-automation/allure-offline/*
 # 忽略 AI 智能测试采集产物（截图/定位器 sidecar 等运行时文件）
 media/ui-automation/ai-captures/*
 !media/ui-automation/ai-captures/.gitkeep
+# 忽略 AI 智能测试上传的原始用例文档（运行时上传产物）
+media/ui-automation/ai-source-files/*
+!media/ui-automation/ai-source-files/.gitkeep
 # 忽略 Redis 运行转储
 redis-windows/dump.rdb
 # 忽略知识库文档上传文件，但保留 .gitkeep
